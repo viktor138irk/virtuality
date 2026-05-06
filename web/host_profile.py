@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 PROFILE_FILE = Path('/var/lib/virtuality/config/host_profile.json')
+DEFAULT_BRIDGE = 'br0'
 
 
 def run_cmd(cmd: list[str], timeout: int = 5) -> dict[str, Any]:
@@ -37,6 +38,25 @@ def detect_board_model() -> str:
         if line.lower().startswith(('model', 'hardware')) and ':' in line:
             return line.split(':', 1)[1].strip()
     return 'unknown'
+
+
+def list_interfaces() -> list[str]:
+    result = run_cmd(['ip', '-o', 'link', 'show'], timeout=5)
+    interfaces: list[str] = []
+    if not result['ok']:
+        return interfaces
+    for line in result['stdout'].splitlines():
+        match = re.match(r'\d+:\s+([^:@]+)', line)
+        if match:
+            interfaces.append(match.group(1))
+    return interfaces
+
+
+def list_bridges() -> list[str]:
+    result = run_cmd(['sh', '-lc', "ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1"], timeout=5)
+    if not result['ok']:
+        return []
+    return [item.strip() for item in result['stdout'].splitlines() if item.strip()]
 
 
 def classify_profile(arch: str, model: str) -> dict[str, str]:
@@ -83,14 +103,25 @@ def detect_host_profile() -> dict[str, Any]:
     model = detect_board_model()
     base = classify_profile(arch, model)
     is_arm = arch in ('aarch64', 'arm64')
+    interfaces = list_interfaces()
+    bridges = list_bridges()
+    bridge_available = DEFAULT_BRIDGE in interfaces or DEFAULT_BRIDGE in bridges
+    recommended_network = base['recommended_network']
+    if recommended_network == 'bridge' and not bridge_available:
+        recommended_network = 'nat'
+
     data: dict[str, Any] = {
         'arch': arch,
         'model': model,
         'profile': base['profile'],
         'label': base['label'],
-        'recommended_network': base['recommended_network'],
+        'recommended_network': recommended_network,
         'recommended_guest_arch': base['recommended_guest_arch'],
         'recommended_vm_mode': base['recommended_vm_mode'],
+        'network_interfaces': interfaces,
+        'bridges': bridges,
+        'default_bridge': DEFAULT_BRIDGE,
+        'bridge_available': bridge_available,
         'kvm_device': Path('/dev/kvm').exists(),
         'qemu_system_x86_64': command_exists('qemu-system-x86_64'),
         'qemu_system_aarch64': command_exists('qemu-system-aarch64'),
@@ -104,7 +135,7 @@ def detect_host_profile() -> dict[str, Any]:
         ]),
     }
     checks = []
-    checks.append({'name': '/dev/kvm', 'ok': data['kvm_device'], 'hint': 'Нужен KVM. На ARM-платах проверь ядро и виртуализацию.'})
+    checks.append({'name': '/dev/kvm', 'ok': data['kvm_device'], 'hint': 'Нужен KVM. На VPS проверь вложенную виртуализацию у провайдера; без /dev/kvm будет медленный qemu.'})
     if is_arm:
         checks.append({'name': 'qemu-system-aarch64', 'ok': data['qemu_system_aarch64'], 'hint': 'Пакет qemu-system-arm / qemu-system-aarch64.'})
         checks.append({'name': 'AArch64 UEFI', 'ok': data['uefi_aarch64_hint'], 'hint': 'Пакет qemu-efi-aarch64 или AAVMF.'})
@@ -112,8 +143,9 @@ def detect_host_profile() -> dict[str, Any]:
         checks.append({'name': 'qemu-system-x86_64', 'ok': data['qemu_system_x86_64'], 'hint': 'Пакет qemu-system-x86.'})
     checks.append({'name': 'virt-install', 'ok': data['virt_install'], 'hint': 'Пакет virtinst.'})
     checks.append({'name': 'nftables', 'ok': data['nft'], 'hint': 'Пакет nftables для NAT port forwarding.'})
+    checks.append({'name': f'bridge {DEFAULT_BRIDGE}', 'ok': bridge_available, 'hint': 'Если br0 отсутствует, Virtuality будет использовать VPS NAT Router / virtuality-nat.'})
     data['checks'] = checks
-    data['ready'] = all(item['ok'] for item in checks if item['name'] != 'AArch64 UEFI')
+    data['ready'] = all(item['ok'] for item in checks if item['name'] not in ('AArch64 UEFI', f'bridge {DEFAULT_BRIDGE}'))
     return data
 
 
@@ -125,7 +157,12 @@ def save_host_profile(profile: dict[str, Any]) -> None:
 def load_host_profile() -> dict[str, Any]:
     if PROFILE_FILE.exists():
         try:
-            return json.loads(PROFILE_FILE.read_text())
+            profile = json.loads(PROFILE_FILE.read_text())
+            # Older installs stored x86_64 as bridge by default. Re-detect once when bridge metadata is missing.
+            if 'bridge_available' not in profile:
+                profile = detect_host_profile()
+                save_host_profile(profile)
+            return profile
         except Exception:
             pass
     profile = detect_host_profile()
