@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 import crypt
+import json
 import os
 import re
 import secrets
 import shutil
 import spwd
 import subprocess
+import threading
+import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +25,7 @@ APP_NAME = "Virtuality"
 ENV_FILE = BASE_DIR / ".env"
 ISO_DIR = Path("/var/lib/virtuality/iso")
 IMAGES_DIR = Path("/var/lib/virtuality/images")
+OPERATIONS_DIR = Path("/var/log/virtuality/operations")
 DEFAULT_BRIDGE = "br0"
 
 app = FastAPI(title="Virtuality Panel")
@@ -29,6 +34,8 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+OP_LOCK = threading.Lock()
 
 
 def load_env() -> dict[str, str]:
@@ -96,6 +103,145 @@ def run_cmd(cmd: list[str], timeout: int = 12) -> dict[str, Any]:
         return {"ok": result.returncode == 0, "code": result.returncode, "stdout": result.stdout.strip(), "stderr": result.stderr.strip(), "cmd": " ".join(cmd)}
     except Exception as exc:
         return {"ok": False, "code": -1, "stdout": "", "stderr": str(exc), "cmd": " ".join(cmd)}
+
+
+def utc_now() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def operation_meta_path(operation_id: str) -> Path:
+    return OPERATIONS_DIR / f"{operation_id}.json"
+
+
+def operation_log_path(operation_id: str) -> Path:
+    return OPERATIONS_DIR / f"{operation_id}.log"
+
+
+def ensure_operations_dir() -> None:
+    OPERATIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def tail_text(path: Path, max_lines: int = 220) -> str:
+    if not path.exists():
+        return ""
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-max_lines:])
+
+
+def write_operation(operation: dict[str, Any]) -> None:
+    ensure_operations_dir()
+    path = operation_meta_path(operation["id"])
+    tmp_path = path.with_suffix(".json.tmp")
+    with OP_LOCK:
+        tmp_path.write_text(json.dumps(operation, ensure_ascii=False, indent=2))
+        tmp_path.replace(path)
+
+
+def read_operation(operation_id: str) -> dict[str, Any] | None:
+    if not re.fullmatch(r"[a-f0-9-]{36}", operation_id or ""):
+        return None
+    path = operation_meta_path(operation_id)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return None
+    data["log_tail"] = tail_text(operation_log_path(operation_id))
+    return data
+
+
+def list_operations(limit: int = 25) -> list[dict[str, Any]]:
+    ensure_operations_dir()
+    operations: list[dict[str, Any]] = []
+    for path in sorted(OPERATIONS_DIR.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(path.read_text())
+            data["log_tail"] = tail_text(operation_log_path(data["id"]), max_lines=20)
+            operations.append(data)
+        except Exception:
+            continue
+        if len(operations) >= limit:
+            break
+    return operations
+
+
+def append_operation_log(operation_id: str, message: str) -> None:
+    ensure_operations_dir()
+    line = message.rstrip("\n")
+    with operation_log_path(operation_id).open("a", encoding="utf-8") as handle:
+        handle.write(f"[{utc_now()}] {line}\n")
+
+
+def operation_css(status: str) -> str:
+    if status == "success":
+        return "ok"
+    if status == "error":
+        return "err"
+    if status in ("queued", "running"):
+        return "warn"
+    return "warn"
+
+
+def update_operation(operation: dict[str, Any], **changes: Any) -> None:
+    operation.update(changes)
+    operation["updated_at"] = utc_now()
+    write_operation(operation)
+
+
+def progress_from_line(current: int, line: str) -> int:
+    low = line.lower()
+    if "allocating" in low or "creating storage" in low:
+        return max(current, 30)
+    if "starting install" in low or "installing" in low:
+        return max(current, 50)
+    if "creating domain" in low:
+        return max(current, 75)
+    if "domain creation completed" in low or "installation continues" in low:
+        return max(current, 90)
+    return current
+
+
+def run_operation_worker(operation_id: str, cmd: list[str]) -> None:
+    operation = read_operation(operation_id)
+    if not operation:
+        return
+    update_operation(operation, status="running", progress=10, message="virt-install запущен", started_at=utc_now())
+    append_operation_log(operation_id, "Запуск команды:")
+    append_operation_log(operation_id, " ".join(cmd))
+
+    try:
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        if process.stdout:
+            for line in process.stdout:
+                append_operation_log(operation_id, line)
+                fresh = read_operation(operation_id) or operation
+                new_progress = progress_from_line(int(fresh.get("progress", 10)), line)
+                if new_progress != fresh.get("progress"):
+                    update_operation(fresh, progress=new_progress, message=line.strip()[:240] or fresh.get("message"))
+        exit_code = process.wait()
+        fresh = read_operation(operation_id) or operation
+        if exit_code == 0:
+            append_operation_log(operation_id, "virt-install завершился успешно.")
+            run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
+            update_operation(fresh, status="success", progress=100, exit_code=exit_code, message="VM создана успешно", finished_at=utc_now())
+        else:
+            append_operation_log(operation_id, f"virt-install завершился с ошибкой. Exit code: {exit_code}")
+            update_operation(fresh, status="error", progress=100, exit_code=exit_code, message=f"virt-install завершился с ошибкой: {exit_code}", finished_at=utc_now())
+    except Exception as exc:
+        fresh = read_operation(operation_id) or operation
+        append_operation_log(operation_id, f"Ошибка запуска операции: {exc}")
+        update_operation(fresh, status="error", progress=100, exit_code=-1, message=str(exc), finished_at=utc_now())
+
+
+def start_background_operation(operation: dict[str, Any], cmd: list[str]) -> None:
+    write_operation(operation)
+    append_operation_log(operation["id"], "Операция поставлена в очередь.")
+    thread = threading.Thread(target=run_operation_worker, args=(operation["id"], cmd), daemon=True)
+    thread.start()
 
 
 def parse_virsh_list() -> list[dict[str, str]]:
@@ -242,7 +388,7 @@ def dashboard(request: Request):
     vms = parse_virsh_list()
     pools = parse_pool_list()
     services = {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}
-    return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": vms, "pools": pools, "network": network_summary(), "user": AUTH_USER})
+    return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": vms, "pools": pools, "network": network_summary(), "user": AUTH_USER, "operations": list_operations(5), "operation_css": operation_css})
 
 
 @app.get("/iso", response_class=HTMLResponse)
@@ -298,6 +444,42 @@ def iso_refresh(request: Request):
     return RedirectResponse(url="/iso", status_code=303)
 
 
+@app.get("/operations", response_class=HTMLResponse)
+def operations_page(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    return templates.TemplateResponse("operations.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "operations": list_operations(50), "operation_css": operation_css})
+
+
+@app.get("/operations/{operation_id}", response_class=HTMLResponse)
+def operation_detail_page(request: Request, operation_id: str):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    operation = read_operation(operation_id)
+    if not operation:
+        return RedirectResponse(url="/operations", status_code=303)
+    return templates.TemplateResponse("operation_detail.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "operation": operation, "operation_css": operation_css})
+
+
+@app.get("/api/operations")
+def api_operations(request: Request):
+    if not get_current_user(request):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    return {"ok": True, "operations": list_operations(25)}
+
+
+@app.get("/api/operations/{operation_id}")
+def api_operation(request: Request, operation_id: str):
+    if not get_current_user(request):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    operation = read_operation(operation_id)
+    if not operation:
+        return JSONResponse({"ok": False, "error": "Operation not found"}, status_code=404)
+    return {"ok": True, "operation": operation}
+
+
 # Важно: статический маршрут /vm/create должен быть выше динамического /vm/{name}.
 # Иначе FastAPI воспринимает слово "create" как имя виртуальной машины.
 @app.get("/vm/create", response_class=HTMLResponse)
@@ -338,12 +520,31 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
     disk_path = IMAGES_DIR / f"{name}.qcow2"
     if disk_path.exists():
         return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": f"Диск уже существует: {disk_path}", "form": form}, status_code=400)
+
     cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", f"bridge={bridge},model=virtio", "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"]
-    result = run_cmd(cmd, timeout=180)
-    if not result["ok"]:
-        return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": result["stderr"] or result["stdout"] or "virt-install failed", "form": form}, status_code=500)
-    run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
-    return RedirectResponse(url="/", status_code=303)
+
+    operation_id = str(uuid.uuid4())
+    operation = {
+        "id": operation_id,
+        "type": "vm_create",
+        "title": f"Создание VM {name}",
+        "status": "queued",
+        "progress": 0,
+        "message": "Операция поставлена в очередь",
+        "created_at": utc_now(),
+        "updated_at": utc_now(),
+        "created_by": AUTH_USER,
+        "vm_name": name,
+        "disk_path": str(disk_path),
+        "iso_path": iso_path,
+        "bridge": bridge,
+        "memory": memory,
+        "vcpus": vcpus,
+        "disk_size": disk_size,
+        "cmd": " ".join(cmd),
+    }
+    start_background_operation(operation, cmd)
+    return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
 
 
 @app.get("/vm/{name}", response_class=HTMLResponse)
