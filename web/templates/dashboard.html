@@ -95,9 +95,10 @@
         {% for vm in vms %}
           <tr>
             <td>{{ vm.id }}</td>
-            <td class="strong">{{ vm.name }}</td>
+            <td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
             <td><span class="status {{ 'ok' if 'running' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
             <td class="actions">
+              <a class="link-pill" href="/vm/{{ vm.name }}">Подробнее</a>
               <form method="post" action="/vm/{{ vm.name }}/start"><button>Start</button></form>
               <form method="post" action="/vm/{{ vm.name }}/shutdown"><button>Shutdown</button></form>
               <form method="post" action="/vm/{{ vm.name }}/reboot"><button>Reboot</button></form>
