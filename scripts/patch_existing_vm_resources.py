@@ -49,9 +49,14 @@ def current_vm_arch(name: str) -> str:
     return (os_type.attrib.get("arch") if os_type is not None else "") or "unknown"
 
 
+def vm_runtime_state(name: str) -> str:
+    result = run_cmd(["virsh", "domstate", name], timeout=8)
+    return (result.get("stdout") or "unknown").strip().lower()
+
+
 def vm_resource_settings(name: str) -> dict[str, Any]:
     dominfo = run_cmd(["virsh", "dominfo", name], timeout=10).get("stdout") or ""
-    state = (parse_dominfo_value(dominfo, "State") or vm_state(name)).lower()
+    state = (parse_dominfo_value(dominfo, "State") or vm_runtime_state(name)).lower()
     vcpus_raw = parse_dominfo_value(dominfo, "CPU(s)")
     used_memory_raw = parse_dominfo_value(dominfo, "Used memory")
     max_memory_raw = parse_dominfo_value(dominfo, "Max memory")
@@ -147,15 +152,27 @@ else:
     changed.append('existing VM resources helpers already present')
 
 if '"resource_settings": vm_resource_settings(name)' not in text:
-    old = '"iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})'
-    new = '"iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})'
-    if old not in text:
-        old = '"host_ip": system_summary()["ip"]})'
-        new = '"host_ip": system_summary()["ip"], "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})'
-    if old not in text:
+    replacements = [
+        (
+            '"iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})',
+            '"iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})',
+        ),
+        (
+            '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", "")})',
+            '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})',
+        ),
+        (
+            '"host_ip": system_summary()["ip"]})',
+            '"host_ip": system_summary()["ip"], "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})',
+        ),
+    ]
+    for old, new in replacements:
+        if old in text:
+            text = text.replace(old, new, 1)
+            changed.append('vm detail context gets resource settings')
+            break
+    else:
         raise SystemExit('vm detail context marker not found')
-    text = text.replace(old, new, 1)
-    changed.append('vm detail context gets resource settings')
 else:
     changed.append('vm detail context already has resource settings')
 
@@ -174,6 +191,8 @@ def vm_resources_apply(request: Request, name: str, memory_mb: int = Form(...), 
 
 if '@app.post("/vm/{name}/resources")' not in text:
     marker = '\n\n@app.post("/vm/{name}/boot-order")'
+    if marker not in text:
+        marker = '\n\n@app.post("/vm/{name}/iso/mount")'
     if marker not in text:
         marker = '\n\n@app.post("/vm/{name}/{action}")'
     if marker not in text:
