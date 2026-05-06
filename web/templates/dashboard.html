@@ -82,13 +82,14 @@
         </div>
         <table>
           <thead>
-            <tr><th>ID</th><th>Name</th><th>State</th><th>Actions</th></tr>
+            <tr><th>ID</th><th>Name</th><th>IP</th><th>State</th><th>Actions</th></tr>
           </thead>
           <tbody>
           {% for vm in vms %}
             <tr>
               <td>{{ vm.id }}</td>
               <td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
+              <td class="strong">{{ vm.ip|default('—') }}</td>
               <td><span class="status {{ 'ok' if 'running' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
               <td class="actions">
                 <a class="link-pill" href="/vm/{{ vm.name }}">Подробнее</a>
@@ -99,7 +100,7 @@
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="4" class="muted">Виртуальных машин пока нет</td></tr>
+            <tr><td colspan="5" class="muted">Виртуальных машин пока нет</td></tr>
           {% endfor %}
           </tbody>
         </table>
