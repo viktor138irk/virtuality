@@ -80,23 +80,31 @@
             <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
           </div>
         </div>
-        <table>
+        <table class="vm-table">
           <thead>
             <tr><th>ID</th><th>Name</th><th>IP</th><th>State</th><th>Actions</th></tr>
           </thead>
           <tbody>
           {% for vm in vms %}
-            <tr>
+            {% set is_running = 'running' in vm.state %}
+            <tr class="vm-row {{ 'is-running' if is_running else 'is-stopped' }}">
               <td>{{ vm.id }}</td>
               <td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
               <td class="strong">{{ vm.ip|default('—') }}</td>
-              <td><span class="status {{ 'ok' if 'running' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
-              <td class="actions">
-                <a class="link-pill" href="/vm/{{ vm.name }}">Подробнее</a>
-                <form method="post" action="/vm/{{ vm.name }}/start"><button>Start</button></form>
-                <form method="post" action="/vm/{{ vm.name }}/shutdown"><button>Shutdown</button></form>
-                <form method="post" action="/vm/{{ vm.name }}/reboot"><button>Reboot</button></form>
-                <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="danger">Power off</button></form>
+              <td><span class="status {{ 'ok' if is_running else 'err' if 'shut' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
+              <td class="vm-actions-cell">
+                <div class="vm-actions compact-actions">
+                  <a class="icon-action" href="/vm/{{ vm.name }}" title="Подробнее"><span>ℹ</span><em>Детали</em></a>
+                  <a class="icon-action accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener" title="Консоль"><span>▣</span><em>Консоль</em></a>
+                  {% if is_running %}
+                    <form method="post" action="/vm/{{ vm.name }}/reboot"><button class="icon-action" title="Перезагрузить"><span>↻</span><em>Reboot</em></button></form>
+                    <form method="post" action="/vm/{{ vm.name }}/shutdown"><button class="icon-action" title="Мягко выключить"><span>⏻</span><em>Shutdown</em></button></form>
+                    <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="icon-action danger" title="Принудительно выключить"><span>⚡</span><em>Power</em></button></form>
+                  {% else %}
+                    <form method="post" action="/vm/{{ vm.name }}/start"><button class="icon-action success" title="Запустить"><span>▶</span><em>Start</em></button></form>
+                    <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');"><button class="icon-action danger" title="Удалить VM"><span>🗑</span><em>Delete</em></button></form>
+                  {% endif %}
+                </div>
               </td>
             </tr>
           {% else %}
