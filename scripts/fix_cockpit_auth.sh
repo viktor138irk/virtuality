@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # Virtuality Cockpit auth helper
-# Checks Linux user password state and required groups for Cockpit/libvirt access.
+# Checks Linux user password state, Cockpit disallowed-users and required groups.
 
 USER_NAME="${1:-${VIRTUALITY_USER:-${SUDO_USER:-root}}}"
+DISALLOWED_FILE="/etc/cockpit/disallowed-users"
 
 ESC="\033"
 RESET="${ESC}[0m"
@@ -50,6 +51,18 @@ else
   ok "У пользователя ${USER_NAME} есть пароль"
 fi
 
+if [[ -f "$DISALLOWED_FILE" ]]; then
+  if grep -qx "$USER_NAME" "$DISALLOWED_FILE"; then
+    cp "$DISALLOWED_FILE" "${DISALLOWED_FILE}.bak.$(date +%Y%m%d_%H%M%S)"
+    sed -i "/^${USER_NAME}$/d" "$DISALLOWED_FILE"
+    ok "Пользователь ${USER_NAME} удалён из ${DISALLOWED_FILE}"
+  else
+    ok "Пользователь ${USER_NAME} не запрещён в ${DISALLOWED_FILE}"
+  fi
+else
+  warn "Файл ${DISALLOWED_FILE} не найден, пропускаю проверку запрета пользователей"
+fi
+
 if [[ "$USER_NAME" != "root" ]]; then
   usermod -aG sudo "$USER_NAME" || true
   usermod -aG libvirt "$USER_NAME" || true
@@ -58,6 +71,11 @@ if [[ "$USER_NAME" != "root" ]]; then
   warn "Для применения групп нужно выйти из SSH и войти снова"
 else
   ok "root не требует добавления в группы"
+fi
+
+if command -v apt >/dev/null 2>&1; then
+  apt install -y cockpit cockpit-machines sscg >/dev/null 2>&1 || true
+  ok "Пакеты cockpit/cockpit-machines/sscg проверены"
 fi
 
 systemctl enable --now cockpit.socket >/dev/null 2>&1 || fail "Не удалось запустить cockpit.socket"
@@ -69,13 +87,18 @@ if command -v ufw >/dev/null 2>&1; then
 fi
 
 systemctl restart cockpit.socket >/dev/null 2>&1 || true
-ok "cockpit.socket перезапущен"
+systemctl restart cockpit.service >/dev/null 2>&1 || true
+ok "Cockpit перезапущен"
 
 SERVER_IP="$(hostname -I | awk '{print $1}')"
+PUBLIC_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')"
 
 echo
 echo -e "${GREEN}${BOLD}Готово.${RESET}"
-echo -e "${BOLD}Cockpit:${RESET} https://${SERVER_IP}:9090"
+echo -e "${BOLD}Cockpit local/private:${RESET} https://${SERVER_IP}:9090"
+if [[ -n "$PUBLIC_IP" && "$PUBLIC_IP" != "$SERVER_IP" ]]; then
+  echo -e "${BOLD}Cockpit route IP:${RESET}    https://${PUBLIC_IP}:9090"
+fi
 echo -e "${BOLD}Login:${RESET} ${USER_NAME}"
 echo -e "${BOLD}Password:${RESET} пароль Linux-пользователя ${USER_NAME}"
 echo
