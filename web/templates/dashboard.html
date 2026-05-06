@@ -7,209 +7,197 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div>
-        <div class="brand">Virtuality</div>
-        <div class="muted">Лёгкая панель управления виртуализацией</div>
+  <div class="v-layout">
+    <aside class="v-sidebar">
+      <div class="v-logo">
+        <strong>Virtuality</strong>
+        <span>control panel</span>
       </div>
-      <div class="top-meta">
-        <span>{{ system.hostname }}</span>
-        <span>{{ system.ip }}</span>
-        <span>{{ system.time }}</span>
-        <span>user: {{ user }}</span>
-        <a class="link-pill" href="/network">Сеть</a>
-        <a class="link-pill" href="/operations">Операции</a>
-        <a class="link-pill" href="/iso">ISO</a>
-        <a class="link-pill" href="/disk-images">Диски</a>
-        <a class="link-pill {{ 'accent' if update_notice and update_notice.has_update else '' }}" href="/update">Обновления{% if update_notice and update_notice.has_update %} · доступно{% endif %}</a>
-        <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
-        <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-      </div>
-    </header>
+      <nav class="v-nav">
+        <a class="active" href="/">Обзор</a>
+        <a href="/vm/create">Создать VM</a>
+        <a href="/iso">ISO</a>
+        <a href="/disk-images">Диски</a>
+        <a href="/network">Сеть</a>
+        <a href="/operations">Операции</a>
+        <a href="/logs">Журналы</a>
+        <a href="/update">Обновления</a>
+        <a href="/host">Хост</a>
+      </nav>
+    </aside>
 
-    {% if update_notice and update_notice.has_update %}
-      <section class="card update-banner">
+    <main class="v-main">
+      <header class="v-topbar">
         <div>
-          <div class="label">Доступно обновление Virtuality</div>
-          <div class="value small">{{ update_notice.current_version }} → {{ update_notice.latest_version }}</div>
-          <div class="muted small-note">
-            Пропущено версий: {{ update_notice.missing_count }} · новых коммитов: {{ update_notice.commit_count }}
+          <div class="v-title">Обзор</div>
+          <div class="v-subtitle">{{ system.hostname }} · {{ system.ip }} · {{ system.time }}</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
+
+      {% if update_notice and update_notice.has_update %}
+        <section class="card update-banner">
+          <div>
+            <div class="label">Доступно обновление Virtuality</div>
+            <div class="value small">{{ update_notice.current_version }} → {{ update_notice.latest_version }}</div>
+            <div class="muted small-note">Пропущено версий: {{ update_notice.missing_count }} · новых коммитов: {{ update_notice.commit_count }}</div>
           </div>
-        </div>
-        <div class="actions">
-          <a class="link-pill accent" href="/update">Посмотреть изменения</a>
-        </div>
+          <div class="actions">
+            <a class="link-pill accent" href="/update">Посмотреть изменения</a>
+          </div>
+        </section>
+      {% endif %}
+
+      <section class="grid stats">
+        <article class="card stat">
+          <div class="label">Uptime</div>
+          <div class="value">{{ system.uptime }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Load</div>
+          <div class="value">{{ system.load }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Kernel</div>
+          <div class="value small">{{ system.kernel }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">VM</div>
+          <div class="value">{{ vms|length }}</div>
+        </article>
       </section>
-    {% endif %}
 
-    <section class="grid stats">
-      <article class="card stat">
-        <div class="label">Uptime</div>
-        <div class="value">{{ system.uptime }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">Load</div>
-        <div class="value">{{ system.load }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">Kernel</div>
-        <div class="value small">{{ system.kernel }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">VM</div>
-        <div class="value">{{ vms|length }}</div>
-      </article>
-    </section>
-
-    <section class="grid two">
-      <article class="card">
+      <section class="card">
         <div class="card-head">
-          <h2>Сервисы</h2>
-          <span class="pill">systemd</span>
-        </div>
-        <div class="services">
-          {% for name, state in services.items() %}
-          <div class="service-row">
-            <span>{{ name }}</span>
-            <span class="status {{ 'ok' if state == 'active' else 'warn' }}">{{ state }}</span>
+          <h2>Виртуальные машины</h2>
+          <div class="actions">
+            <a class="link-pill" href="/operations">Операции</a>
+            <a class="link-pill" href="/logs">Журналы</a>
+            <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
           </div>
-          {% endfor %}
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <h2>Последние операции</h2>
-          <a class="link-pill" href="/operations">Журнал</a>
-        </div>
-        <div class="services">
-          {% for operation in operations %}
-            <a class="service-row service-link" href="/operations/{{ operation.id }}">
-              <span>
-                <strong>{{ operation.title }}</strong>
-                <small>{{ operation.created_at }} · {{ operation.message }}</small>
-              </span>
-              <span class="status {{ operation_css(operation.status) }}">{{ operation.status }}</span>
-            </a>
-          {% else %}
-            <div class="muted">Операций пока нет. Чистый лист — редкость, почти музей.</div>
-          {% endfor %}
-        </div>
-      </article>
-    </section>
-
-    <section class="grid two">
-      <article class="card">
-        <div class="card-head">
-          <h2>Storage pools</h2>
-          <span class="pill">libvirt</span>
         </div>
         <table>
           <thead>
-            <tr><th>Name</th><th>State</th><th>Autostart</th></tr>
+            <tr><th>ID</th><th>Name</th><th>State</th><th>Actions</th></tr>
           </thead>
           <tbody>
-          {% for pool in pools %}
+          {% for vm in vms %}
             <tr>
-              <td>{{ pool.name }}</td>
-              <td><span class="status {{ 'ok' if pool.state == 'active' else 'warn' }}">{{ pool.state }}</span></td>
-              <td>{{ pool.autostart }}</td>
+              <td>{{ vm.id }}</td>
+              <td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
+              <td><span class="status {{ 'ok' if 'running' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
+              <td class="actions">
+                <a class="link-pill" href="/vm/{{ vm.name }}">Подробнее</a>
+                <form method="post" action="/vm/{{ vm.name }}/start"><button>Start</button></form>
+                <form method="post" action="/vm/{{ vm.name }}/shutdown"><button>Shutdown</button></form>
+                <form method="post" action="/vm/{{ vm.name }}/reboot"><button>Reboot</button></form>
+                <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="danger">Power off</button></form>
+              </td>
             </tr>
           {% else %}
-            <tr><td colspan="3" class="muted">Storage pools не найдены</td></tr>
+            <tr><td colspan="4" class="muted">Виртуальных машин пока нет</td></tr>
           {% endfor %}
           </tbody>
         </table>
-      </article>
+      </section>
 
-      <article class="card">
-        <div class="card-head">
-          <h2>Быстрые действия</h2>
-          <span class="pill">control plane</span>
-        </div>
-        <div class="quick-actions">
-          <a class="big-action" href="/vm/create">
-            <strong>Создать VM</strong>
-            <span>Запуск мастера с ISO, RAM, CPU, диском, архитектурой и выбором Bridge/NAT</span>
-          </a>
-          <a class="big-action" href="/network">
-            <strong>Сеть</strong>
-            <span>NAT Router для VPS, DHCP leases, nftables и проброс портов</span>
-          </a>
-          <a class="big-action" href="/iso">
-            <strong>ISO-менеджер</strong>
-            <span>Загрузка, удаление и refresh ISO storage pool</span>
-          </a>
-          <a class="big-action" href="/disk-images">
-            <strong>Диски</strong>
-            <span>Загрузка .img/.raw/.qcow2 и импорт готовых системных образов</span>
-          </a>
-          <a class="big-action" href="/operations">
-            <strong>Журнал операций</strong>
-            <span>Прогресс, stdout/stderr virt-install и причины ошибок</span>
-          </a>
-          <a class="big-action" href="/update">
-            <strong>Обновления</strong>
-            <span>Проверка GitHub, список пропущенных версий и установка обновления</span>
-          </a>
-        </div>
-      </article>
-    </section>
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Сервисы</h2>
+            <span class="pill">systemd</span>
+          </div>
+          <div class="services">
+            {% for name, state in services.items() %}
+            <div class="service-row">
+              <span>{{ name }}</span>
+              <span class="status {{ 'ok' if state == 'active' else 'warn' }}">{{ state }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </article>
 
-    <section class="card">
-      <div class="card-head">
-        <h2>Виртуальные машины</h2>
-        <div class="actions">
-          <a class="link-pill" href="/network">Сеть</a>
-          <a class="link-pill" href="/operations">Операции</a>
-          <a class="link-pill" href="/iso">ISO</a>
-          <a class="link-pill" href="/disk-images">Диски</a>
-          <a class="link-pill" href="/update">Обновления</a>
-          <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
-        </div>
-      </div>
-      <table>
-        <thead>
-          <tr><th>ID</th><th>Name</th><th>State</th><th>Actions</th></tr>
-        </thead>
-        <tbody>
-        {% for vm in vms %}
-          <tr>
-            <td>{{ vm.id }}</td>
-            <td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
-            <td><span class="status {{ 'ok' if 'running' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
-            <td class="actions">
-              <a class="link-pill" href="/vm/{{ vm.name }}">Подробнее</a>
-              <form method="post" action="/vm/{{ vm.name }}/start"><button>Start</button></form>
-              <form method="post" action="/vm/{{ vm.name }}/shutdown"><button>Shutdown</button></form>
-              <form method="post" action="/vm/{{ vm.name }}/reboot"><button>Reboot</button></form>
-              <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="danger">Power off</button></form>
-            </td>
-          </tr>
-        {% else %}
-          <tr><td colspan="4" class="muted">Виртуальных машин пока нет</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </section>
+        <article class="card">
+          <div class="card-head">
+            <h2>Последние операции</h2>
+            <a class="link-pill" href="/operations">Все операции</a>
+          </div>
+          <div class="services">
+            {% for operation in operations %}
+              <a class="service-row service-link" href="/operations/{{ operation.id }}">
+                <span>
+                  <strong>{{ operation.title }}</strong>
+                  <small>{{ operation.created_at }} · {{ operation.message }}</small>
+                </span>
+                <span class="status {{ operation_css(operation.status) }}">{{ operation.status }}</span>
+              </a>
+            {% else %}
+              <div class="muted">Операций пока нет.</div>
+            {% endfor %}
+          </div>
+        </article>
+      </section>
 
-    <section class="grid two">
-      <article class="card">
-        <div class="card-head">
-          <h2>Интерфейсы</h2>
-          <span class="pill">ip -br a</span>
-        </div>
-        <pre>{{ network.interfaces }}</pre>
-      </article>
-      <article class="card">
-        <div class="card-head">
-          <h2>Маршруты</h2>
-          <span class="pill">ip route</span>
-        </div>
-        <pre>{{ network.routes }}</pre>
-      </article>
-    </section>
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Storage pools</h2>
+            <span class="pill">libvirt</span>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Name</th><th>State</th><th>Autostart</th></tr>
+            </thead>
+            <tbody>
+            {% for pool in pools %}
+              <tr>
+                <td>{{ pool.name }}</td>
+                <td><span class="status {{ 'ok' if pool.state == 'active' else 'warn' }}">{{ pool.state }}</span></td>
+                <td>{{ pool.autostart }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="3" class="muted">Storage pools не найдены</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Быстрые действия</h2>
+            <span class="pill">control plane</span>
+          </div>
+          <div class="quick-actions">
+            <a class="big-action" href="/vm/create"><strong>Создать VM</strong><span>Мастер создания виртуальной машины</span></a>
+            <a class="big-action" href="/network"><strong>Сеть</strong><span>NAT, DHCP leases, проброс портов</span></a>
+            <a class="big-action" href="/iso"><strong>ISO</strong><span>Установочные .iso образы</span></a>
+            <a class="big-action" href="/disk-images"><strong>Диски</strong><span>.img/.raw/.qcow2 и архивы</span></a>
+            <a class="big-action" href="/logs"><strong>Журналы</strong><span>Web, update, libvirt, операции</span></a>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Интерфейсы</h2>
+            <span class="pill">ip -br a</span>
+          </div>
+          <pre>{{ network.interfaces }}</pre>
+        </article>
+        <article class="card">
+          <div class="card-head">
+            <h2>Маршруты</h2>
+            <span class="pill">ip route</span>
+          </div>
+          <pre>{{ network.routes }}</pre>
+        </article>
+      </section>
+    </main>
   </div>
 </body>
 </html>
