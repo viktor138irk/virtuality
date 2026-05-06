@@ -143,9 +143,47 @@ def save_port_forwards(items: list[dict[str, Any]]) -> None:
     PORT_FORWARDS_FILE.write_text(json.dumps(items, ensure_ascii=False, indent=2))
 
 
+def vm_mac_addresses(vm_name: str) -> list[str]:
+    result = run_cmd(['virsh', 'domiflist', vm_name], timeout=8)
+    if not result['ok']:
+        return []
+    macs: list[str] = []
+    for line in result['stdout'].splitlines():
+        match = re.search(r'([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}', line)
+        if match:
+            macs.append(match.group(0).lower())
+    return macs
+
+
+def resolve_vm_ip(vm_name: str) -> str | None:
+    result = run_cmd(['virsh', 'domifaddr', vm_name], timeout=8)
+    if result['ok']:
+        match = re.search(r'\b(192\.168\.100\.\d+|\d+\.\d+\.\d+\.\d+)/\d+', result['stdout'])
+        if match:
+            return match.group(1)
+
+    leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
+    if not leases['ok']:
+        return None
+    macs = set(vm_mac_addresses(vm_name))
+    for line in leases['stdout'].splitlines():
+        low = line.lower()
+        if macs and not any(mac in low for mac in macs):
+            continue
+        match = re.search(r'\b(192\.168\.100\.\d+|\d+\.\d+\.\d+\.\d+)/\d+', line)
+        if match:
+            return match.group(1)
+    return None
+
+
 def add_port_forward(vm_name: str, guest_ip: str, external_port: int, guest_port: int, protocol: str, note: str = '') -> dict[str, Any]:
     if not vm_name or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', vm_name):
         raise NetworkError('Некорректное имя VM')
+    if guest_ip == 'auto':
+        resolved_ip = resolve_vm_ip(vm_name)
+        if not resolved_ip:
+            raise NetworkError('Не удалось автоматически определить IP VM. Запусти VM, дождись DHCP, установи qemu-guest-agent или проверь DHCP leases на странице сети.')
+        guest_ip = resolved_ip
     if not valid_ip(guest_ip):
         raise NetworkError('Некорректный внутренний IP VM')
     if not valid_port(external_port) or not valid_port(guest_port):
