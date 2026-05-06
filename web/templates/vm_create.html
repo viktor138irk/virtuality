@@ -18,6 +18,7 @@
         <a class="link-pill" href="/network">Сеть</a>
         <a class="link-pill" href="/operations">Операции</a>
         <a class="link-pill" href="/iso">ISO</a>
+        <a class="link-pill" href="/disk-images">Диски</a>
         <a class="link-pill" href="/">← Дашборд</a>
         <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
       </div>
@@ -31,13 +32,21 @@
       <article class="card">
         <div class="card-head">
           <h2>Параметры</h2>
-          <span class="pill">VM wizard v0.3</span>
+          <span class="pill">VM wizard</span>
         </div>
 
         <form method="post" action="/vm/create" class="form-grid">
           <label>
             <span>Имя VM</span>
             <input type="text" name="name" value="{{ form.name or '' }}" placeholder="ubuntu-test" required>
+          </label>
+
+          <label>
+            <span>Источник VM</span>
+            <select id="source-type" name="source_type" required>
+              <option value="iso" {% if form.source_type != 'disk_image' %}selected{% endif %}>ISO-установщик</option>
+              <option value="disk_image" {% if form.source_type == 'disk_image' %}selected{% endif %}>Готовый диск .img / .raw / .qcow2</option>
+            </select>
           </label>
 
           <div class="form-row">
@@ -51,16 +60,25 @@
             </label>
           </div>
 
-          <label>
+          <label id="disk-size-row">
             <span>Диск, GB</span>
             <input type="number" name="disk_size" min="4" max="4096" value="{{ form.disk_size }}" required>
           </label>
 
-          <label>
+          <label id="iso-source-row">
             <span>ISO образ</span>
-            <select name="iso_path" required>
+            <select name="iso_path">
               {% for iso in isos %}
                 <option value="{{ iso.path }}" {% if form.iso_path == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
+              {% endfor %}
+            </select>
+          </label>
+
+          <label id="disk-image-source-row">
+            <span>Готовый образ диска</span>
+            <select name="disk_image_path">
+              {% for image in disk_images %}
+                <option value="{{ image.path }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.name }} — {{ image.size }} — {{ image.format }}</option>
               {% endfor %}
             </select>
           </label>
@@ -79,35 +97,69 @@
           </label>
 
           <div class="notice">
-            Для VPS выбирай NAT Router: VM получит внутренний адрес 192.168.100.x, а доступ снаружи делается через проброс портов в разделе «Сеть».
+            ISO создаёт пустой qcow2-диск и запускает установщик. Готовый .img/.raw/.qcow2 импортируется как диск VM через qemu-img convert, оригинальный образ остаётся шаблоном.
           </div>
 
-          <button type="submit" class="primary wide" {% if not isos %}disabled{% endif %}>Создать виртуальную машину</button>
+          <button id="create-vm-button" type="submit" class="primary wide">Создать виртуальную машину</button>
           {% if not isos %}
-            <div class="alert danger">Сначала загрузи ISO-образ в ISO-менеджере.</div>
+            <div id="iso-missing-warning" class="alert danger">Для режима ISO сначала загрузи ISO-образ в ISO-менеджере.</div>
+          {% endif %}
+          {% if not disk_images %}
+            <div id="disk-image-missing-warning" class="alert danger">Для режима готового диска сначала загрузи .img, .raw или .qcow2 в разделе «Диски».</div>
           {% endif %}
         </form>
       </article>
 
       <article class="card">
         <div class="card-head">
-          <h2>Сетевые режимы</h2>
-          <a class="link-pill" href="/network">Открыть сеть</a>
+          <h2>Источники VM</h2>
+          <a class="link-pill" href="/disk-images">Открыть диски</a>
         </div>
         <div class="quick-actions">
           <div class="big-action static">
-            <strong>VPS NAT Router</strong>
-            <span>Правильный режим для VPS с одним внешним IP. VM сидят за NAT, входящие порты пробрасываются вручную.</span>
+            <strong>ISO-установщик</strong>
+            <span>Классический сценарий: создаём пустой qcow2-диск и устанавливаем систему с ISO.</span>
           </div>
           <div class="big-action static">
-            <strong>Bridge br0</strong>
-            <span>Режим для домашнего или офисного сервера, где VM могут получать IP из локальной сети.</span>
+            <strong>Готовый диск</strong>
+            <span>Для Raspberry/Orange Pi образов и готовых .img/.raw/.qcow2. Virtuality импортирует образ в отдельный диск VM.</span>
+          </div>
+          <div class="big-action static">
+            <strong>Сеть</strong>
+            <span>Для VPS выбирай NAT Router. Bridge нужен только если br0 реально есть на сервере.</span>
           </div>
         </div>
-        <pre>VPS:    --network network=virtuality-nat,model=virtio
-LAN:    --network bridge=br0,model=virtio</pre>
+        <pre>ISO:    virt-install --cdrom ubuntu.iso --disk VM.qcow2
+IMG:    qemu-img convert -O qcow2 image.img VM.qcow2
+        virt-install --import --disk VM.qcow2</pre>
       </article>
     </section>
   </div>
+
+  <script>
+    const sourceType = document.getElementById('source-type');
+    const isoRow = document.getElementById('iso-source-row');
+    const diskImageRow = document.getElementById('disk-image-source-row');
+    const diskSizeRow = document.getElementById('disk-size-row');
+    const isoWarning = document.getElementById('iso-missing-warning');
+    const diskWarning = document.getElementById('disk-image-missing-warning');
+    const createButton = document.getElementById('create-vm-button');
+    const hasIsos = {{ 'true' if isos else 'false' }};
+    const hasDiskImages = {{ 'true' if disk_images else 'false' }};
+
+    function refreshSourceUI() {
+      const isDisk = sourceType.value === 'disk_image';
+      isoRow.style.display = isDisk ? 'none' : 'grid';
+      diskImageRow.style.display = isDisk ? 'grid' : 'none';
+      diskSizeRow.style.opacity = isDisk ? '.45' : '1';
+      diskSizeRow.querySelector('span').textContent = isDisk ? 'Диск, GB — не используется при импорте' : 'Диск, GB';
+      if (isoWarning) isoWarning.style.display = !isDisk && !hasIsos ? 'block' : 'none';
+      if (diskWarning) diskWarning.style.display = isDisk && !hasDiskImages ? 'block' : 'none';
+      createButton.disabled = isDisk ? !hasDiskImages : !hasIsos;
+    }
+
+    sourceType.addEventListener('change', refreshSourceUI);
+    refreshSourceUI();
+  </script>
 </body>
 </html>
