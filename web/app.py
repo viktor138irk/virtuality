@@ -8,7 +8,6 @@ import shutil
 import spwd
 import subprocess
 import threading
-import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +19,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
+import network_core
+from network_core import NetworkError
+
 BASE_DIR = Path(__file__).resolve().parent
 APP_NAME = "Virtuality"
 ENV_FILE = BASE_DIR / ".env"
@@ -30,11 +32,9 @@ DEFAULT_BRIDGE = "br0"
 
 app = FastAPI(title="Virtuality Panel")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
 OP_LOCK = threading.Lock()
 
 
@@ -43,10 +43,9 @@ def load_env() -> dict[str, str]:
     if ENV_FILE.exists():
         for raw_line in ENV_FILE.read_text().splitlines():
             line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            data[key.strip()] = value.strip().strip('"').strip("'")
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                data[key.strip()] = value.strip().strip('"').strip("'")
     return data
 
 
@@ -61,15 +60,11 @@ def is_configured() -> bool:
 
 
 def verify_linux_password(username: str, password: str) -> bool:
-    if not username or not password:
-        return False
-    if username != AUTH_USER:
+    if not username or not password or username != AUTH_USER:
         return False
     try:
         shadow = spwd.getspnam(username)
-    except PermissionError:
-        return False
-    except KeyError:
+    except (PermissionError, KeyError):
         return False
     stored_hash = shadow.sp_pwdp
     if stored_hash in ("!", "*", "!!", ""):
@@ -85,14 +80,11 @@ def get_current_user(request: Request) -> str | None:
         data = serializer.loads(token)
     except BadSignature:
         return None
-    if data.get("user") == AUTH_USER:
-        return AUTH_USER
-    return None
+    return AUTH_USER if data.get("user") == AUTH_USER else None
 
 
 def require_auth(request: Request):
-    user = get_current_user(request)
-    if not user:
+    if not get_current_user(request):
         return RedirectResponse(url="/login", status_code=303)
     return None
 
@@ -125,10 +117,9 @@ def tail_text(path: Path, max_lines: int = 220) -> str:
     if not path.exists():
         return ""
     try:
-        lines = path.read_text(errors="replace").splitlines()
+        return "\n".join(path.read_text(errors="replace").splitlines()[-max_lines:])
     except OSError:
         return ""
-    return "\n".join(lines[-max_lines:])
 
 
 def write_operation(operation: dict[str, Any]) -> None:
@@ -171,19 +162,12 @@ def list_operations(limit: int = 25) -> list[dict[str, Any]]:
 
 def append_operation_log(operation_id: str, message: str) -> None:
     ensure_operations_dir()
-    line = message.rstrip("\n")
     with operation_log_path(operation_id).open("a", encoding="utf-8") as handle:
-        handle.write(f"[{utc_now()}] {line}\n")
+        handle.write(f"[{utc_now()}] {message.rstrip()}\n")
 
 
 def operation_css(status: str) -> str:
-    if status == "success":
-        return "ok"
-    if status == "error":
-        return "err"
-    if status in ("queued", "running"):
-        return "warn"
-    return "warn"
+    return "ok" if status == "success" else "err" if status == "error" else "warn"
 
 
 def update_operation(operation: dict[str, Any], **changes: Any) -> None:
@@ -212,7 +196,6 @@ def run_operation_worker(operation_id: str, cmd: list[str]) -> None:
     update_operation(operation, status="running", progress=10, message="virt-install запущен", started_at=utc_now())
     append_operation_log(operation_id, "Запуск команды:")
     append_operation_log(operation_id, " ".join(cmd))
-
     try:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         if process.stdout:
@@ -240,20 +223,16 @@ def run_operation_worker(operation_id: str, cmd: list[str]) -> None:
 def start_background_operation(operation: dict[str, Any], cmd: list[str]) -> None:
     write_operation(operation)
     append_operation_log(operation["id"], "Операция поставлена в очередь.")
-    thread = threading.Thread(target=run_operation_worker, args=(operation["id"], cmd), daemon=True)
-    thread.start()
+    threading.Thread(target=run_operation_worker, args=(operation["id"], cmd), daemon=True).start()
 
 
 def parse_virsh_list() -> list[dict[str, str]]:
     result = run_cmd(["virsh", "list", "--all"])
-    if not result["ok"]:
-        return []
     rows = []
+    if not result["ok"]:
+        return rows
     for line in result["stdout"].splitlines()[2:]:
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split(None, 2)
+        parts = line.strip().split(None, 2)
         if len(parts) == 3:
             rows.append({"id": parts[0], "name": parts[1], "state": parts[2]})
         elif len(parts) == 2:
@@ -263,14 +242,11 @@ def parse_virsh_list() -> list[dict[str, str]]:
 
 def parse_pool_list() -> list[dict[str, str]]:
     result = run_cmd(["virsh", "pool-list", "--all"])
-    if not result["ok"]:
-        return []
     rows = []
+    if not result["ok"]:
+        return rows
     for line in result["stdout"].splitlines()[2:]:
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split()
+        parts = line.strip().split()
         if len(parts) >= 3:
             rows.append({"name": parts[0], "state": parts[1], "autostart": parts[2]})
     return rows
@@ -306,8 +282,7 @@ def iso_path_by_name(name: str) -> Path | None:
     if not safe_name:
         return None
     path = (ISO_DIR / safe_name).resolve()
-    iso_root = ISO_DIR.resolve()
-    if iso_root not in path.parents:
+    if ISO_DIR.resolve() not in path.parents:
         return None
     return path
 
@@ -324,11 +299,20 @@ def vm_exists(name: str) -> bool:
     return run_cmd(["virsh", "dominfo", name], timeout=8)["ok"]
 
 
+def vm_ip(name: str) -> str:
+    result = run_cmd(["virsh", "domifaddr", name], timeout=8)
+    if not result["ok"]:
+        return "not available"
+    match = re.search(r"(192\.168\.100\.\d+|\d+\.\d+\.\d+\.\d+)/", result["stdout"])
+    return match.group(1) if match else "not available"
+
+
 def vm_details(name: str) -> dict[str, Any]:
     return {
         "name": name,
         "dominfo": run_cmd(["virsh", "dominfo", name], timeout=10)["stdout"],
         "vnc": run_cmd(["virsh", "vncdisplay", name], timeout=8)["stdout"] or "not available",
+        "ip": vm_ip(name),
         "disks": run_cmd(["virsh", "domblklist", name, "--details"], timeout=10)["stdout"],
         "interfaces": run_cmd(["virsh", "domiflist", name], timeout=10)["stdout"],
         "autostart": run_cmd(["virsh", "dominfo", name], timeout=10)["stdout"],
@@ -352,6 +336,10 @@ def service_state(unit: str) -> str:
 
 def network_summary() -> dict[str, str]:
     return {"interfaces": run_cmd(["ip", "-br", "a"])["stdout"], "routes": run_cmd(["ip", "route"])["stdout"]}
+
+
+def vm_form_context(request: Request, error: str | None = None, form: dict[str, Any] | None = None, status_code: int = 200):
+    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": error, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "network_mode": "nat", "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -385,10 +373,8 @@ def dashboard(request: Request):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-    vms = parse_virsh_list()
-    pools = parse_pool_list()
     services = {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}
-    return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": vms, "pools": pools, "network": network_summary(), "user": AUTH_USER, "operations": list_operations(5), "operation_css": operation_css})
+    return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "user": AUTH_USER, "operations": list_operations(5), "operation_css": operation_css})
 
 
 @app.get("/iso", response_class=HTMLResponse)
@@ -444,6 +430,63 @@ def iso_refresh(request: Request):
     return RedirectResponse(url="/iso", status_code=303)
 
 
+@app.get("/network", response_class=HTMLResponse)
+def network_page(request: Request, error: str | None = None):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    return templates.TemplateResponse("network.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vms": parse_virsh_list(), "ctx": network_core.network_context(), "error": error})
+
+
+@app.post("/network/nat/setup")
+def network_nat_setup(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    try:
+        network_core.create_nat_network()
+        network_core.apply_port_forwards()
+    except NetworkError as exc:
+        return templates.TemplateResponse("network.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vms": parse_virsh_list(), "ctx": network_core.network_context(), "error": str(exc)}, status_code=500)
+    return RedirectResponse(url="/network", status_code=303)
+
+
+@app.post("/network/forward/add")
+def network_forward_add(request: Request, vm_name: str = Form(...), guest_ip: str = Form(...), external_port: int = Form(...), guest_port: int = Form(...), protocol: str = Form("tcp"), note: str = Form("")):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    try:
+        network_core.add_port_forward(vm_name, guest_ip, external_port, guest_port, protocol, note)
+    except NetworkError as exc:
+        return templates.TemplateResponse("network.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vms": parse_virsh_list(), "ctx": network_core.network_context(), "error": str(exc)}, status_code=400)
+    return RedirectResponse(url="/network", status_code=303)
+
+
+@app.post("/network/forward/{forward_id}/delete")
+def network_forward_delete(request: Request, forward_id: str):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    try:
+        network_core.delete_port_forward(forward_id)
+    except NetworkError:
+        pass
+    return RedirectResponse(url="/network", status_code=303)
+
+
+@app.post("/network/apply")
+def network_apply(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    try:
+        network_core.apply_port_forwards()
+    except NetworkError as exc:
+        return templates.TemplateResponse("network.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vms": parse_virsh_list(), "ctx": network_core.network_context(), "error": str(exc)}, status_code=500)
+    return RedirectResponse(url="/network", status_code=303)
+
+
 @app.get("/operations", response_class=HTMLResponse)
 def operations_page(request: Request):
     auth_redirect = require_auth(request)
@@ -480,22 +523,20 @@ def api_operation(request: Request, operation_id: str):
     return {"ok": True, "operation": operation}
 
 
-# Важно: статический маршрут /vm/create должен быть выше динамического /vm/{name}.
-# Иначе FastAPI воспринимает слово "create" как имя виртуальной машины.
 @app.get("/vm/create", response_class=HTMLResponse)
 def vm_create_page(request: Request):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": None, "form": {"memory": 2048, "vcpus": 2, "disk_size": 20, "bridge": DEFAULT_BRIDGE}})
+    return vm_form_context(request)
 
 
 @app.post("/vm/create", response_class=HTMLResponse)
-def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(...), iso_path: str = Form(...), bridge: str = Form(DEFAULT_BRIDGE), autostart_install: str | None = Form(None)):
+def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(...), iso_path: str = Form(...), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE)):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-    form = {"name": name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "iso_path": iso_path, "bridge": bridge}
+    form = {"name": name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "iso_path": iso_path, "network_mode": network_mode, "bridge": bridge}
     error = None
     if not valid_vm_name(name):
         error = "Имя VM может содержать латиницу, цифры, точку, дефис и подчёркивание. Длина 2–63 символа."
@@ -507,42 +548,33 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
         error = "CPU должен быть от 1 до 128 vCPU."
     elif disk_size < 4 or disk_size > 4096:
         error = "Диск должен быть от 4 GB до 4096 GB."
-    elif not bridge or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", bridge):
+    elif network_mode not in ("nat", "bridge"):
+        error = "Некорректный режим сети."
+    elif network_mode == "bridge" and (not bridge or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", bridge)):
         error = "Некорректное имя bridge."
     else:
         iso = Path(iso_path).resolve()
-        iso_root = ISO_DIR.resolve()
-        if iso_root not in iso.parents or iso.suffix.lower() != ".iso" or not iso.exists():
+        if ISO_DIR.resolve() not in iso.parents or iso.suffix.lower() != ".iso" or not iso.exists():
             error = "ISO должен быть существующим .iso файлом из /var/lib/virtuality/iso."
     if error:
-        return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": error, "form": form}, status_code=400)
+        return vm_form_context(request, error=error, form=form, status_code=400)
+
+    if network_mode == "nat":
+        try:
+            network_core.create_nat_network()
+        except NetworkError as exc:
+            return vm_form_context(request, error=f"NAT-сеть не готова: {exc}", form=form, status_code=500)
+
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     disk_path = IMAGES_DIR / f"{name}.qcow2"
     if disk_path.exists():
-        return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": f"Диск уже существует: {disk_path}", "form": form}, status_code=400)
+        return vm_form_context(request, error=f"Диск уже существует: {disk_path}", form=form, status_code=400)
 
-    cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", f"bridge={bridge},model=virtio", "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"]
+    network_arg = f"network={network_core.NETWORK_NAME},model=virtio" if network_mode == "nat" else f"bridge={bridge},model=virtio"
+    cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"]
 
     operation_id = str(uuid.uuid4())
-    operation = {
-        "id": operation_id,
-        "type": "vm_create",
-        "title": f"Создание VM {name}",
-        "status": "queued",
-        "progress": 0,
-        "message": "Операция поставлена в очередь",
-        "created_at": utc_now(),
-        "updated_at": utc_now(),
-        "created_by": AUTH_USER,
-        "vm_name": name,
-        "disk_path": str(disk_path),
-        "iso_path": iso_path,
-        "bridge": bridge,
-        "memory": memory,
-        "vcpus": vcpus,
-        "disk_size": disk_size,
-        "cmd": " ".join(cmd),
-    }
+    operation = {"id": operation_id, "type": "vm_create", "title": f"Создание VM {name}", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": name, "disk_path": str(disk_path), "iso_path": iso_path, "network_mode": network_mode, "network": network_arg, "bridge": bridge, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "cmd": " ".join(cmd)}
     start_background_operation(operation, cmd)
     return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
 
@@ -577,4 +609,4 @@ def vm_action(request: Request, name: str, action: str):
 def api_health(request: Request):
     if not get_current_user(request):
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    return {"system": system_summary(), "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary()}
+    return {"system": system_summary(), "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "virtuality_nat": network_core.network_context()}
