@@ -84,14 +84,21 @@
             </select>
           </label>
 
-          <label id="disk-image-source-row">
-            <span id="disk-image-label">Готовый образ диска</span>
-            <select name="disk_image_path">
-              {% for image in disk_images %}
-                <option value="{{ image.path }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.name }} — {{ image.size }} — {{ image.format }}</option>
-              {% endfor %}
-            </select>
-          </label>
+          <div id="disk-image-source-row" class="form-subcard">
+            <label>
+              <span id="disk-image-label">Готовый образ диска</span>
+              <select name="disk_image_path">
+                {% for image in disk_images %}
+                  <option value="{{ image.path }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.name }} — {{ image.size }} — {{ image.format }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" name="replace_existing_disk" value="1" {% if form.replace_existing_disk == '1' %}checked{% endif %}>
+              <span>Заменить существующий диск VM, если остался после неудачной установки</span>
+            </label>
+            <div class="muted small-note">Опция нужна, если предыдущая попытка создания VM оборвалась и оставила хвост в /var/lib/virtuality/images.</div>
+          </div>
 
           <label>
             <span>Режим сети</span>
@@ -104,11 +111,6 @@
           <label>
             <span>Bridge для режима Bridge</span>
             <input type="text" name="bridge" value="{{ form.bridge }}" placeholder="br0">
-          </label>
-
-          <label class="check-row">
-            <input type="checkbox" name="replace_existing_disk" value="1" {% if form.replace_existing_disk == '1' %}checked{% endif %}>
-            <span>Заменить существующий диск VM, если остался после неудачной установки</span>
           </label>
 
           <div id="source-mode-notice" class="notice">
@@ -174,7 +176,7 @@ IMG ARM: qemu-img convert -O qcow2 image.img VM.qcow2
       diskSizeRow.style.opacity = isDisk ? '.45' : '1';
       diskSizeRow.querySelector('span').textContent = isDisk ? 'Диск, GB — не используется при импорте' : 'Диск, GB';
       sourceModeNotice.textContent = isDisk
-        ? 'Выбран источник “Готовый диск”: Virtuality импортирует .img/.raw/.qcow2 в новый qcow2-диск VM. Поле “Диск, GB” не используется.'
+        ? 'Выбран источник “Готовый диск”: Virtuality импортирует .img/.raw/.qcow2 в новый qcow2-диск VM. Поле “Диск, GB” не используется. При необходимости можно заменить хвост от неудачной установки прямо в блоке готового диска.'
         : 'Выбран источник “ISO-установщик”: Virtuality создаст новый диск указанного размера и запустит установку с ISO.';
       if (isoWarning) isoWarning.style.display = !isDisk && !hasIsos ? 'block' : 'none';
       if (diskWarning) diskWarning.style.display = isDisk && !hasDiskImages ? 'block' : 'none';
