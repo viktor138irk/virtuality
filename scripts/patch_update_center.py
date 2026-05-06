@@ -10,9 +10,9 @@ if not app_path.exists():
 script_dir = Path(__file__).resolve().parent
 
 # New installs run this patch from install_web_panel.sh. Keep feature patches here too
-# so a fresh install gets disk images, VM architecture selector, dashboard update
-# notifications and update center without requiring extra manual commands.
-for optional_patch in ('patch_disk_images.py', 'patch_vm_architecture.py', 'patch_update_badge.py'):
+# so a fresh install gets disk images, conversion progress, VM architecture selector,
+# dashboard update notifications and update center without extra manual commands.
+for optional_patch in ('patch_disk_images.py', 'patch_disk_convert_progress.py', 'patch_vm_architecture.py', 'patch_update_badge.py'):
     patch_path = script_dir / optional_patch
     if patch_path.exists():
         old_argv = sys.argv[:]
