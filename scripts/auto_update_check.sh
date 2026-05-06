@@ -9,6 +9,7 @@ LOG_FILE="/var/log/virtuality/update.log"
 REMOTE="${VIRTUALITY_UPDATE_REMOTE:-origin}"
 BRANCH="${VIRTUALITY_UPDATE_BRANCH:-main}"
 APPLY_SCRIPT="${SOURCE_DIR}/scripts/apply_github_update.sh"
+ZIP_URL="${VIRTUALITY_UPDATE_ZIP_URL:-https://github.com/viktor138irk/virtuality/archive/refs/heads/${BRANCH}.zip}"
 
 mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
 
@@ -32,6 +33,30 @@ write_state() {
 JSON
 }
 
+diag_network() {
+  log "diagnostics: host=$(hostname 2>/dev/null || echo unknown)"
+  log "diagnostics: date=$(date -Is 2>/dev/null || date)"
+  if command -v getent >/dev/null 2>&1; then
+    getent hosts github.com >> "$LOG_FILE" 2>&1 || log "diagnostics: DNS github.com failed"
+  fi
+  if command -v git >/dev/null 2>&1; then
+    git --version >> "$LOG_FILE" 2>&1 || true
+    git -C "$SOURCE_DIR" remote -v >> "$LOG_FILE" 2>&1 || true
+  else
+    log "diagnostics: git not found"
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -I -L --connect-timeout 10 --max-time 25 https://github.com/ >> "$LOG_FILE" 2>&1 || log "diagnostics: curl github.com failed"
+  else
+    log "diagnostics: curl not found"
+  fi
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -v | head -2 >> "$LOG_FILE" 2>&1 || true
+  else
+    log "diagnostics: unzip not found"
+  fi
+}
+
 (
   flock -n 9 || {
     log "another update check is already running, skip"
@@ -41,9 +66,9 @@ JSON
   STARTED_AT="$(now)"
   log "checking updates"
 
-  if [ ! -d "$SOURCE_DIR/.git" ]; then
-    log "git repository not found: $SOURCE_DIR"
-    write_state "error" "Автообновление: не найден git-репозиторий: $SOURCE_DIR"
+  if [ ! -d "$SOURCE_DIR" ]; then
+    log "source directory not found: $SOURCE_DIR"
+    write_state "error" "Автообновление: не найдена директория исходников: $SOURCE_DIR"
     exit 0
   fi
 
@@ -53,30 +78,32 @@ JSON
     exit 0
   }
 
-  current="$(git rev-parse HEAD 2>/dev/null || true)"
+  current="unknown"
+  if [ -d "$SOURCE_DIR/.git" ]; then
+    current="$(git rev-parse HEAD 2>/dev/null || true)"
+  fi
+  current_version="$(cat VERSION 2>/dev/null || echo unknown)"
+
   if [ -z "$current" ]; then
-    log "cannot read current commit"
-    write_state "error" "Автообновление: не удалось прочитать текущий commit"
-    exit 0
+    current="unknown"
   fi
 
-  if ! git fetch --quiet "$REMOTE" "$BRANCH" >> "$LOG_FILE" 2>&1; then
-    log "git fetch failed"
-    write_state "error" "Автообновление: git fetch завершился ошибкой"
-    exit 0
-  fi
-
-  latest="$(git rev-parse "${REMOTE}/${BRANCH}" 2>/dev/null || true)"
-  if [ -z "$latest" ]; then
-    log "cannot read remote commit ${REMOTE}/${BRANCH}"
-    write_state "error" "Автообновление: не удалось прочитать удалённый commit ${REMOTE}/${BRANCH}"
-    exit 0
-  fi
-
-  if [ "$current" = "$latest" ]; then
-    log "no updates: ${current:0:12}"
-    write_state "idle" "Автообновление: новых обновлений нет"
-    exit 0
+  if [ -d "$SOURCE_DIR/.git" ]; then
+    if git fetch --quiet "$REMOTE" "$BRANCH" >> "$LOG_FILE" 2>&1; then
+      latest="$(git rev-parse "${REMOTE}/${BRANCH}" 2>/dev/null || true)"
+      if [ -n "$latest" ] && [ "$current" = "$latest" ]; then
+        log "no updates: ${current:0:12} / version $current_version"
+        write_state "idle" "Автообновление: новых обновлений нет"
+        exit 0
+      fi
+      log "update may be available or current commit unknown: ${current:0:12} -> ${latest:0:12}"
+    else
+      log "git fetch failed; diagnostics and apply ZIP fallback will be used"
+      diag_network
+    fi
+  else
+    log "git repository not found; apply ZIP fallback will be used"
+    diag_network
   fi
 
   if [ ! -f "$APPLY_SCRIPT" ]; then
@@ -85,7 +112,6 @@ JSON
     exit 0
   fi
 
-  log "update found: ${current:0:12} -> ${latest:0:12}"
-  write_state "running" "Автообновление: найдено обновление, запускаем установку"
-  VIRTUALITY_SOURCE_DIR="$SOURCE_DIR" VIRTUALITY_UPDATE_REMOTE="$REMOTE" VIRTUALITY_UPDATE_BRANCH="$BRANCH" bash "$APPLY_SCRIPT"
+  write_state "running" "Автообновление: проверяем и устанавливаем обновление через устойчивый механизм"
+  VIRTUALITY_SOURCE_DIR="$SOURCE_DIR" VIRTUALITY_UPDATE_REMOTE="$REMOTE" VIRTUALITY_UPDATE_BRANCH="$BRANCH" VIRTUALITY_UPDATE_ZIP_URL="$ZIP_URL" bash "$APPLY_SCRIPT"
 ) 9>"$LOCK_FILE"
