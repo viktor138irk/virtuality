@@ -299,11 +299,11 @@ ExecStart=/bin/bash ${REPO_DIR}/scripts/auto_update_check.sh
 EOF
   cat > "$AUTO_UPDATE_TIMER_FILE" <<EOF
 [Unit]
-Description=Run Virtuality automatic update check every 15 minutes
+Description=Run Virtuality automatic update check daily at 00:00 Moscow time
 
 [Timer]
-OnBootSec=3min
-OnUnitActiveSec=15min
+OnCalendar=*-*-* 00:00:00
+Timezone=Europe/Moscow
 AccuracySec=1min
 Persistent=true
 Unit=virtuality-auto-update.service
@@ -313,7 +313,7 @@ WantedBy=timers.target
 EOF
   run_logged "systemd daemon-reload выполнен для автообновлений" systemctl daemon-reload
   run_logged "virtuality-auto-update.timer включён" systemctl enable --now virtuality-auto-update.timer
-  ok "Автообновление будет проверять GitHub каждые 15 минут"
+  ok "Автообновление будет проверять GitHub 1 раз в сутки в 00:00 по Москве"
 else
   warn "auto_update_check.sh не найден, автообновление пропущено"
 fi
@@ -354,7 +354,7 @@ echo -e "${BOLD}Login:${RESET}      ${AUTH_USER} / пароль Linux-польз
 echo -e "${BOLD}Profile:${RESET}    ${LABEL:-$PROFILE}"
 echo -e "${BOLD}Arch:${RESET}       ${ARCH:-unknown}"
 echo -e "${BOLD}Service:${RESET}    virtuality-web.service"
-echo -e "${BOLD}Auto update:${RESET} virtuality-auto-update.timer / каждые 15 минут"
+echo -e "${BOLD}Auto update:${RESET} virtuality-auto-update.timer / ежедневно в 00:00 по Москве"
 echo -e "${BOLD}Upload tmp:${RESET}  ${UPLOAD_TMP_DIR}"
 echo -e "${BOLD}Session key:${RESET} ${SESSION_SECRET_FILE}"
 echo -e "${BOLD}Status:${RESET}     systemctl status virtuality-web --no-pager"
