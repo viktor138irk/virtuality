@@ -91,28 +91,10 @@ def require_auth(request: Request):
 
 def run_cmd(cmd: list[str], timeout: int = 12) -> dict[str, Any]:
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        return {
-            "ok": result.returncode == 0,
-            "code": result.returncode,
-            "stdout": result.stdout.strip(),
-            "stderr": result.stderr.strip(),
-            "cmd": " ".join(cmd),
-        }
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        return {"ok": result.returncode == 0, "code": result.returncode, "stdout": result.stdout.strip(), "stderr": result.stderr.strip(), "cmd": " ".join(cmd)}
     except Exception as exc:
-        return {
-            "ok": False,
-            "code": -1,
-            "stdout": "",
-            "stderr": str(exc),
-            "cmd": " ".join(cmd),
-        }
+        return {"ok": False, "code": -1, "stdout": "", "stderr": str(exc), "cmd": " ".join(cmd)}
 
 
 def parse_virsh_list() -> list[dict[str, str]]:
@@ -167,6 +149,17 @@ def vm_exists(name: str) -> bool:
     return run_cmd(["virsh", "dominfo", name], timeout=8)["ok"]
 
 
+def vm_details(name: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "dominfo": run_cmd(["virsh", "dominfo", name], timeout=10)["stdout"],
+        "vnc": run_cmd(["virsh", "vncdisplay", name], timeout=8)["stdout"] or "not available",
+        "disks": run_cmd(["virsh", "domblklist", name, "--details"], timeout=10)["stdout"],
+        "interfaces": run_cmd(["virsh", "domiflist", name], timeout=10)["stdout"],
+        "autostart": run_cmd(["virsh", "dominfo", name], timeout=10)["stdout"],
+    }
+
+
 def system_summary() -> dict[str, str]:
     hostname = run_cmd(["hostname"])["stdout"]
     uptime = run_cmd(["uptime", "-p"])["stdout"]
@@ -174,14 +167,7 @@ def system_summary() -> dict[str, str]:
     ip_addr = run_cmd(["hostname", "-I"])["stdout"].split()
     ip_main = ip_addr[0] if ip_addr else "unknown"
     load = Path("/proc/loadavg").read_text().split()[:3]
-    return {
-        "hostname": hostname,
-        "uptime": uptime,
-        "kernel": kernel,
-        "ip": ip_main,
-        "load": " ".join(load),
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    return {"hostname": hostname, "uptime": uptime, "kernel": kernel, "ip": ip_main, "load": " ".join(load), "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 
 def service_state(unit: str) -> str:
@@ -190,54 +176,22 @@ def service_state(unit: str) -> str:
 
 
 def network_summary() -> dict[str, str]:
-    return {
-        "interfaces": run_cmd(["ip", "-br", "a"])["stdout"],
-        "routes": run_cmd(["ip", "route"])["stdout"],
-    }
+    return {"interfaces": run_cmd(["ip", "-br", "a"])["stdout"], "routes": run_cmd(["ip", "route"])["stdout"]}
 
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     if get_current_user(request):
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse(
-        "login.html",
-        {
-            "request": request,
-            "app_name": APP_NAME,
-            "error": None,
-            "configured": is_configured(),
-            "auth_user": AUTH_USER,
-        },
-    )
+    return templates.TemplateResponse("login.html", {"request": request, "app_name": APP_NAME, "error": None, "configured": is_configured(), "auth_user": AUTH_USER})
 
 
 @app.post("/login", response_class=HTMLResponse)
 def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
     if not is_configured():
-        return templates.TemplateResponse(
-            "login.html",
-            {
-                "request": request,
-                "app_name": APP_NAME,
-                "error": "Панель ещё не настроена. Запусти установщик веб-панели повторно.",
-                "configured": False,
-                "auth_user": AUTH_USER,
-            },
-            status_code=500,
-        )
+        return templates.TemplateResponse("login.html", {"request": request, "app_name": APP_NAME, "error": "Панель ещё не настроена. Запусти установщик веб-панели повторно.", "configured": False, "auth_user": AUTH_USER}, status_code=500)
     if not verify_linux_password(username, password):
-        return templates.TemplateResponse(
-            "login.html",
-            {
-                "request": request,
-                "app_name": APP_NAME,
-                "error": "Неверный логин или пароль Linux-пользователя",
-                "configured": True,
-                "auth_user": AUTH_USER,
-            },
-            status_code=401,
-        )
+        return templates.TemplateResponse("login.html", {"request": request, "app_name": APP_NAME, "error": "Неверный логин или пароль Linux-пользователя", "configured": True, "auth_user": AUTH_USER}, status_code=401)
     token = serializer.dumps({"user": AUTH_USER})
     response = RedirectResponse(url="/", status_code=303)
     response.set_cookie("virtuality_session", token, httponly=True, samesite="lax", max_age=60 * 60 * 12)
@@ -258,26 +212,18 @@ def dashboard(request: Request):
         return auth_redirect
     vms = parse_virsh_list()
     pools = parse_pool_list()
-    services = {
-        "libvirtd": service_state("libvirtd.service"),
-        "virtlogd": service_state("virtlogd.service"),
-        "cockpit": service_state("cockpit.socket"),
-        "dashboard": service_state("virtuality-console-dashboard.service"),
-        "web": service_state("virtuality-web.service"),
-    }
-    return templates.TemplateResponse(
-        "dashboard.html",
-        {
-            "request": request,
-            "app_name": APP_NAME,
-            "system": system_summary(),
-            "services": services,
-            "vms": vms,
-            "pools": pools,
-            "network": network_summary(),
-            "user": AUTH_USER,
-        },
-    )
+    services = {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}
+    return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": vms, "pools": pools, "network": network_summary(), "user": AUTH_USER})
+
+
+@app.get("/vm/{name}", response_class=HTMLResponse)
+def vm_detail_page(request: Request, name: str):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    if not valid_vm_name(name) or not vm_exists(name):
+        return RedirectResponse(url="/", status_code=303)
+    return templates.TemplateResponse("vm_detail.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vm": vm_details(name), "host_ip": system_summary()["ip"]})
 
 
 @app.get("/vm/create", response_class=HTMLResponse)
@@ -285,37 +231,16 @@ def vm_create_page(request: Request):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-    return templates.TemplateResponse(
-        "vm_create.html",
-        {
-            "request": request,
-            "app_name": APP_NAME,
-            "user": AUTH_USER,
-            "isos": list_iso_files(),
-            "error": None,
-            "form": {"memory": 2048, "vcpus": 2, "disk_size": 20, "bridge": DEFAULT_BRIDGE},
-        },
-    )
+    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": None, "form": {"memory": 2048, "vcpus": 2, "disk_size": 20, "bridge": DEFAULT_BRIDGE}})
 
 
 @app.post("/vm/create", response_class=HTMLResponse)
-def vm_create_submit(
-    request: Request,
-    name: str = Form(...),
-    memory: int = Form(...),
-    vcpus: int = Form(...),
-    disk_size: int = Form(...),
-    iso_path: str = Form(...),
-    bridge: str = Form(DEFAULT_BRIDGE),
-    autostart_install: str | None = Form(None),
-):
+def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(...), iso_path: str = Form(...), bridge: str = Form(DEFAULT_BRIDGE), autostart_install: str | None = Form(None)):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-
     form = {"name": name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "iso_path": iso_path, "bridge": bridge}
     error = None
-
     if not valid_vm_name(name):
         error = "Имя VM может содержать латиницу, цифры, точку, дефис и подчёркивание. Длина 2–63 символа."
     elif vm_exists(name):
@@ -333,47 +258,16 @@ def vm_create_submit(
         iso_root = ISO_DIR.resolve()
         if iso_root not in iso.parents or iso.suffix.lower() != ".iso" or not iso.exists():
             error = "ISO должен быть существующим .iso файлом из /var/lib/virtuality/iso."
-
     if error:
-        return templates.TemplateResponse(
-            "vm_create.html",
-            {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": error, "form": form},
-            status_code=400,
-        )
-
+        return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": error, "form": form}, status_code=400)
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     disk_path = IMAGES_DIR / f"{name}.qcow2"
     if disk_path.exists():
-        return templates.TemplateResponse(
-            "vm_create.html",
-            {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": f"Диск уже существует: {disk_path}", "form": form},
-            status_code=400,
-        )
-
-    cmd = [
-        "virt-install",
-        "--name", name,
-        "--memory", str(memory),
-        "--vcpus", str(vcpus),
-        "--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio",
-        "--cdrom", iso_path,
-        "--os-variant", "generic",
-        "--network", f"bridge={bridge},model=virtio",
-        "--graphics", "vnc,listen=0.0.0.0",
-        "--noautoconsole",
-    ]
-    if not autostart_install:
-        # virt-install starts the installer by design; this flag is kept for future behaviour toggles.
-        pass
-
+        return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": f"Диск уже существует: {disk_path}", "form": form}, status_code=400)
+    cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", f"bridge={bridge},model=virtio", "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"]
     result = run_cmd(cmd, timeout=180)
     if not result["ok"]:
-        return templates.TemplateResponse(
-            "vm_create.html",
-            {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": result["stderr"] or result["stdout"] or "virt-install failed", "form": form},
-            status_code=500,
-        )
-
+        return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": result["stderr"] or result["stdout"] or "virt-install failed", "form": form}, status_code=500)
     run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
     return RedirectResponse(url="/", status_code=303)
 
@@ -383,32 +277,19 @@ def vm_action(request: Request, name: str, action: str):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-    allowed = {
-        "start": ["virsh", "start", name],
-        "shutdown": ["virsh", "shutdown", name],
-        "reboot": ["virsh", "reboot", name],
-        "destroy": ["virsh", "destroy", name],
-    }
+    allowed = {"start": ["virsh", "start", name], "shutdown": ["virsh", "shutdown", name], "reboot": ["virsh", "reboot", name], "destroy": ["virsh", "destroy", name], "autostart": ["virsh", "autostart", name], "autostart-disable": ["virsh", "autostart", "--disable", name]}
+    if action == "delete":
+        run_cmd(["virsh", "destroy", name], timeout=20)
+        run_cmd(["virsh", "undefine", name, "--remove-all-storage"], timeout=60)
+        return RedirectResponse(url="/", status_code=303)
     if action not in allowed:
         return JSONResponse({"ok": False, "error": "Unsupported action"}, status_code=400)
-    run_cmd(allowed[action], timeout=20)
-    return RedirectResponse(url="/", status_code=303)
+    run_cmd(allowed[action], timeout=30)
+    return RedirectResponse(url=f"/vm/{name}", status_code=303)
 
 
 @app.get("/api/health")
 def api_health(request: Request):
     if not get_current_user(request):
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    return {
-        "system": system_summary(),
-        "services": {
-            "libvirtd": service_state("libvirtd.service"),
-            "virtlogd": service_state("virtlogd.service"),
-            "cockpit": service_state("cockpit.socket"),
-            "dashboard": service_state("virtuality-console-dashboard.service"),
-            "web": service_state("virtuality-web.service"),
-        },
-        "vms": parse_virsh_list(),
-        "pools": parse_pool_list(),
-        "network": network_summary(),
-    }
+    return {"system": system_summary(), "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary()}
