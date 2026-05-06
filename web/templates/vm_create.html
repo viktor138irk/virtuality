@@ -76,7 +76,7 @@
           </label>
 
           <label id="iso-source-row">
-            <span>ISO образ</span>
+            <span id="source-image-label">ISO образ</span>
             <select name="iso_path">
               {% for iso in isos %}
                 <option value="{{ iso.path }}" {% if form.iso_path == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
@@ -85,7 +85,7 @@
           </label>
 
           <label id="disk-image-source-row">
-            <span>Готовый образ диска</span>
+            <span id="disk-image-label">Готовый образ диска</span>
             <select name="disk_image_path">
               {% for image in disk_images %}
                 <option value="{{ image.path }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.name }} — {{ image.size }} — {{ image.format }}</option>
@@ -111,7 +111,7 @@
             <span>Заменить существующий диск VM, если остался после неудачной установки</span>
           </label>
 
-          <div class="notice">
+          <div id="source-mode-notice" class="notice">
             Для обычных ISO выбирай x86_64 на ПК/VPS. Для Raspberry/Orange Pi образов обычно нужен ARM64/aarch64 и источник “Готовый диск”. Опция замены диска удаляет только /var/lib/virtuality/images/ИМЯ_VM.qcow2, если VM с таким именем ещё не существует.
           </div>
 
@@ -156,6 +156,9 @@ IMG ARM: qemu-img convert -O qcow2 image.img VM.qcow2
     const isoRow = document.getElementById('iso-source-row');
     const diskImageRow = document.getElementById('disk-image-source-row');
     const diskSizeRow = document.getElementById('disk-size-row');
+    const sourceImageLabel = document.getElementById('source-image-label');
+    const diskImageLabel = document.getElementById('disk-image-label');
+    const sourceModeNotice = document.getElementById('source-mode-notice');
     const isoWarning = document.getElementById('iso-missing-warning');
     const diskWarning = document.getElementById('disk-image-missing-warning');
     const createButton = document.getElementById('create-vm-button');
@@ -166,8 +169,13 @@ IMG ARM: qemu-img convert -O qcow2 image.img VM.qcow2
       const isDisk = sourceType.value === 'disk_image';
       isoRow.style.display = isDisk ? 'none' : 'grid';
       diskImageRow.style.display = isDisk ? 'grid' : 'none';
+      sourceImageLabel.textContent = isDisk ? 'Готовый образ диска' : 'ISO образ';
+      diskImageLabel.textContent = isDisk ? 'Готовый образ диска' : 'ISO образ';
       diskSizeRow.style.opacity = isDisk ? '.45' : '1';
       diskSizeRow.querySelector('span').textContent = isDisk ? 'Диск, GB — не используется при импорте' : 'Диск, GB';
+      sourceModeNotice.textContent = isDisk
+        ? 'Выбран источник “Готовый диск”: Virtuality импортирует .img/.raw/.qcow2 в новый qcow2-диск VM. Поле “Диск, GB” не используется.'
+        : 'Выбран источник “ISO-установщик”: Virtuality создаст новый диск указанного размера и запустит установку с ISO.';
       if (isoWarning) isoWarning.style.display = !isDisk && !hasIsos ? 'block' : 'none';
       if (diskWarning) diskWarning.style.display = isDisk && !hasDiskImages ? 'block' : 'none';
       createButton.disabled = isDisk ? !hasDiskImages : !hasIsos;
