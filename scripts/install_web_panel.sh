@@ -165,6 +165,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_vm_network_guard.py" ]]; then
 else
   warn "patch_vm_network_guard.py не найден, защита от отсутствующего bridge пропущена"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_update_center.py" ]]; then
+  run_logged "update center patch применён" python3 "${REPO_DIR}/scripts/patch_update_center.py" "${APP_DIR}/app.py"
+else
+  warn "patch_update_center.py не найден, центр обновлений пропущен"
+fi
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
   ok "Профиль уже сохранён: $PROFILE_FILE"
@@ -210,6 +215,7 @@ User=root
 Group=root
 Environment=PYTHONUNBUFFERED=1
 Environment=VIRTUALITY_AUTH_USER=${AUTH_USER}
+Environment=VIRTUALITY_SOURCE_DIR=${REPO_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -258,5 +264,5 @@ echo -e "${BOLD}Logs:${RESET}       journalctl -u virtuality-web -f"
 echo -e "${BOLD}Install log:${RESET} ${LOG_FILE}"
 echo
 line
-echo -e "${DIM}Следующий шаг: /host, /network, /vm/create, /vm/NAME/console.${RESET}"
+echo -e "${DIM}Следующий шаг: /host, /network, /update, /vm/create, /vm/NAME/console.${RESET}"
 line
