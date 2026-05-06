@@ -1,6 +1,21 @@
 {
   "versions": [
     {
+      "version": "0.8.5",
+      "date": "2026-05-07",
+      "title": "Устойчивое обновление через ZIP fallback",
+      "summary": "Механизм обновлений стал устойчивее: если git fetch не проходит, применяется резервная загрузка ZIP архива ветки main с GitHub и синхронизация через rsync.",
+      "features": [
+        "ZIP fallback обновления был добавлен в apply_github_update.sh",
+        "При сбое git fetch теперь пробуется загрузка архива GitHub через curl или wget",
+        "Архив ветки main распаковывается и синхронизируется в /opt/virtuality/source через rsync",
+        "Диагностика DNS, GitHub, git, curl и unzip была добавлена в auto_update_check.sh",
+        "curl, wget и unzip были добавлены в системные зависимости установщика",
+        "Сообщения ошибок обновления стали подробнее в /var/log/virtuality/update.log",
+        "Версия обновлена до 0.8.5"
+      ]
+    },
+    {
       "version": "0.8.4",
       "date": "2026-05-07",
       "title": "AJAX-навигация и динамика панели",
