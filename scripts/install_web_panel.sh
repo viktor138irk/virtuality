@@ -302,8 +302,7 @@ EOF
 Description=Run Virtuality automatic update check daily at 00:00 Moscow time
 
 [Timer]
-OnCalendar=*-*-* 00:00:00
-Timezone=Europe/Moscow
+OnCalendar=*-*-* 21:00:00 UTC
 AccuracySec=1min
 Persistent=true
 Unit=virtuality-auto-update.service
