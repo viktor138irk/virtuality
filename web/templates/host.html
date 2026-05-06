@@ -21,6 +21,10 @@
       </div>
     </header>
 
+    {% if profile.virtualization_warning %}
+      <div class="notice">{{ profile.virtualization_warning }}</div>
+    {% endif %}
+
     <section class="grid stats">
       <article class="card stat">
         <div class="label">Profile</div>
@@ -31,8 +35,8 @@
         <div class="value small">{{ profile.arch }}</div>
       </article>
       <article class="card stat">
-        <div class="label">Guest arch</div>
-        <div class="value small">{{ profile.recommended_guest_arch }}</div>
+        <div class="label">Virtualization</div>
+        <div class="value small">{{ profile.virtualization_mode|default('unknown') }}</div>
       </article>
       <article class="card stat">
         <div class="label">Default network</div>
@@ -52,7 +56,7 @@
           <div><span>Ready</span><strong>{{ 'yes' if profile.ready else 'needs check' }}</strong></div>
         </div>
         <div class="notice top-space">
-          Raspberry Pi и Orange Pi 5 работают как ARM64 edge nodes. Для них правильный путь — ARM64-гости, NAT-сеть и cloud images.
+          На физическом сервере для нормальной скорости нужен KVM: включи Intel VT-x / AMD-V в BIOS/UEFI. Если KVM недоступен, Virtuality может использовать QEMU fallback, но VM будут работать медленно.
         </div>
       </article>
 
@@ -63,12 +67,13 @@
         </div>
         <div class="services">
           {% for check in profile.checks %}
+            {% set level = check.level|default('ok' if check.ok else 'err') %}
             <div class="service-row">
               <span>
                 <strong>{{ check.name }}</strong>
                 <small>{{ check.hint }}</small>
               </span>
-              <span class="status {{ 'ok' if check.ok else 'err' }}">{{ 'OK' if check.ok else 'FAIL' }}</span>
+              <span class="status {{ 'ok' if level == 'ok' else 'warn' if level == 'warn' else 'err' }}">{{ 'OK' if level == 'ok' else 'WARN' if level == 'warn' else 'FAIL' }}</span>
             </div>
           {% endfor %}
         </div>
