@@ -4,10 +4,12 @@ import sys
 
 app_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/opt/virtuality/web/app.py')
 if not app_path.exists():
-    raise SystemExit(f'app.py not found: {app_path}')
+    print(f'WARN: app.py not found: {app_path}')
+    raise SystemExit(0)
 
 text = app_path.read_text()
 changed = []
+warnings = []
 
 old_progress = '''def progress_from_line(current: int, line: str) -> int:
     low = line.lower()
@@ -23,10 +25,10 @@ old_progress = '''def progress_from_line(current: int, line: str) -> int:
 '''
 new_progress = '''def progress_from_line(current: int, line: str) -> int:
     low = line.lower()
-    convert_match = re.search(r"\((\d+(?:\.\d+)?)\s*/\s*100%\)", line)
+    convert_match = re.search(r"\\((\\d+(?:\\.\\d+)?)\\s*/\\s*100%\\)", line)
     if convert_match:
         return max(1, min(99, int(float(convert_match.group(1)))))
-    percent_match = re.search(r"(\d+(?:\.\d+)?)%", line)
+    percent_match = re.search(r"(\\d+(?:\\.\\d+)?)%", line)
     if "qemu-img" in low and percent_match:
         return max(1, min(99, int(float(percent_match.group(1)))))
     if "allocating" in low or "creating storage" in low:
@@ -45,7 +47,7 @@ if old_progress in text:
 elif 'convert_match = re.search' in text:
     changed.append('qemu-img percent parser already present')
 else:
-    raise SystemExit('progress_from_line marker not found')
+    warnings.append('progress_from_line marker not found, progress parser skipped')
 
 helpers = r'''
 
@@ -84,10 +86,11 @@ def start_disk_image_convert_operation(source_path: Path, target_path: Path, sou
 '''
 if 'def start_disk_image_convert_operation(' not in text:
     marker = '\n\ndef valid_vm_name(name: str) -> bool:'
-    if marker not in text:
-        raise SystemExit('valid_vm_name marker not found')
-    text = text.replace(marker, helpers + marker, 1)
-    changed.append('disk conversion operation helpers added')
+    if marker in text:
+        text = text.replace(marker, helpers + marker, 1)
+        changed.append('disk conversion operation helpers added')
+    else:
+        warnings.append('valid_vm_name marker not found, conversion helpers skipped')
 else:
     changed.append('disk conversion operation helpers already present')
 
@@ -154,12 +157,15 @@ def disk_image_upload(request: Request, image_file: UploadFile = File(...)):
 if old_upload in text:
     text = text.replace(old_upload, new_upload, 1)
     changed.append('disk upload returns JSON and starts conversion operation')
-elif 'mode": "converting"' in text and 'start_disk_image_convert_operation' in text:
+elif 'mode": "converting"' in text and ('start_disk_image_convert_operation' in text or 'start_disk_convert_operation' in text):
     changed.append('disk upload conversion already present')
 else:
-    raise SystemExit('disk_image_upload marker not found')
+    warnings.append('disk_image_upload marker not found, upload conversion patch skipped')
 
 app_path.write_text(text)
-print('disk convert progress patch applied:')
+print('disk convert progress patch completed:')
 for item in changed:
     print(f'- {item}')
+for item in warnings:
+    print(f'WARN: {item}')
+raise SystemExit(0)
