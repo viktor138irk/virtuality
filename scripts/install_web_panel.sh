@@ -197,6 +197,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_network_nat_errors.py" ]]; then
 else
   warn "patch_network_nat_errors.py не найден, безопасные ошибки NAT пропущены"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_logs_center.py" ]]; then
+  run_logged "logs center patch применён" python3 "${REPO_DIR}/scripts/patch_logs_center.py" "${APP_DIR}/app.py"
+else
+  warn "patch_logs_center.py не найден, центр журналов пропущен"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_vm_network_guard.py" ]]; then
   run_logged "VM network guard patch применён" python3 "${REPO_DIR}/scripts/patch_vm_network_guard.py" "${APP_DIR}/app.py"
 else
@@ -357,5 +362,5 @@ echo -e "${BOLD}Logs:${RESET}       journalctl -u virtuality-web -f"
 echo -e "${BOLD}Install log:${RESET} ${LOG_FILE}"
 echo
 line
-echo -e "${DIM}Следующий шаг: /host, /network, /update, /vm/create, /vm/NAME/console.${RESET}"
+echo -e "${DIM}Следующий шаг: /host, /network, /logs, /update, /vm/create, /vm/NAME/console.${RESET}"
 line
