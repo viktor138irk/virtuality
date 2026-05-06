@@ -167,6 +167,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_network_ranges.py" ]]; then
 else
   warn "patch_network_ranges.py не найден, поддержка диапазонов портов пропущена"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_network_nat_errors.py" ]]; then
+  run_logged "network NAT error patch применён" python3 "${REPO_DIR}/scripts/patch_network_nat_errors.py" "${APP_DIR}/app.py"
+else
+  warn "patch_network_nat_errors.py не найден, безопасные ошибки NAT пропущены"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_vm_network_guard.py" ]]; then
   run_logged "VM network guard patch применён" python3 "${REPO_DIR}/scripts/patch_vm_network_guard.py" "${APP_DIR}/app.py"
 else
