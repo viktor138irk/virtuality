@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <div class="brand">Диски</div>
-        <div class="muted">Готовые образы установленных систем: .img / .raw / .qcow2, а также архивы .zip / .tar.gz / .tgz</div>
+        <div class="muted">Готовые образы установленных систем: .img / .raw / .qcow2 / .img.xz, а также архивы .zip / .tar.gz / .tgz</div>
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
@@ -30,14 +30,15 @@
       <article class="card">
         <div class="card-head">
           <h2>Загрузить образ установленной системы</h2>
-          <span class="pill">.img .raw .qcow2 .zip .tar.gz</span>
+          <span class="pill">.img .raw .qcow2 .img.xz .zip .tar.gz</span>
         </div>
         <form id="disk-upload-form" method="post" action="/disk-images/upload" enctype="multipart/form-data" class="form-grid">
           <label class="upload-box">
             <span>Выбери файл готового диска или архив с диском</span>
-            <input id="disk-file-input" type="file" name="image_file" accept=".img,.raw,.qcow2,.zip,.tar.gz,.tgz" required>
+            <input id="disk-file-input" type="file" name="image_file" accept=".img,.raw,.qcow2,.img.xz,.zip,.tar.gz,.tgz" required>
           </label>
-          <div id="disk-file-hint" class="muted small-note">Файл ещё не выбран. Разрешены .img, .raw, .qcow2, .zip, .tar.gz и .tgz.</div>
+          <div id="disk-file-hint" class="muted small-note">Файл ещё не выбран. Разрешены .img, .raw, .qcow2, .img.xz, .zip, .tar.gz и .tgz.</div>
+          <div id="disk-file-error" class="alert danger" hidden></div>
           <div id="upload-progress-wrap" class="upload-progress-wrap" hidden>
             <div class="upload-progress-head">
               <strong id="upload-status">Подготовка…</strong>
@@ -51,7 +52,7 @@
           </div>
           <button id="disk-upload-button" type="submit" class="primary wide">Загрузить образ диска</button>
         </form>
-        <p class="muted small-note">Архив будет распакован автоматически. Virtuality найдёт внутри .img/.raw/.qcow2 и положит их в <b>/var/lib/virtuality/disk-images</b>. После загрузки .img/.raw запускается конвертация в qcow2. Установочные .iso загружаются отдельно в разделе <b>ISO</b>.</p>
+        <p class="muted small-note">Архив или .img.xz будет распакован автоматически. Virtuality найдёт внутри .img/.raw/.qcow2 или распакует .img.xz и положит результат в <b>/var/lib/virtuality/disk-images</b>. После загрузки .img/.raw/.img.xz запускается конвертация в qcow2. Установочные .iso загружаются отдельно в разделе <b>ISO</b>.</p>
       </article>
 
       <article class="card">
@@ -62,11 +63,11 @@
         <div class="quick-actions">
           <div class="big-action static">
             <strong>Raspberry / Orange Pi images</strong>
-            <span>Загрузи .img или архив с .img, дождись распаковки/конвертации, затем в “Создать VM” выбери режим “Готовый диск”.</span>
+            <span>Загрузи .img, .img.xz или архив с .img, дождись распаковки/конвертации, затем в “Создать VM” выбери режим “Готовый диск”.</span>
           </div>
           <div class="big-action static">
             <strong>Архивы безопасно распаковываются</strong>
-            <span>Поддерживаются .zip, .tar.gz и .tgz. Из архива берём только .img/.raw/.qcow2.</span>
+            <span>Поддерживаются .zip, .tar.gz, .tgz и .img.xz. Из обычных архивов берём только .img/.raw/.qcow2.</span>
           </div>
         </div>
         <pre>qemu-img convert -p -f raw -O qcow2 source.img source.qcow2</pre>
@@ -97,7 +98,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="5" class="muted">Образов пока нет. Загрузи .img, .raw, .qcow2 или архив .zip/.tar.gz/.tgz.</td></tr>
+          <tr><td colspan="5" class="muted">Образов пока нет. Загрузи .img, .raw, .qcow2, .img.xz или архив .zip/.tar.gz/.tgz.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -109,13 +110,14 @@
     const fileInput = document.getElementById('disk-file-input');
     const button = document.getElementById('disk-upload-button');
     const hint = document.getElementById('disk-file-hint');
+    const errorBox = document.getElementById('disk-file-error');
     const box = document.getElementById('upload-progress-wrap');
     const bar = document.getElementById('upload-progress-bar');
     const percent = document.getElementById('upload-percent');
     const statusLine = document.getElementById('upload-status');
     const loadedLine = document.getElementById('upload-loaded');
     const speedLine = document.getElementById('upload-speed');
-    const allowedExtensions = ['.img', '.raw', '.qcow2', '.zip', '.tar.gz', '.tgz'];
+    const allowedExtensions = ['.img', '.raw', '.qcow2', '.img.xz', '.zip', '.tar.gz', '.tgz'];
 
     function bytesText(bytes) {
       if (!bytes) return '0 MB';
@@ -130,6 +132,12 @@
       if (!file || !file.name) return false;
       const lower = file.name.toLowerCase();
       return allowedExtensions.some(ext => lower.endsWith(ext));
+    }
+
+    function setFileError(message) {
+      if (!errorBox) return;
+      errorBox.textContent = message || '';
+      errorBox.hidden = !message;
     }
 
     function resetProgress(title, detail) {
@@ -172,23 +180,32 @@
 
     fileInput.addEventListener('change', function () {
       const file = fileInput.files[0];
+      setFileError('');
       if (!file) {
-        hint.textContent = 'Файл ещё не выбран. Разрешены .img, .raw, .qcow2, .zip, .tar.gz и .tgz.';
+        hint.textContent = 'Файл ещё не выбран. Разрешены .img, .raw, .qcow2, .img.xz, .zip, .tar.gz и .tgz.';
+        button.disabled = false;
         return;
       }
       if (!validDiskFile(file)) {
-        hint.textContent = 'Неверный тип файла. Здесь можно выбрать только .img, .raw, .qcow2, .zip, .tar.gz или .tgz.';
+        const message = 'Неверное расширение: ' + file.name + '. Разрешены только .img, .raw, .qcow2, .img.xz, .zip, .tar.gz и .tgz.';
+        hint.textContent = message;
+        setFileError(message);
         fileInput.value = '';
+        button.disabled = true;
         return;
       }
+      button.disabled = false;
       hint.textContent = file.name + ' · ' + bytesText(file.size);
     });
 
     form.addEventListener('submit', function (event) {
       event.preventDefault();
       const file = fileInput.files[0];
+      setFileError('');
       if (!validDiskFile(file)) {
-        hint.textContent = 'Выбери образ установленной системы или архив: .img, .raw, .qcow2, .zip, .tar.gz или .tgz.';
+        const message = 'Выбери образ установленной системы или архив: .img, .raw, .qcow2, .img.xz, .zip, .tar.gz или .tgz.';
+        hint.textContent = message;
+        setFileError(message);
         return;
       }
 
