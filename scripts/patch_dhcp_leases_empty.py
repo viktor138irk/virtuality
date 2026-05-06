@@ -10,6 +10,10 @@ template_path = app_path.parent / 'templates' / 'network.html'
 if not template_path.exists():
     raise SystemExit(f'network.html not found: {template_path}')
 
+dashboard_template_path = app_path.parent / 'templates' / 'dashboard.html'
+if not dashboard_template_path.exists():
+    raise SystemExit(f'dashboard.html not found: {dashboard_template_path}')
+
 text = app_path.read_text()
 changed = []
 
@@ -26,9 +30,10 @@ def parse_dhcp_leases_output(output: str) -> list[dict[str, str]]:
             continue
         leases.append({
             'expiry': ' '.join(parts[0:2]),
-            'mac': parts[2],
+            'mac': parts[2].lower(),
             'protocol': parts[3],
-            'ip': parts[4],
+            'ip': parts[4].split('/')[0],
+            'ip_with_prefix': parts[4],
             'hostname': parts[5] if len(parts) > 5 else '—',
             'client_id': parts[6] if len(parts) > 6 else '—',
         })
@@ -44,6 +49,49 @@ def dhcp_leases_hint(info: dict[str, Any], leases: list[dict[str, str]]) -> str:
     if 'Active: yes' not in info_text:
         return 'NAT-сеть есть, но не активна. Нажми «Создать / починить NAT-сеть» или проверь virsh net-start virtuality-nat.'
     return 'Leases пусты: запусти VM с сетью virtuality-nat, дождись загрузки ОС и DHCP. У статических IP и некоторых готовых образов lease может не появиться.'
+
+
+def vm_mac_addresses(vm_name: str) -> list[str]:
+    result = run_cmd(['virsh', 'domiflist', vm_name], timeout=8)
+    if not result['ok']:
+        return []
+    macs: list[str] = []
+    for line in result['stdout'].splitlines():
+        match = re.search(r'([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}', line)
+        if match:
+            macs.append(match.group(0).lower())
+    return macs
+
+
+def resolve_vm_ip_for_table(vm_name: str) -> str:
+    if not vm_name:
+        return '—'
+    result = run_cmd(['virsh', 'domifaddr', vm_name], timeout=8)
+    if result['ok']:
+        match = re.search(r'\b(\d{1,3}(?:\.\d{1,3}){3})/\d+', result['stdout'])
+        if match:
+            return match.group(1)
+
+    leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
+    if not leases['ok']:
+        return '—'
+    macs = set(vm_mac_addresses(vm_name))
+    for lease in parse_dhcp_leases_output(leases['stdout']):
+        if macs and lease.get('mac', '').lower() not in macs:
+            continue
+        ip = lease.get('ip') or ''
+        if ip:
+            return ip
+    return '—'
+
+
+def enrich_vms_with_ips(vms: list[dict[str, str]]) -> list[dict[str, str]]:
+    enriched: list[dict[str, str]] = []
+    for vm in vms:
+        item = dict(vm)
+        item['ip'] = resolve_vm_ip_for_table(item.get('name', '')) if item.get('name') else '—'
+        enriched.append(item)
+    return enriched
 '''
 
 if 'def parse_dhcp_leases_output(' not in text:
@@ -57,13 +105,64 @@ if 'def parse_dhcp_leases_output(' not in text:
         if marker in text:
             text = text.replace(marker, helpers + marker, 1)
             inserted = True
-            changed.append('DHCP leases parser added')
+            changed.append('DHCP leases and VM IP helpers added')
             break
     if not inserted:
         print('WARN: DHCP helper marker not found, skip helper injection')
         changed.append('DHCP leases parser skipped')
 else:
     changed.append('DHCP leases parser already present')
+    if 'def enrich_vms_with_ips(' not in text:
+        marker = '\n\ndef parse_virsh_list() -> list[dict[str, str]]:'
+        extra_helpers = r'''
+
+def vm_mac_addresses(vm_name: str) -> list[str]:
+    result = run_cmd(['virsh', 'domiflist', vm_name], timeout=8)
+    if not result['ok']:
+        return []
+    macs: list[str] = []
+    for line in result['stdout'].splitlines():
+        match = re.search(r'([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}', line)
+        if match:
+            macs.append(match.group(0).lower())
+    return macs
+
+
+def resolve_vm_ip_for_table(vm_name: str) -> str:
+    if not vm_name:
+        return '—'
+    result = run_cmd(['virsh', 'domifaddr', vm_name], timeout=8)
+    if result['ok']:
+        match = re.search(r'\b(\d{1,3}(?:\.\d{1,3}){3})/\d+', result['stdout'])
+        if match:
+            return match.group(1)
+    leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
+    if not leases['ok']:
+        return '—'
+    macs = set(vm_mac_addresses(vm_name))
+    for lease in parse_dhcp_leases_output(leases['stdout']):
+        if macs and lease.get('mac', '').lower() not in macs:
+            continue
+        ip = lease.get('ip') or ''
+        if ip:
+            return ip
+    return '—'
+
+
+def enrich_vms_with_ips(vms: list[dict[str, str]]) -> list[dict[str, str]]:
+    enriched: list[dict[str, str]] = []
+    for vm in vms:
+        item = dict(vm)
+        item['ip'] = resolve_vm_ip_for_table(item.get('name', '')) if item.get('name') else '—'
+        enriched.append(item)
+    return enriched
+'''
+        if marker in text:
+            text = text.replace(marker, extra_helpers + marker, 1)
+            changed.append('VM IP helpers added')
+        else:
+            print('WARN: parse_virsh_list marker not found, skip VM IP helpers')
+            changed.append('VM IP helpers skipped')
 
 old_info = '''def libvirt_network_info() -> dict[str, Any]:
     info = run_cmd(['virsh', 'net-info', NETWORK_NAME], timeout=8)
@@ -108,6 +207,19 @@ elif "'lease_rows':" in text:
 else:
     print('WARN: libvirt_network_info marker not found, skip function rewrite')
     changed.append('libvirt network info rewrite skipped')
+
+# Add IP enrichment directly into parse_virsh_list return path.
+if "return enrich_vms_with_ips(rows)" not in text:
+    old_return = "    return rows\n\n\ndef parse_pool_list() -> list[dict[str, str]]:"
+    new_return = "    return enrich_vms_with_ips(rows) if 'enrich_vms_with_ips' in globals() else rows\n\n\ndef parse_pool_list() -> list[dict[str, str]]:"
+    if old_return in text:
+        text = text.replace(old_return, new_return, 1)
+        changed.append('VM list enriched with IP addresses')
+    else:
+        print('WARN: parse_virsh_list return marker not found, skip VM IP enrichment')
+        changed.append('VM IP enrichment skipped')
+else:
+    changed.append('VM IP enrichment already present')
 
 app_path.write_text(text)
 
@@ -161,6 +273,16 @@ else:
 
 template_path.write_text(html)
 
-print('DHCP leases empty-state patch applied:')
+dashboard_html = dashboard_template_path.read_text()
+if '<th>IP</th>' not in dashboard_html:
+    dashboard_html = dashboard_html.replace('<tr><th>ID</th><th>Name</th><th>State</th><th>Actions</th></tr>', '<tr><th>ID</th><th>Name</th><th>IP</th><th>State</th><th>Actions</th></tr>')
+    dashboard_html = dashboard_html.replace('<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>\n              <td><span', '<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>\n              <td class="strong">{{ vm.ip|default(\'—\') }}</td>\n              <td><span')
+    dashboard_html = dashboard_html.replace('colspan="4" class="muted">Виртуальных машин пока нет', 'colspan="5" class="muted">Виртуальных машин пока нет')
+    changed.append('Dashboard VM IP column added')
+else:
+    changed.append('Dashboard VM IP column already present')
+dashboard_template_path.write_text(dashboard_html)
+
+print('DHCP leases and VM IP patch applied:')
 for item in changed:
     print(f'- {item}')
