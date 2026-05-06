@@ -4,6 +4,8 @@
     refreshTimers: [],
   };
 
+  const fullLoadPages = ['/iso', '/disk-images', '/vm/create'];
+
   function qs(selector, root = document) {
     return root.querySelector(selector);
   }
@@ -18,9 +20,14 @@
     return url.origin === window.location.origin;
   }
 
+  function requiresFullLoad(pathname) {
+    return fullLoadPages.some((path) => pathname === path || pathname.startsWith(path + '/'));
+  }
+
   function isAjaxSafeLink(link) {
     if (!sameOriginLink(link)) return false;
     const url = new URL(link.href, window.location.href);
+    if (requiresFullLoad(url.pathname)) return false;
     if (url.pathname.startsWith('/vm/') && url.pathname.endsWith('/console')) return false;
     if (url.pathname.startsWith('/static/')) return false;
     if (url.pathname.startsWith('/api/')) return false;
@@ -59,6 +66,11 @@
   function swapPage(html, url, push = true) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
+    const targetPath = new URL(url, window.location.href).pathname;
+    if (requiresFullLoad(targetPath)) {
+      window.location.href = url;
+      return;
+    }
     const newMain = qs('.v-main', doc) || qs('.shell', doc);
     const currentMain = qs('.v-main') || qs('.shell');
 
@@ -74,7 +86,7 @@
       currentMain.replaceWith(newMain);
       newMain.classList.add('page-enter');
       setTimeout(() => newMain.classList.remove('page-enter'), 220);
-      activeSidebar(new URL(url, window.location.href).pathname);
+      activeSidebar(targetPath);
       if (push) history.pushState({ ajax: true }, '', url);
       initDynamicPage();
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -82,6 +94,11 @@
   }
 
   async function ajaxNavigate(url, push = true) {
+    const targetPath = new URL(url, window.location.href).pathname;
+    if (requiresFullLoad(targetPath)) {
+      window.location.href = url;
+      return;
+    }
     if (app.loading) return;
     setLoading(true);
     try {
