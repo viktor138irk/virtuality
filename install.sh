@@ -11,6 +11,7 @@ set -euo pipefail
 
 INSTALL_URL="${VIRTUALITY_BOOTSTRAP_URL:-https://raw.githubusercontent.com/viktor138irk/virtuality/main/bootstrap.sh}"
 TMP_FILE="/tmp/virtuality-install-$$.sh"
+DOWNLOAD_LOG="/tmp/virtuality-install-download-$$.log"
 
 ESC="\033"
 RESET="${ESC}[0m"
@@ -21,12 +22,37 @@ CYAN="${ESC}[36m"
 GRAY="${ESC}[90m"
 
 cleanup() {
-  rm -f "$TMP_FILE" 2>/dev/null || true
+  rm -f "$TMP_FILE" "$DOWNLOAD_LOG" 2>/dev/null || true
 }
 trap cleanup EXIT
 
 ok() { echo -e "${GREEN}✓${RESET} $*"; }
 fail() { echo -e "${RED}✗${RESET} $*"; exit 1; }
+
+run_with_pulse() {
+  local text="$1"
+  shift
+  local pid code start_ts elapsed i symbol
+  local spinner=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+
+  "$@" >"$DOWNLOAD_LOG" 2>&1 &
+  pid=$!
+  start_ts="$(date +%s)"
+  i=0
+
+  while kill -0 "$pid" 2>/dev/null; do
+    elapsed=$(( $(date +%s) - start_ts ))
+    symbol="${spinner[$((i % ${#spinner[@]}))]}"
+    printf "\r  ${CYAN}%s${RESET} %s... ${GRAY}%ss${RESET} ${GRAY}(%s)${RESET}" "$symbol" "$text" "$elapsed" "$INSTALL_URL"
+    sleep 1
+    i=$((i + 1))
+  done
+
+  wait "$pid"
+  code=$?
+  printf "\r%*s\r" 140 ""
+  return "$code"
+}
 
 cat <<EOF
 ${CYAN}${BOLD}Virtuality installer${RESET}
@@ -37,9 +63,19 @@ echo
 
 echo "[1/3] Загружаем основной установщик..."
 if command -v curl >/dev/null 2>&1; then
-  curl -fL --show-error "$INSTALL_URL" -o "$TMP_FILE" || fail "Не удалось скачать bootstrap. Проверь, что репозиторий публичный и URL доступен."
+  if run_with_pulse "Скачиваем bootstrap" curl -fL --show-error "$INSTALL_URL" -o "$TMP_FILE"; then
+    ok "Установщик скачан: $TMP_FILE"
+  else
+    cat "$DOWNLOAD_LOG" 2>/dev/null || true
+    fail "Не удалось скачать bootstrap. Проверь, что репозиторий публичный и URL доступен."
+  fi
 elif command -v wget >/dev/null 2>&1; then
-  wget -O "$TMP_FILE" "$INSTALL_URL" || fail "Не удалось скачать bootstrap. Проверь, что репозиторий публичный и URL доступен."
+  if run_with_pulse "Скачиваем bootstrap" wget -O "$TMP_FILE" "$INSTALL_URL"; then
+    ok "Установщик скачан: $TMP_FILE"
+  else
+    cat "$DOWNLOAD_LOG" 2>/dev/null || true
+    fail "Не удалось скачать bootstrap. Проверь, что репозиторий публичный и URL доступен."
+  fi
 else
   fail "Нужен curl или wget для загрузки установщика Virtuality."
 fi
@@ -49,7 +85,6 @@ if [[ ! -s "$TMP_FILE" ]]; then
 fi
 
 chmod +x "$TMP_FILE"
-ok "Установщик скачан: $TMP_FILE"
 
 echo
 echo "[2/3] Проверяем режим запуска..."
