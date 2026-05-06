@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.8.10",
+      "date": "2026-05-07",
+      "title": "Фикс Python re.subn в DHCP leases patch",
+      "summary": "Ошибка replacement в patch_dhcp_leases_empty.py была исправлена: замена блока parse_virsh_list теперь выполняется через lambda и не ломается на регулярных выражениях.",
+      "features": [
+        "Ошибка replacement в patch_dhcp_leases_empty.py была исправлена",
+        "Замена parse_virsh_list теперь выполняется через lambda replacement",
+        "Установщик больше не должен останавливаться на DHCP leases empty-state patch из-за re.subn",
+        "Версия обновлена до 0.8.10"
+      ]
+    },
+    {
       "version": "0.8.9",
       "date": "2026-05-07",
       "title": "Hotfix установки DHCP leases patch",
