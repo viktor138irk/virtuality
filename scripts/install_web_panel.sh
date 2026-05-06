@@ -166,6 +166,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_upload_compat.py" ]]; then
 else
   warn "patch_upload_compat.py не найден, совместимость загрузки файлов пропущена"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_dhcp_leases_empty.py" ]]; then
+  run_logged "DHCP leases empty-state patch применён" python3 "${REPO_DIR}/scripts/patch_dhcp_leases_empty.py" "${APP_DIR}/app.py"
+else
+  warn "patch_dhcp_leases_empty.py не найден, диагностика DHCP leases пропущена"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_network_diagnostics.py" ]]; then
   run_logged "network diagnostics patch применён" python3 "${REPO_DIR}/scripts/patch_network_diagnostics.py" "${APP_DIR}/app.py"
 else
