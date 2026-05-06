@@ -192,20 +192,80 @@ boot_card = r'''
       <article class="card">
         <div class="card-head">
           <h2>Порядок загрузки</h2>
-          <span class="pill">boot order</span>
+          <span class="pill">drag boot</span>
         </div>
-        <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid">
-          <label>
-            <span>Порядок загрузки VM</span>
-            <select name="boot_order" required>
-              {% for boot in boot_options %}
-                <option value="{{ boot.value }}" {% if current_boot_order == boot.value %}selected{% endif %}>{{ boot.label }}</option>
-              {% endfor %}
-            </select>
-          </label>
+        <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid boot-order-form">
+          <input type="hidden" name="boot_order" id="boot-order-value" value="{{ current_boot_order }}">
+          <div class="boot-order-list" id="boot-order-list" data-current="{{ current_boot_order }}">
+            <div class="boot-order-item" draggable="true" data-device="cdrom">
+              <span class="drag-handle">☰</span>
+              <div><b>ISO / CD-ROM</b><small>Установщик или rescue-образ</small></div>
+            </div>
+            <div class="boot-order-item" draggable="true" data-device="hd">
+              <span class="drag-handle">☰</span>
+              <div><b>Диск</b><small>Основной qcow2/raw диск VM</small></div>
+            </div>
+            <div class="boot-order-item" draggable="true" data-device="network">
+              <span class="drag-handle">☰</span>
+              <div><b>Сеть / PXE</b><small>Загрузка по сети</small></div>
+            </div>
+          </div>
           <button class="primary wide" type="submit">Применить порядок загрузки</button>
         </form>
-        <p class="muted small-note">Чтобы загрузиться с ISO, выбери “Сначала ISO/CD-ROM, потом диск”. Если VM запущена, новый порядок сработает после перезапуска.</p>
+        <p class="muted small-note">Перетащи нужный источник выше. Для загрузки с ISO поставь ISO / CD-ROM первым. Изменение сработает после перезапуска VM.</p>
+        <script>
+          (function(){
+            const list = document.getElementById('boot-order-list');
+            const input = document.getElementById('boot-order-value');
+            if (!list || !input) return;
+            const initialMap = {
+              'cdrom_disk': ['cdrom', 'hd', 'network'],
+              'disk_cdrom': ['hd', 'cdrom', 'network'],
+              'network_disk': ['network', 'hd', 'cdrom'],
+              'disk': ['hd', 'cdrom', 'network'],
+              'auto': ['hd', 'cdrom', 'network']
+            };
+            const order = initialMap[list.dataset.current || 'auto'] || initialMap.auto;
+            const nodes = Array.from(list.querySelectorAll('.boot-order-item'));
+            order.forEach(device => {
+              const node = nodes.find(item => item.dataset.device === device);
+              if (node) list.appendChild(node);
+            });
+            function updateValue(){
+              const devices = Array.from(list.querySelectorAll('.boot-order-item')).map(item => item.dataset.device);
+              const first = devices[0];
+              const second = devices[1];
+              if (first === 'cdrom' && second === 'hd') input.value = 'cdrom_disk';
+              else if (first === 'hd' && second === 'cdrom') input.value = 'disk_cdrom';
+              else if (first === 'network' && second === 'hd') input.value = 'network_disk';
+              else if (first === 'hd') input.value = 'disk';
+              else input.value = 'auto';
+            }
+            let dragged = null;
+            list.addEventListener('dragstart', event => {
+              dragged = event.target.closest('.boot-order-item');
+              if (!dragged) return;
+              dragged.classList.add('dragging');
+              event.dataTransfer.effectAllowed = 'move';
+            });
+            list.addEventListener('dragend', () => {
+              if (dragged) dragged.classList.remove('dragging');
+              dragged = null;
+              updateValue();
+            });
+            list.addEventListener('dragover', event => {
+              event.preventDefault();
+              const after = Array.from(list.querySelectorAll('.boot-order-item:not(.dragging)')).find(item => {
+                const box = item.getBoundingClientRect();
+                return event.clientY < box.top + box.height / 2;
+              });
+              if (!dragged) return;
+              if (after) list.insertBefore(dragged, after);
+              else list.appendChild(dragged);
+            });
+            updateValue();
+          })();
+        </script>
       </article>
 '''
 
@@ -213,7 +273,6 @@ if template_path.exists():
     tpl = template_path.read_text()
     original = tpl
 
-    # Normalize legacy separate cards into one two-column settings grid.
     legacy_boot = r'''
     <section class="card">
       <div class="card-head">
@@ -271,7 +330,13 @@ if template_path.exists():
 ''' + iso_card + boot_card + r'''    </section>
 '''
 
-    if 'vm-boot-iso-grid' not in tpl:
+    if 'vm-boot-iso-grid' in tpl:
+        start = tpl.find('    <section class="grid two vm-boot-iso-grid">')
+        end = tpl.find('\n\n    <section class="grid two">', start + 1)
+        if start != -1 and end != -1:
+            tpl = tpl[:start] + settings_grid.strip('\n') + tpl[end:]
+            changed.append('boot order grid replaced with draggable version')
+    else:
         if legacy_boot in tpl or legacy_iso in tpl:
             tpl = tpl.replace(legacy_boot, '')
             tpl = tpl.replace(legacy_iso, '')
@@ -279,13 +344,13 @@ if template_path.exists():
             if marker not in tpl:
                 raise SystemExit('vm detail grid marker not found')
             tpl = tpl.replace(marker, settings_grid + marker, 1)
-            changed.append('ISO and boot order cards moved into two-column grid')
+            changed.append('ISO and boot order cards moved into draggable two-column grid')
         elif 'action="/vm/{{ vm.name }}/iso/mount"' not in tpl:
             marker = '\n\n    <section class="grid two">'
             if marker not in tpl:
                 raise SystemExit('vm detail grid marker not found')
             tpl = tpl.replace(marker, settings_grid + marker, 1)
-            changed.append('ISO and boot order two-column grid added')
+            changed.append('ISO and boot order draggable two-column grid added')
 
     if tpl != original:
         template_path.write_text(tpl)
