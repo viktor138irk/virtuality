@@ -187,6 +187,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_boot_order.py" ]]; then
 else
   warn "patch_existing_vm_boot_order.py не найден, порядок загрузки существующих VM пропущен"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_resources.py" ]]; then
+  run_logged "existing VM resources patch применён" python3 "${REPO_DIR}/scripts/patch_existing_vm_resources.py" "${APP_DIR}/app.py"
+else
+  warn "patch_existing_vm_resources.py не найден, ресурсы существующих VM пропущены"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_iso_mount.py" ]]; then
   run_logged "existing VM ISO mount patch применён" python3 "${REPO_DIR}/scripts/patch_existing_vm_iso_mount.py" "${APP_DIR}/app.py"
 else
