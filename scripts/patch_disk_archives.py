@@ -10,8 +10,11 @@ text = app_path.read_text()
 changed = []
 
 if 'import zipfile' not in text:
-    text = text.replace('import uuid\n', 'import uuid\nimport tarfile\nimport zipfile\n', 1)
+    text = text.replace('import uuid\n', 'import uuid\nimport lzma\nimport tarfile\nimport zipfile\n', 1)
     changed.append('archive imports added')
+elif 'import lzma' not in text:
+    text = text.replace('import tarfile\n', 'import lzma\nimport tarfile\n', 1) if 'import tarfile\n' in text else text.replace('import zipfile\n', 'import lzma\nimport zipfile\n', 1)
+    changed.append('lzma import added')
 else:
     changed.append('archive imports already present')
 
@@ -23,13 +26,16 @@ def safe_disk_upload_filename(filename: str) -> str | None:
     if lower.endswith(".tar.gz"):
         suffix = ".tar.gz"
         stem = original[:-7]
+    elif lower.endswith(".img.xz"):
+        suffix = ".img.xz"
+        stem = original[:-7]
     elif lower.endswith(".tgz"):
         suffix = ".tgz"
         stem = original[:-4]
     else:
         suffix = Path(original).suffix.lower()
         stem = Path(original).stem
-    if suffix not in (".img", ".raw", ".qcow2", ".zip", ".tar.gz", ".tgz"):
+    if suffix not in (".img", ".raw", ".qcow2", ".img.xz", ".zip", ".tar.gz", ".tgz"):
         return None
     stem = re.sub(r"\s+", "-", stem.strip())
     stem = re.sub(r"[^a-zA-Z0-9_.-]", "_", stem)
@@ -44,9 +50,13 @@ def disk_upload_is_archive(name: str) -> bool:
     return lower.endswith((".zip", ".tar.gz", ".tgz"))
 
 
+def disk_upload_is_xz_image(name: str) -> bool:
+    return str(name or "").lower().endswith(".img.xz")
+
+
 def disk_upload_is_image(name: str) -> bool:
     lower = str(name or "").lower()
-    return lower.endswith((".img", ".raw", ".qcow2"))
+    return lower.endswith((".img", ".raw", ".qcow2", ".img.xz"))
 
 
 def archive_member_is_safe(name: str) -> bool:
@@ -128,6 +138,21 @@ def extract_disk_archive(archive_path: Path) -> list[Path]:
                     shutil.copyfileobj(src, dst, length=1024 * 1024)
                 extracted.append(target)
     return extracted
+
+
+def extract_xz_disk_image(compressed_path: Path) -> Path:
+    lower = compressed_path.name.lower()
+    if not lower.endswith(".img.xz"):
+        raise ValueError("Поддерживаются только сжатые образы .img.xz")
+    raw_name = compressed_path.name[:-3]
+    target = unique_disk_image_path(raw_name)
+    try:
+        with lzma.open(compressed_path, "rb") as src, target.open("wb") as dst:
+            shutil.copyfileobj(src, dst, length=1024 * 1024)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return target
 
 
 def disk_convert_target_path(source_path: Path) -> Path:
@@ -227,7 +252,10 @@ if 'def safe_disk_upload_filename(' not in text:
     text = text.replace(marker, helpers + marker, 1)
     changed.append('disk archive helpers added')
 else:
-    changed.append('disk archive helpers already present')
+    # Replace the whole helper block so upgrades get .img.xz support too.
+    pattern = r"\n\ndef safe_disk_upload_filename\(filename: str\).*?\n\ndef disk_upload_response\(request: Request, payload: dict\[str, Any\]\):.*?\n    return RedirectResponse\(url=\"/disk-images\", status_code=303\)\n"
+    text, count = re.subn(pattern, helpers, text, count=1, flags=re.S)
+    changed.append('disk archive helpers replaced with img.xz support' if count else 'disk archive helpers already present')
 
 old_route_start = text.find('@app.post("/disk-images/upload"')
 if old_route_start == -1:
@@ -235,7 +263,6 @@ if old_route_start == -1:
 next_route = text.find('\n\n@app.post("/disk-images/{name}/delete")', old_route_start)
 if next_route == -1:
     raise SystemExit('disk image delete route marker not found')
-old_route = text[old_route_start:next_route]
 new_route = r'''@app.post("/disk-images/upload", response_class=HTMLResponse)
 def disk_image_upload(request: Request, image_file: UploadFile = File(...)):
     auth_redirect = require_auth(request)
@@ -243,7 +270,7 @@ def disk_image_upload(request: Request, image_file: UploadFile = File(...)):
         return auth_redirect
     safe_name = safe_disk_upload_filename(image_file.filename or "")
     if not safe_name:
-        return templates.TemplateResponse("disk_images.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "images": list_disk_image_files(), "error": "Можно загружать только .img, .raw, .qcow2, .zip, .tar.gz или .tgz файлы."}, status_code=400)
+        return templates.TemplateResponse("disk_images.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "images": list_disk_image_files(), "error": "Можно загружать только .img, .raw, .qcow2, .img.xz, .zip, .tar.gz или .tgz файлы."}, status_code=400)
     DISK_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     tmp_target = DISK_IMAGES_DIR / f".{safe_name}.uploading"
     saved_paths: list[Path] = []
@@ -252,6 +279,9 @@ def disk_image_upload(request: Request, image_file: UploadFile = File(...)):
             shutil.copyfileobj(image_file.file, out, length=1024 * 1024)
         if disk_upload_is_archive(safe_name):
             saved_paths = extract_disk_archive(tmp_target)
+            tmp_target.unlink(missing_ok=True)
+        elif disk_upload_is_xz_image(safe_name):
+            saved_paths = [extract_xz_disk_image(tmp_target)]
             tmp_target.unlink(missing_ok=True)
         else:
             target = unique_disk_image_path(safe_name)
@@ -280,7 +310,7 @@ def disk_image_upload(request: Request, image_file: UploadFile = File(...)):
     return disk_upload_response(request, payload)
 '''
 text = text[:old_route_start] + new_route + text[next_route:]
-changed.append('disk image upload route supports zip/tar.gz archives')
+changed.append('disk image upload route supports img.xz and archives')
 
 app_path.write_text(text)
 print('disk archive import patch applied:')
