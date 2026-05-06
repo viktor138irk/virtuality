@@ -22,7 +22,7 @@
     </header>
 
     <section class="grid two">
-      <article class="card" id="operation-card" data-operation-id="{{ operation.id }}">
+      <article class="card" id="operation-card" data-operation-id="{{ operation.id }}" data-initial-progress="{{ operation.progress }}">
         <div class="card-head">
           <h2>Состояние</h2>
           <span id="operation-status" class="status {{ operation_css(operation.status) }}">{{ operation.status }}</span>
@@ -76,34 +76,94 @@
       const messageEl = document.getElementById('operation-message');
       const logEl = document.getElementById('operation-log');
 
+      let serverProgress = Number(card.dataset.initialProgress || 0);
+      let visualProgress = serverProgress;
+      let lastServerProgress = serverProgress;
+      let currentStatus = statusEl.textContent.trim() || 'queued';
+      let lastProgressAt = Date.now();
+
       function statusClass(status) {
         if (status === 'success') return 'status ok';
         if (status === 'error') return 'status err';
         return 'status warn';
       }
 
-      async function refreshOperation() {
-        const response = await fetch(`/api/operations/${operationId}`, {cache: 'no-store'});
-        if (!response.ok) return;
-        const payload = await response.json();
-        if (!payload.ok) return;
+      function setProgress(value) {
+        const safeValue = Math.max(0, Math.min(100, Math.round(value)));
+        progressBar.style.width = `${safeValue}%`;
+        progressText.textContent = `${safeValue}%`;
+      }
 
-        const op = payload.operation;
-        statusEl.textContent = op.status;
-        statusEl.className = statusClass(op.status);
-        progressBar.style.width = `${op.progress || 0}%`;
-        progressText.textContent = `${op.progress || 0}%`;
-        messageEl.textContent = op.message || '';
-        logEl.textContent = op.log_tail || '';
-        logEl.scrollTop = logEl.scrollHeight;
+      function interpolateProgress() {
+        if (currentStatus === 'success') {
+          visualProgress = 100;
+          setProgress(100);
+          clearInterval(window.virtualitySmoothProgressTimer);
+          return;
+        }
+        if (currentStatus === 'error') {
+          visualProgress = Math.max(visualProgress, serverProgress || 100);
+          setProgress(visualProgress);
+          clearInterval(window.virtualitySmoothProgressTimer);
+          return;
+        }
+        if (currentStatus !== 'queued' && currentStatus !== 'running') return;
 
-        if (op.status === 'success' || op.status === 'error') {
-          clearInterval(window.virtualityOperationTimer);
+        const ceiling = currentStatus === 'queued' ? 12 : 95;
+        const ageSeconds = Math.max(1, Math.floor((Date.now() - lastProgressAt) / 1000));
+        const baseStep = currentStatus === 'queued' ? 0.35 : 0.75;
+        const slowDown = visualProgress > 80 ? 0.28 : visualProgress > 60 ? 0.45 : 1;
+        const step = Math.min(2.5, baseStep * slowDown * ageSeconds);
+
+        if (visualProgress < ceiling) {
+          visualProgress = Math.min(ceiling, Math.max(visualProgress, serverProgress) + step);
+          setProgress(visualProgress);
         }
       }
 
-      window.virtualityOperationTimer = setInterval(refreshOperation, 1800);
+      async function refreshOperation() {
+        try {
+          const response = await fetch(`/api/operations/${operationId}`, {cache: 'no-store'});
+          if (!response.ok) return;
+          const payload = await response.json();
+          if (!payload.ok) return;
+
+          const op = payload.operation;
+          currentStatus = op.status || currentStatus;
+          serverProgress = Number(op.progress || 0);
+          statusEl.textContent = currentStatus;
+          statusEl.className = statusClass(currentStatus);
+
+          if (serverProgress !== lastServerProgress || currentStatus === 'success' || currentStatus === 'error') {
+            lastProgressAt = Date.now();
+            lastServerProgress = serverProgress;
+          }
+
+          if (currentStatus === 'success') {
+            visualProgress = 100;
+          } else if (currentStatus === 'error') {
+            visualProgress = Math.max(visualProgress, serverProgress);
+          } else {
+            visualProgress = Math.max(visualProgress, serverProgress);
+          }
+
+          setProgress(visualProgress);
+          messageEl.textContent = op.message || '';
+          logEl.textContent = op.log_tail || '';
+          logEl.scrollTop = logEl.scrollHeight;
+
+          if (currentStatus === 'success' || currentStatus === 'error') {
+            clearInterval(window.virtualityOperationTimer);
+          }
+        } catch (error) {
+          messageEl.textContent = 'Ожидаем ответ операции...';
+        }
+      }
+
+      window.virtualityOperationTimer = setInterval(refreshOperation, 1500);
+      window.virtualitySmoothProgressTimer = setInterval(interpolateProgress, 1000);
       refreshOperation();
+      interpolateProgress();
     </script>
   </div>
 </body>
