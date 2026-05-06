@@ -119,12 +119,23 @@ def create_nat_network() -> dict[str, Any]:
     if not autostart['ok']:
         raise NetworkError(autostart['stderr'] or autostart['stdout'] or 'Не удалось включить autostart для NAT-сети')
     enable_ip_forward()
+    disable_rp_filter()
     return libvirt_network_info()
 
 
 def enable_ip_forward() -> None:
     Path('/etc/sysctl.d/99-virtuality-forward.conf').write_text('net.ipv4.ip_forward=1\n')
     run_cmd(['sysctl', '-p', '/etc/sysctl.d/99-virtuality-forward.conf'], timeout=10)
+
+
+def disable_rp_filter() -> None:
+    ext = external_interface()
+    Path('/etc/sysctl.d/98-virtuality-rpfilter.conf').write_text(
+        'net.ipv4.conf.all.rp_filter=0\n'
+        f'net.ipv4.conf.{ext}.rp_filter=0\n'
+        f'net.ipv4.conf.{NAT_BRIDGE}.rp_filter=0\n'
+    )
+    run_cmd(['sysctl', '-p', '/etc/sysctl.d/98-virtuality-rpfilter.conf'], timeout=10)
 
 
 def load_port_forwards() -> list[dict[str, Any]]:
@@ -240,15 +251,80 @@ def render_nft_rules() -> str:
     return '\n'.join(lines) + '\n'
 
 
+def apply_ufw_route_rules(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ext = external_interface()
+    results: list[dict[str, Any]] = []
+    if not run_cmd(['sh', '-lc', 'command -v ufw >/dev/null 2>&1'], timeout=5)['ok']:
+        return results
+    status = run_cmd(['ufw', 'status'], timeout=8)
+    if 'Status: active' not in status['stdout']:
+        return results
+    for item in items:
+        cmd = [
+            'ufw', 'route', 'allow',
+            'in', 'on', ext,
+            'out', 'on', NAT_BRIDGE,
+            'to', item['guest_ip'],
+            'port', str(int(item['guest_port'])),
+            'proto', item['protocol'],
+        ]
+        results.append(run_cmd(cmd, timeout=15))
+        results.append(run_cmd(['ufw', 'allow', f"{int(item['external_port'])}/{item['protocol']}"], timeout=15))
+    run_cmd(['ufw', 'reload'], timeout=20)
+    return results
+
+
+def iptables_rule_exists(cmd: list[str]) -> bool:
+    check_cmd = cmd.copy()
+    if '-I' in check_cmd:
+        check_cmd[check_cmd.index('-I')] = '-C'
+        if check_cmd[check_cmd.index('-C') + 2].isdigit():
+            del check_cmd[check_cmd.index('-C') + 2]
+    return run_cmd(check_cmd, timeout=8)['ok']
+
+
+def ensure_iptables_rule(cmd: list[str]) -> dict[str, Any]:
+    if iptables_rule_exists(cmd):
+        return {'ok': True, 'code': 0, 'stdout': 'exists', 'stderr': '', 'cmd': ' '.join(cmd)}
+    return run_cmd(cmd, timeout=10)
+
+
+def apply_iptables_fallback(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ext = external_interface()
+    results: list[dict[str, Any]] = []
+    if not run_cmd(['sh', '-lc', 'command -v iptables >/dev/null 2>&1'], timeout=5)['ok']:
+        return results
+    for item in items:
+        proto = item['protocol']
+        guest_ip = item['guest_ip']
+        external_port = str(int(item['external_port']))
+        guest_port = str(int(item['guest_port']))
+        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', ext, '-o', NAT_BRIDGE, '-p', proto, '-d', guest_ip, '--dport', guest_port, '-j', 'ACCEPT']))
+        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', NAT_BRIDGE, '-o', ext, '-s', guest_ip, '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', '-j', 'ACCEPT']))
+        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', ext, '-p', proto, '--dport', external_port, '-j', 'DNAT', '--to-destination', f'{guest_ip}:{guest_port}']))
+    results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-s', NAT_SUBNET, '-o', ext, '-j', 'MASQUERADE']))
+    return results
+
+
 def apply_port_forwards() -> dict[str, Any]:
     ensure_dirs()
     enable_ip_forward()
+    disable_rp_filter()
+    items = load_port_forwards()
     NFT_FILE.write_text(render_nft_rules())
     run_cmd(['nft', 'delete', 'table', 'ip', 'virtuality'], timeout=8)
     result = run_cmd(['nft', '-f', str(NFT_FILE)], timeout=15)
     if not result['ok']:
         raise NetworkError(result['stderr'] or result['stdout'] or 'Не удалось применить nftables-правила')
-    return {'ok': True, 'file': str(NFT_FILE), 'rules': render_nft_rules()}
+    ufw_results = apply_ufw_route_rules(items)
+    iptables_results = apply_iptables_fallback(items)
+    return {
+        'ok': True,
+        'file': str(NFT_FILE),
+        'rules': render_nft_rules(),
+        'ufw': ufw_results,
+        'iptables': iptables_results,
+    }
 
 
 def network_context() -> dict[str, Any]:
