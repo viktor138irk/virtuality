@@ -197,6 +197,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_iso_mount.py" ]]; then
 else
   warn "patch_existing_vm_iso_mount.py не найден, монтирование ISO в VM пропущено"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_vm_detail_resource_layout.py" ]]; then
+  run_logged "VM detail resource layout patch применён" python3 "${REPO_DIR}/scripts/patch_vm_detail_resource_layout.py" "${APP_DIR}/app.py"
+else
+  warn "patch_vm_detail_resource_layout.py не найден, раскладка ресурсов VM пропущена"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_disk_archives.py" ]]; then
   run_logged "disk archive import patch применён" python3 "${REPO_DIR}/scripts/patch_disk_archives.py" "${APP_DIR}/app.py"
 else
