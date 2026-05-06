@@ -8,6 +8,8 @@
 </head>
 <body>
   <div class="shell">
+    {% set is_running = 'running' in vm.dominfo|lower %}
+    {% set is_autostart = 'enable' in vm.autostart|lower %}
     <header class="topbar">
       <div>
         <div class="brand">{{ vm.name }}</div>
@@ -15,6 +17,7 @@
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
+        <span class="status {{ 'ok' if is_running else 'err' }}">{{ 'running' if is_running else 'shut off' }}</span>
         <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Консоль ↗</a>
         <a class="link-pill" href="/">← Дашборд</a>
         <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
@@ -24,16 +27,46 @@
     <section class="card">
       <div class="card-head">
         <h2>Управление</h2>
-        <span class="pill">virsh actions</span>
+        <span class="pill">compact actions</span>
       </div>
-      <div class="actions big-actions">
-        <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Открыть консоль ↗</a>
-        <form method="post" action="/vm/{{ vm.name }}/start"><button>Start</button></form>
-        <form method="post" action="/vm/{{ vm.name }}/shutdown"><button>Shutdown</button></form>
-        <form method="post" action="/vm/{{ vm.name }}/reboot"><button>Reboot</button></form>
-        <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="danger">Power off</button></form>
-        <form method="post" action="/vm/{{ vm.name }}/autostart"><button>Autostart on</button></form>
-        <form method="post" action="/vm/{{ vm.name }}/autostart-disable"><button>Autostart off</button></form>
+      <div class="vm-control-panel">
+        <div>
+          <div class="label">Основные действия</div>
+          <div class="vm-actions compact-actions big-actions">
+            <a class="icon-action accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener" title="Открыть консоль"><span>▣</span><em>Консоль</em></a>
+            {% if is_running %}
+              <form method="post" action="/vm/{{ vm.name }}/reboot"><button class="icon-action" title="Перезагрузить"><span>↻</span><em>Reboot</em></button></form>
+              <form method="post" action="/vm/{{ vm.name }}/shutdown"><button class="icon-action" title="Мягко выключить"><span>⏻</span><em>Shutdown</em></button></form>
+            {% else %}
+              <form method="post" action="/vm/{{ vm.name }}/start"><button class="icon-action success" title="Запустить"><span>▶</span><em>Start</em></button></form>
+            {% endif %}
+          </div>
+        </div>
+        <div>
+          <div class="label">Автозапуск</div>
+          <div class="vm-actions compact-actions big-actions">
+            {% if is_autostart %}
+              <form method="post" action="/vm/{{ vm.name }}/autostart-disable"><button class="icon-action" title="Отключить автозапуск"><span>○</span><em>Auto off</em></button></form>
+              <span class="status ok">enabled</span>
+            {% else %}
+              <form method="post" action="/vm/{{ vm.name }}/autostart"><button class="icon-action success" title="Включить автозапуск"><span>●</span><em>Auto on</em></button></form>
+              <span class="status warn">disabled</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="danger-zone-inline">
+          <div class="label">Опасные действия</div>
+          <div class="vm-actions compact-actions big-actions">
+            {% if is_running %}
+              <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="icon-action danger" title="Принудительно выключить"><span>⚡</span><em>Power off</em></button></form>
+            {% endif %}
+            {% if not is_running %}
+              <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');"><button class="icon-action danger" title="Удалить VM вместе с дисками"><span>🗑</span><em>Delete</em></button></form>
+            {% else %}
+              <span class="muted small-note">Удаление доступно после выключения VM.</span>
+            {% endif %}
+          </div>
+        </div>
       </div>
     </section>
 
@@ -76,17 +109,6 @@
         </div>
         <pre>{{ vm.interfaces }}</pre>
       </article>
-    </section>
-
-    <section class="card danger-zone">
-      <div class="card-head">
-        <h2>Опасная зона</h2>
-        <span class="pill">delete VM</span>
-      </div>
-      <p class="muted">Удаление остановит VM, удалит определение libvirt и попытается удалить все привязанные storage-диски. Это действие необратимо.</p>
-      <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');">
-        <button class="danger">Удалить VM вместе с дисками</button>
-      </form>
     </section>
   </div>
 </body>
