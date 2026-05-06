@@ -68,7 +68,7 @@
           <span class="pill">virsh net-dhcp-leases</span>
         </div>
         <pre>{{ ctx.nat.leases }}</pre>
-        <div class="notice top-space">IP для проброса теперь определяется автоматически: сначала через qemu-guest-agent, затем по DHCP leases и MAC-адресу VM.</div>
+        <div class="notice top-space">IP для проброса определяется автоматически: сначала через qemu-guest-agent, затем по DHCP leases и MAC-адресу VM.</div>
       </article>
     </section>
 
@@ -88,17 +88,15 @@
             </select>
           </label>
           <input type="hidden" name="guest_ip" value="auto">
-          <div class="notice">
-            Внутренний IP VM будет подставлен автоматически. VM должна быть запущена и получить адрес в NAT-сети.
-          </div>
+          <div class="notice">Внутренний IP VM будет подставлен автоматически. VM должна быть запущена и получить адрес в NAT-сети.</div>
           <div class="form-row">
             <label>
               <span>Внешний порт сервера</span>
-              <input type="number" name="external_port" min="1" max="65535" placeholder="2222" required>
+              <input type="number" name="external_port" min="1" max="65535" placeholder="80" required>
             </label>
             <label>
               <span>Порт внутри VM</span>
-              <input type="number" name="guest_port" min="1" max="65535" placeholder="22" required>
+              <input type="number" name="guest_port" min="1" max="65535" placeholder="80" required>
             </label>
           </div>
           <div class="form-row">
@@ -111,7 +109,7 @@
             </label>
             <label>
               <span>Заметка</span>
-              <input type="text" name="note" placeholder="SSH / HTTP / RDP">
+              <input type="text" name="note" placeholder="web / ssh / sip">
             </label>
           </div>
           <button class="primary wide">Добавить и применить</button>
@@ -120,25 +118,76 @@
 
       <article class="card">
         <div class="card-head">
-          <h2>Libvirt networks</h2>
-          <span class="pill">virsh net-list --all</span>
+          <h2>Диагностика публичного доступа</h2>
+          <span class="pill">VM → Internet</span>
         </div>
-        <table>
-          <thead><tr><th>Name</th><th>State</th><th>Autostart</th></tr></thead>
-          <tbody>
-          {% for net in ctx.networks %}
-            <tr>
-              <td>{{ net.name }}</td>
-              <td><span class="status {{ 'ok' if net.state == 'active' else 'warn' }}">{{ net.state }}</span></td>
-              <td>{{ net.autostart }}</td>
-            </tr>
-          {% else %}
-            <tr><td colspan="3" class="muted">Libvirt-сети не найдены</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
+        <form method="post" action="/network/diagnose" class="form-grid">
+          <label>
+            <span>Виртуальная машина</span>
+            <select name="vm_name" required>
+              {% for vm in vms %}
+                <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <div class="form-row">
+            <label>
+              <span>Внешний порт</span>
+              <input type="number" name="external_port" min="1" max="65535" value="80" required>
+            </label>
+            <label>
+              <span>Порт внутри VM</span>
+              <input type="number" name="guest_port" min="1" max="65535" value="80" required>
+            </label>
+          </div>
+          <label>
+            <span>Протокол</span>
+            <select name="protocol">
+              <option value="tcp">tcp</option>
+              <option value="udp">udp</option>
+            </select>
+          </label>
+          <button class="primary wide">Проверить доступ</button>
+        </form>
       </article>
     </section>
+
+    {% if diagnostics %}
+    <section class="card">
+      <div class="card-head">
+        <h2>Результат диагностики</h2>
+        <span class="pill">{{ diagnostics.vm_name }} · {{ diagnostics.protocol }} {{ diagnostics.external_port }} → {{ diagnostics.guest_port }}</span>
+      </div>
+      <div class="notice">{{ diagnostics.verdict }}</div>
+      <div class="meta-grid top-space">
+        <div><span>VM IP</span><strong>{{ diagnostics.vm_ip or 'not found' }}</strong></div>
+        <div><span>External interface</span><strong>{{ diagnostics.external_interface }}</strong></div>
+        <div><span>Mapping</span><strong>{{ diagnostics.external_port }} → {{ diagnostics.guest_port }}</strong></div>
+      </div>
+      <table class="top-space">
+        <thead><tr><th>Проверка</th><th>Статус</th><th>Детали</th></tr></thead>
+        <tbody>
+        {% for check in diagnostics.checks %}
+          <tr>
+            <td class="strong">{{ check.name }}</td>
+            <td><span class="status {{ 'ok' if check.ok else 'err' }}">{{ 'OK' if check.ok else 'FAIL' }}</span></td>
+            <td class="muted">{{ check.detail }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div class="grid two top-space">
+        <article>
+          <div class="label">Проверить входящий трафик</div>
+          <pre>{{ diagnostics.commands.watch_external }}</pre>
+        </article>
+        <article>
+          <div class="label">Проверить трафик к VM</div>
+          <pre>{{ diagnostics.commands.watch_internal }}</pre>
+        </article>
+      </div>
+    </section>
+    {% endif %}
 
     <section class="card">
       <div class="card-head">
