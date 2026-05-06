@@ -4,18 +4,22 @@ import re
 import sys
 
 app_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/opt/virtuality/web/app.py')
+changed: list[str] = []
+warnings: list[str] = []
+
 if not app_path.exists():
-    raise SystemExit(f'app.py not found: {app_path}')
+    print(f'WARN: app.py not found: {app_path}')
+    raise SystemExit(0)
 
 dashboard_template_path = app_path.parent / 'templates' / 'dashboard.html'
 if not dashboard_template_path.exists():
-    raise SystemExit(f'dashboard.html not found: {dashboard_template_path}')
+    print(f'WARN: dashboard.html not found: {dashboard_template_path}')
+    raise SystemExit(0)
 
-changed: list[str] = []
 text = app_path.read_text(encoding='utf-8')
 
-# Remove helper blocks injected by older versions of this patch. They were too invasive
-# and could leave stale references on servers that had several hotfixes applied.
+# Older versions of this patch injected helper blocks. Remove them first so repeated
+# installs stay deterministic and do not accumulate stale NETWORK_NAME references.
 text, removed_helpers = re.subn(
     r"\n\ndef parse_dhcp_leases_output\(output: str\).*?\n\ndef parse_virsh_list\(\) -> list\[dict\[str, str\]\]:",
     "\n\ndef parse_virsh_list() -> list[dict[str, str]]:",
@@ -68,35 +72,42 @@ text, replaced = re.subn(
     count=1,
     flags=re.S,
 )
-if not replaced:
-    raise SystemExit('parse_virsh_list block not found')
-changed.append('parse_virsh_list was replaced with a safe inline IP resolver')
+if replaced:
+    changed.append('parse_virsh_list was replaced with a safe inline IP resolver')
+else:
+    warnings.append('parse_virsh_list block not found, app.py IP injection skipped')
 
 app_path.write_text(text, encoding='utf-8')
 
 dashboard_html = dashboard_template_path.read_text(encoding='utf-8')
+
+header_old = '<tr><th>ID</th><th>Name</th><th>State</th><th>Actions</th></tr>'
+header_new = '<tr><th>ID</th><th>Name</th><th>IP</th><th>State</th><th>Actions</th></tr>'
+name_cell = '''<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
+              <td><span'''
+name_ip_cell = '''<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
+              <td class="strong">{{ vm.ip|default("—") }}</td>
+              <td><span'''
+
 if '<th>IP</th>' not in dashboard_html:
-    dashboard_html = dashboard_html.replace(
-        '<tr><th>ID</th><th>Name</th><th>State</th><th>Actions</th></tr>',
-        '<tr><th>ID</th><th>Name</th><th>IP</th><th>State</th><th>Actions</th></tr>'
-    )
-    dashboard_html = dashboard_html.replace(
-        '<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>\n              <td><span',
-        '<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>\n              <td class="strong">{{ vm.ip|default(\'—\') }}</td>\n              <td><span'
-    )
+    dashboard_html = dashboard_html.replace(header_old, header_new)
+    dashboard_html = dashboard_html.replace(name_cell, name_ip_cell)
     dashboard_html = dashboard_html.replace('colspan="4" class="muted">Виртуальных машин пока нет', 'colspan="5" class="muted">Виртуальных машин пока нет')
     changed.append('Dashboard VM IP column was added')
-elif "vm.ip" not in dashboard_html:
-    dashboard_html = dashboard_html.replace(
-        '<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>\n              <td><span',
-        '<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>\n              <td class="strong">{{ vm.ip|default(\'—\') }}</td>\n              <td><span'
-    )
+elif 'vm.ip' not in dashboard_html:
+    dashboard_html = dashboard_html.replace(name_cell, name_ip_cell)
     changed.append('Dashboard VM IP cell was added')
 else:
     changed.append('Dashboard VM IP column was already present')
 
 dashboard_template_path.write_text(dashboard_html, encoding='utf-8')
 
-print('DHCP leases empty-state patch applied safely:')
+print('DHCP leases empty-state patch completed:')
 for item in changed:
     print(f'- {item}')
+for item in warnings:
+    print(f'WARN: {item}')
+
+# This patch must never break the installer. If it cannot find an older marker,
+# the panel can still run without the extra IP column logic.
+raise SystemExit(0)
