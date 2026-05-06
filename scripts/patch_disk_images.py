@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 import sys
 
 app_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/opt/virtuality/web/app.py')
@@ -74,7 +75,6 @@ if 'def list_disk_image_files() -> list[dict[str, str]]:' not in text:
 else:
     changed.append('disk image helpers already present')
 
-# Avoid duplicate bridge_exists if an older patch already added it.
 text = text.replace('\n\ndef bridge_exists(name: str) -> bool:\n    if not name or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", name):\n        return False\n    return run_cmd(["ip", "link", "show", name], timeout=5)["ok"]\n\n\ndef bridge_exists(name: str) -> bool:\n    if not name or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", name):\n        return False\n    return run_cmd(["ip", "link", "show", name], timeout=5)["ok"]\n', '\n\ndef bridge_exists(name: str) -> bool:\n    if not name or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", name):\n        return False\n    return run_cmd(["ip", "link", "show", name], timeout=5)["ok"]\n')
 
 old_context = '"isos": list_iso_files(), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}'
@@ -203,10 +203,11 @@ new_cmd = '''    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
     profile = host_profile.load_host_profile()
     is_arm = profile.get("recommended_guest_arch") == "aarch64"
+    virt_type = "kvm" if profile.get("kvm_device") else "qemu"
     network_arg = f"network={network_core.NETWORK_NAME},model=virtio" if network_mode == "nat" else f"bridge={bridge},model=virtio"
-    cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus)]
+    cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--virt-type", virt_type]
     if is_arm:
-        cmd += ["--arch", "aarch64", "--machine", "virt", "--cpu", "host", "--virt-type", "kvm", "--boot", "uefi"]
+        cmd += ["--arch", "aarch64", "--machine", "virt", "--cpu", "host" if virt_type == "kvm" else "cortex-a57", "--boot", "uefi"]
 
     if source_type == "disk_image":
         source_disk = Path(disk_image_path).resolve()
@@ -219,9 +220,14 @@ new_cmd = '''    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 '''
 if old_cmd in text:
     text = text.replace(old_cmd, new_cmd, 1)
-    changed.append('vm create command supports import from disk image')
+    changed.append('vm create command supports qemu fallback and disk image import')
+elif 'virt_type = "kvm" if profile.get("kvm_device") else "qemu"' in text:
+    changed.append('vm create command already supports qemu fallback')
 elif 'source_type == "disk_image"' in text and 'qemu-img convert' in text:
-    changed.append('vm create command already supports import from disk image')
+    # Upgrade existing disk-image-aware command to qemu fallback in-place.
+    text = text.replace('cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus)]', 'virt_type = "kvm" if profile.get("kvm_device") else "qemu"\n    cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--virt-type", virt_type]', 1)
+    text = text.replace('["--arch", "aarch64", "--machine", "virt", "--cpu", "host", "--virt-type", "kvm", "--boot", "uefi"]', '["--arch", "aarch64", "--machine", "virt", "--cpu", "host" if virt_type == "kvm" else "cortex-a57", "--boot", "uefi"]', 1)
+    changed.append('existing vm create command was upgraded with qemu fallback')
 else:
     raise SystemExit('vm command marker not found')
 
