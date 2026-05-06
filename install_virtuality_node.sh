@@ -15,8 +15,13 @@ BACKUP_DIR="${STORAGE_DIR}/backups"
 LOG_DIR="/var/log/virtuality"
 COCKPIT_PORT="9090"
 LOG_FILE="${LOG_DIR}/install_node_$(date +%Y%m%d_%H%M%S).log"
-TOTAL_STEPS=12
+TOTAL_STEPS=13
 CURRENT_STEP=0
+MIN_ROOT_FREE_MB="${VIRTUALITY_MIN_ROOT_FREE_MB:-8192}"
+MIN_VAR_FREE_MB="${VIRTUALITY_MIN_VAR_FREE_MB:-20480}"
+MIN_RAM_MB="${VIRTUALITY_MIN_RAM_MB:-4096}"
+MIN_CPU_CORES="${VIRTUALITY_MIN_CPU_CORES:-2}"
+SKIP_REQUIREMENTS="${VIRTUALITY_SKIP_REQUIREMENTS:-0}"
 
 ESC="\033"
 RESET="${ESC}[0m"
@@ -72,6 +77,26 @@ run_logged() {
 
 service_state() { systemctl is-active "$1" 2>/dev/null || echo "inactive"; }
 service_enabled() { systemctl is-enabled "$1" 2>/dev/null || echo "disabled"; }
+free_mb_for_path() { local path="$1"; mkdir -p "$path" 2>/dev/null || true; df -Pm "$path" | awk 'NR==2 {print $4}'; }
+
+check_requirements() {
+  step "Проверяем системные требования"
+  if [[ "$SKIP_REQUIREMENTS" == "1" ]]; then
+    warn "Проверка требований отключена через VIRTUALITY_SKIP_REQUIREMENTS=1"
+    return 0
+  fi
+
+  local root_free var_free ram_mb cpu_cores
+  root_free="$(free_mb_for_path /)"
+  var_free="$(free_mb_for_path /var/lib 2>/dev/null || free_mb_for_path /)"
+  ram_mb="$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)"
+  cpu_cores="$(nproc 2>/dev/null || echo 1)"
+
+  (( root_free >= MIN_ROOT_FREE_MB )) && ok "Свободно на /: ${root_free} MB минимум ${MIN_ROOT_FREE_MB} MB" || fail "Недостаточно места на /: ${root_free} MB. Нужно минимум ${MIN_ROOT_FREE_MB} MB"
+  (( var_free >= MIN_VAR_FREE_MB )) && ok "Свободно для /var/lib: ${var_free} MB минимум ${MIN_VAR_FREE_MB} MB" || fail "Недостаточно места для VM-хранилища /var/lib: ${var_free} MB. Нужно минимум ${MIN_VAR_FREE_MB} MB"
+  (( ram_mb >= MIN_RAM_MB )) && ok "RAM: ${ram_mb} MB минимум ${MIN_RAM_MB} MB" || warn "RAM: ${ram_mb} MB меньше рекомендуемых ${MIN_RAM_MB} MB"
+  (( cpu_cores >= MIN_CPU_CORES )) && ok "CPU cores: ${cpu_cores} минимум ${MIN_CPU_CORES}" || warn "CPU cores: ${cpu_cores} меньше рекомендуемых ${MIN_CPU_CORES}"
+}
 
 print_header
 
@@ -92,6 +117,8 @@ if [[ -f /etc/os-release ]]; then
 else
   warn "Не найден /etc/os-release"
 fi
+
+check_requirements
 
 step "Проверяем аппаратную виртуализацию"
 if grep -E -q '(vmx|svm)' /proc/cpuinfo; then
