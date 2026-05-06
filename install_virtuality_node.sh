@@ -151,10 +151,10 @@ fi
 step "Обновляем apt cache"
 run_logged "apt update выполнен" apt update
 
-step "Устанавливаем базовые утилиты"
-run_logged "Базовые пакеты установлены" apt install -y \
-  curl wget git nano htop unzip ca-certificates gnupg lsb-release \
-  software-properties-common apt-transport-https ufw rsync
+step "Устанавливаем базовые утилиты и зависимости диагностики"
+run_logged "Базовые пакеты и диагностические утилиты установлены" apt install -y \
+  curl wget git nano htop btop tree ncdu jq unzip xz-utils tar gzip ca-certificates gnupg lsb-release \
+  software-properties-common apt-transport-https ufw rsync iproute2 iptables nftables dnsutils net-tools openssh-client
 
 step "Устанавливаем KVM/QEMU/libvirt"
 run_logged "Пакеты виртуализации установлены" apt install -y \
