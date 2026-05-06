@@ -69,8 +69,7 @@ def archive_member_is_safe(name: str) -> bool:
 
 
 def archive_member_basename(name: str) -> str | None:
-    safe = safe_disk_image_filename(Path(name).name)
-    return safe
+    return safe_disk_image_filename(Path(name).name)
 
 
 def unique_disk_image_path(name: str) -> Path:
@@ -140,11 +139,11 @@ def extract_disk_archive(archive_path: Path) -> list[Path]:
     return extracted
 
 
-def extract_xz_disk_image(compressed_path: Path) -> Path:
-    lower = compressed_path.name.lower()
-    if not lower.endswith(".img.xz"):
+def extract_xz_disk_image(compressed_path: Path, safe_name: str | None = None) -> Path:
+    source_name = safe_name or compressed_path.name
+    if not source_name.lower().endswith(".img.xz"):
         raise ValueError("Поддерживаются только сжатые образы .img.xz")
-    raw_name = compressed_path.name[:-3]
+    raw_name = source_name[:-3]
     target = unique_disk_image_path(raw_name)
     try:
         with lzma.open(compressed_path, "rb") as src, target.open("wb") as dst:
@@ -252,7 +251,6 @@ if 'def safe_disk_upload_filename(' not in text:
     text = text.replace(marker, helpers + marker, 1)
     changed.append('disk archive helpers added')
 else:
-    # Replace the whole helper block so upgrades get .img.xz support too.
     pattern = r"\n\ndef safe_disk_upload_filename\(filename: str\).*?\n\ndef disk_upload_response\(request: Request, payload: dict\[str, Any\]\):.*?\n    return RedirectResponse\(url=\"/disk-images\", status_code=303\)\n"
     text, count = re.subn(pattern, helpers, text, count=1, flags=re.S)
     changed.append('disk archive helpers replaced with img.xz support' if count else 'disk archive helpers already present')
@@ -281,7 +279,7 @@ def disk_image_upload(request: Request, image_file: UploadFile = File(...)):
             saved_paths = extract_disk_archive(tmp_target)
             tmp_target.unlink(missing_ok=True)
         elif disk_upload_is_xz_image(safe_name):
-            saved_paths = [extract_xz_disk_image(tmp_target)]
+            saved_paths = [extract_xz_disk_image(tmp_target, safe_name)]
             tmp_target.unlink(missing_ok=True)
         else:
             target = unique_disk_image_path(safe_name)
