@@ -9,13 +9,15 @@ WEB_DIR="${REPO_DIR}/web"
 APP_DIR="/opt/virtuality/web"
 VENV_DIR="/opt/virtuality/venv"
 SERVICE_FILE="/etc/systemd/system/virtuality-web.service"
+AUTO_UPDATE_SERVICE_FILE="/etc/systemd/system/virtuality-auto-update.service"
+AUTO_UPDATE_TIMER_FILE="/etc/systemd/system/virtuality-auto-update.timer"
 PORT="${VIRTUALITY_WEB_PORT:-8088}"
 AUTH_USER="${VIRTUALITY_AUTH_USER:-${SUDO_USER:-viktor}}"
 LOG_DIR="/var/log/virtuality"
 LOG_FILE="${LOG_DIR}/install_web_panel_$(date +%Y%m%d_%H%M%S).log"
 PROFILE_DIR="/var/lib/virtuality/config"
 PROFILE_FILE="${PROFILE_DIR}/host_profile.json"
-TOTAL_STEPS=12
+TOTAL_STEPS=13
 CURRENT_STEP=0
 
 ESC="\033"
@@ -235,6 +237,43 @@ EOF
 ok "Создан service: $SERVICE_FILE"
 run_logged "systemd daemon-reload выполнен" systemctl daemon-reload
 
+step "Настраиваем автообновление"
+if [[ -f "${REPO_DIR}/scripts/auto_update_check.sh" ]]; then
+  chmod +x "${REPO_DIR}/scripts/auto_update_check.sh" || true
+  cat > "$AUTO_UPDATE_SERVICE_FILE" <<EOF
+[Unit]
+Description=Virtuality automatic GitHub update check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=VIRTUALITY_SOURCE_DIR=${REPO_DIR}
+ExecStart=/bin/bash ${REPO_DIR}/scripts/auto_update_check.sh
+EOF
+  cat > "$AUTO_UPDATE_TIMER_FILE" <<EOF
+[Unit]
+Description=Run Virtuality automatic update check every 15 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+Unit=virtuality-auto-update.service
+
+[Install]
+WantedBy=timers.target
+EOF
+  run_logged "systemd daemon-reload выполнен для автообновлений" systemctl daemon-reload
+  run_logged "virtuality-auto-update.timer включён" systemctl enable --now virtuality-auto-update.timer
+  ok "Автообновление будет проверять GitHub каждые 15 минут"
+else
+  warn "auto_update_check.sh не найден, автообновление пропущено"
+fi
+
 step "Запускаем Virtuality Web Panel"
 run_logged "virtuality-web.service включён и запущен" systemctl enable --now virtuality-web.service
 sleep 2
@@ -271,6 +310,7 @@ echo -e "${BOLD}Login:${RESET}      ${AUTH_USER} / пароль Linux-польз
 echo -e "${BOLD}Profile:${RESET}    ${LABEL:-$PROFILE}"
 echo -e "${BOLD}Arch:${RESET}       ${ARCH:-unknown}"
 echo -e "${BOLD}Service:${RESET}    virtuality-web.service"
+echo -e "${BOLD}Auto update:${RESET} virtuality-auto-update.timer / каждые 15 минут"
 echo -e "${BOLD}Status:${RESET}     systemctl status virtuality-web --no-pager"
 echo -e "${BOLD}Logs:${RESET}       journalctl -u virtuality-web -f"
 echo -e "${BOLD}Install log:${RESET} ${LOG_FILE}"
