@@ -1,5 +1,6 @@
 import json
 import re
+import socket
 import subprocess
 import uuid
 from pathlib import Path
@@ -187,6 +188,14 @@ def resolve_vm_ip(vm_name: str) -> str | None:
     return None
 
 
+def tcp_connect_check(host: str, port: int, timeout: float = 2.0) -> dict[str, Any]:
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return {'ok': True, 'message': f'{host}:{port} reachable'}
+    except Exception as exc:
+        return {'ok': False, 'message': str(exc)}
+
+
 def add_port_forward(vm_name: str, guest_ip: str, external_port: int, guest_port: int, protocol: str, note: str = '') -> dict[str, Any]:
     if not vm_name or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', vm_name):
         raise NetworkError('Некорректное имя VM')
@@ -324,6 +333,90 @@ def apply_port_forwards() -> dict[str, Any]:
         'rules': render_nft_rules(),
         'ufw': ufw_results,
         'iptables': iptables_results,
+    }
+
+
+def diagnose_public_access(vm_name: str, external_port: int, guest_port: int, protocol: str = 'tcp') -> dict[str, Any]:
+    if not vm_name or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', vm_name):
+        raise NetworkError('Некорректное имя VM')
+    if not valid_port(external_port) or not valid_port(guest_port):
+        raise NetworkError('Порт должен быть от 1 до 65535')
+    if not valid_proto(protocol):
+        raise NetworkError('Протокол должен быть tcp или udp')
+
+    ext = external_interface()
+    vm_ip = resolve_vm_ip(vm_name)
+    forwards = load_port_forwards()
+    matching_forward = next((item for item in forwards if item.get('vm_name') == vm_name and int(item.get('external_port', 0)) == int(external_port) and int(item.get('guest_port', 0)) == int(guest_port) and item.get('protocol') == protocol), None)
+
+    nft_rules = run_cmd(['nft', 'list', 'ruleset'], timeout=12)
+    ipt_forward = run_cmd(['iptables', '-S', 'FORWARD'], timeout=8)
+    ipt_nat = run_cmd(['iptables', '-t', 'nat', '-S'], timeout=8)
+    ufw_status = run_cmd(['ufw', 'status', 'numbered'], timeout=10)
+    domiflist = run_cmd(['virsh', 'domiflist', vm_name], timeout=8)
+    domifaddr = run_cmd(['virsh', 'domifaddr', vm_name], timeout=8)
+    net_info = run_cmd(['virsh', 'net-info', NETWORK_NAME], timeout=8)
+
+    vm_port_check = {'ok': False, 'message': 'VM IP not found'}
+    if vm_ip and protocol == 'tcp':
+        vm_port_check = tcp_connect_check(vm_ip, int(guest_port))
+    elif vm_ip and protocol == 'udp':
+        vm_port_check = {'ok': True, 'message': 'UDP cannot be reliably checked with TCP connect; rules only'}
+
+    nft_text = nft_rules['stdout']
+    ipt_forward_text = ipt_forward['stdout']
+    ipt_nat_text = ipt_nat['stdout']
+    ufw_text = ufw_status['stdout']
+
+    expected_dnat = f'dport {int(external_port)} dnat to {vm_ip}:{int(guest_port)}' if vm_ip else ''
+    nft_has_rule = bool(vm_ip and expected_dnat in nft_text)
+    iptables_has_prerouting = bool(vm_ip and f'--dport {int(external_port)} -j DNAT --to-destination {vm_ip}:{int(guest_port)}' in ipt_nat_text)
+    iptables_has_forward = bool(vm_ip and f'-d {vm_ip}/32' in ipt_forward_text and f'--dport {int(guest_port)}' in ipt_forward_text)
+    ufw_has_route = bool(vm_ip and vm_ip in ufw_text and str(int(guest_port)) in ufw_text)
+
+    checks = [
+        {'name': 'VM exists/interface', 'ok': domiflist['ok'], 'detail': domiflist['stdout'] or domiflist['stderr']},
+        {'name': 'VM IP resolved', 'ok': bool(vm_ip), 'detail': vm_ip or 'not found'},
+        {'name': 'virtuality-nat active', 'ok': net_info['ok'] and 'Active: yes' in net_info['stdout'], 'detail': net_info['stdout'] or net_info['stderr']},
+        {'name': 'ip_forward enabled', 'ok': ip_forward_state() == 'enabled', 'detail': ip_forward_state()},
+        {'name': 'port forward config', 'ok': bool(matching_forward), 'detail': json.dumps(matching_forward, ensure_ascii=False) if matching_forward else 'not found'},
+        {'name': f'VM service {vm_ip}:{guest_port}', 'ok': vm_port_check['ok'], 'detail': vm_port_check['message']},
+        {'name': 'nft DNAT rule', 'ok': nft_has_rule, 'detail': expected_dnat or 'VM IP not found'},
+        {'name': 'iptables DNAT fallback', 'ok': iptables_has_prerouting, 'detail': 'present' if iptables_has_prerouting else 'not found'},
+        {'name': 'iptables FORWARD fallback', 'ok': iptables_has_forward, 'detail': 'present' if iptables_has_forward else 'not found'},
+        {'name': 'UFW route allow', 'ok': ufw_has_route or 'Status: inactive' in ufw_text, 'detail': 'present/inactive' if ufw_has_route or 'Status: inactive' in ufw_text else 'not found'},
+    ]
+
+    if not vm_ip:
+        verdict = 'VM не получила IP. Запусти VM, дождись DHCP или проверь virtuality-nat.'
+    elif not vm_port_check['ok']:
+        verdict = f'VM найдена, но сервис внутри VM не отвечает на {vm_ip}:{guest_port}.'
+    elif not nft_has_rule and not iptables_has_prerouting:
+        verdict = 'Сервис VM отвечает, но DNAT-правило не найдено. Нажми «Применить правила».'
+    elif not iptables_has_forward and not ufw_has_route:
+        verdict = 'DNAT есть, но FORWARD/route-правила выглядят неполными. Нажми «Применить правила».'
+    else:
+        verdict = 'Локальная цепочка Virtuality выглядит готовой. Если снаружи не открывается — проверь входящий трафик tcpdump на внешнем интерфейсе и firewall провайдера.'
+
+    return {
+        'vm_name': vm_name,
+        'vm_ip': vm_ip,
+        'external_interface': ext,
+        'external_port': int(external_port),
+        'guest_port': int(guest_port),
+        'protocol': protocol,
+        'verdict': verdict,
+        'checks': checks,
+        'commands': {
+            'watch_external': f"sudo tcpdump -ni {ext} '{protocol} port {int(external_port)}'",
+            'watch_internal': f"sudo tcpdump -ni {NAT_BRIDGE} 'host {vm_ip or '<VM_IP>'} and {protocol} port {int(guest_port)}'",
+        },
+        'raw': {
+            'domifaddr': domifaddr['stdout'] or domifaddr['stderr'],
+            'ufw': ufw_text,
+            'iptables_forward': ipt_forward_text,
+            'iptables_nat': ipt_nat_text,
+        },
     }
 
 
