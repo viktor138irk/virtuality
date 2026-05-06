@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <div class="brand">Обновления</div>
-        <div class="muted">GitHub update center: проверка, changelog и установка</div>
+        <div class="muted">GitHub update center: автоматический мониторинг, changelog и установка</div>
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
@@ -40,7 +40,7 @@
       </article>
       <article class="card stat">
         <div class="label">Последняя проверка</div>
-        <div class="value small">{{ info.checked_at }}</div>
+        <div class="value small" id="last-check-value">{{ info.checked_at }}</div>
       </article>
     </section>
 
@@ -58,8 +58,10 @@
         {% if not info.fetch_ok %}
           <div class="alert danger top-space">GitHub fetch вернул ошибку: {{ info.fetch_error }}</div>
         {% endif %}
+        <div class="notice top-space">
+          Проверка обновлений выполняется автоматически при открытии страницы и дальше каждые 5 минут. Ручная кнопка убрана — меньше лишних действий, больше порядка.
+        </div>
         <div class="actions top-space">
-          <form method="post" action="/update/check"><button>Проверить сейчас</button></form>
           {% if info.has_update %}
             <form method="post" action="/update/apply" onsubmit="return confirm('Запустить обновление Virtuality из GitHub? Панель перезапустится.');">
               <button class="primary">Установить обновление</button>
@@ -142,6 +144,8 @@
     const finishedBox = document.getElementById('update-finished');
     const logBox = document.getElementById('update-log');
     const logState = document.getElementById('update-log-state');
+    const lastCheckBox = document.getElementById('last-check-value');
+    let autoCheckRunning = false;
 
     function statusClass(status) {
       if (status === 'success') return 'status ok';
@@ -168,8 +172,24 @@
       }
     }
 
+    async function autoCheckUpdates() {
+      if (autoCheckRunning) return;
+      autoCheckRunning = true;
+      try {
+        await fetch('/update/check', {method: 'POST', cache: 'no-store', redirect: 'follow'});
+        const now = new Date().toLocaleString();
+        if (lastCheckBox) lastCheckBox.textContent = now;
+      } catch (error) {
+        if (logState) logState.textContent = 'check error';
+      } finally {
+        autoCheckRunning = false;
+      }
+    }
+
     refreshUpdateStatus();
+    autoCheckUpdates();
     setInterval(refreshUpdateStatus, 2000);
+    setInterval(autoCheckUpdates, 300000);
   </script>
 </body>
 </html>
