@@ -155,6 +155,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_network_diagnostics.py" ]]; then
 else
   warn "patch_network_diagnostics.py не найден, диагностика сети пропущена"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_network_ranges.py" ]]; then
+  run_logged "network port ranges patch применён" python3 "${REPO_DIR}/scripts/patch_network_ranges.py" "${APP_DIR}/app.py"
+else
+  warn "patch_network_ranges.py не найден, поддержка диапазонов портов пропущена"
+fi
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
   ok "Профиль уже сохранён: $PROFILE_FILE"
