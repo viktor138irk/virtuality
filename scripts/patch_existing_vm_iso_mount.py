@@ -84,9 +84,7 @@ def mount_vm_iso(name: str, iso_path: str) -> tuple[bool, str]:
     if iso_root not in iso.parents or iso.suffix.lower() != ".iso" or not iso.exists():
         return False, "ISO должен быть существующим .iso файлом из /var/lib/virtuality/iso."
 
-    # Keep only one mounted ISO/CD-ROM device managed by the panel.
     detach_vm_iso(name)
-
     running = vm_state(name) == "running"
     base = ["virsh", "attach-disk", name, str(iso), "sda", "--type", "cdrom", "--mode", "readonly"]
     if running:
@@ -101,23 +99,36 @@ def mount_vm_iso(name: str, iso_path: str) -> tuple[bool, str]:
 
 if 'def mount_vm_iso(name: str, iso_path: str)' not in text:
     marker = '\n\ndef vm_details(name: str) -> dict[str, Any]:'
-    if marker not in text:
-        raise SystemExit('vm_details marker not found')
-    text = text.replace(marker, helpers + marker, 1)
-    changed.append('existing VM ISO mount helpers added')
+    if marker in text:
+        text = text.replace(marker, helpers + marker, 1)
+        changed.append('existing VM ISO mount helpers added')
+    else:
+        changed.append('ISO helpers skipped: vm_details marker not found')
 else:
     changed.append('existing VM ISO mount helpers already present')
 
 if '"current_iso": current_vm_iso(name)' not in text:
-    old = '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", "")})'
-    new = '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})'
-    if old not in text:
-        old = '"host_ip": system_summary()["ip"]})'
-        new = '"host_ip": system_summary()["ip"], "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})'
-    if old not in text:
-        raise SystemExit('vm detail context marker not found')
-    text = text.replace(old, new, 1)
-    changed.append('vm detail context gets ISO mount data')
+    replacements = [
+        (
+            '"resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})',
+            '"resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", ""), "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})',
+        ),
+        (
+            '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", "")})',
+            '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})',
+        ),
+        (
+            '"host_ip": system_summary()["ip"]})',
+            '"host_ip": system_summary()["ip"], "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})',
+        ),
+    ]
+    for old, new in replacements:
+        if old in text:
+            text = text.replace(old, new, 1)
+            changed.append('vm detail context gets ISO mount data')
+            break
+    else:
+        changed.append('ISO context skipped: vm detail context marker not found')
 else:
     changed.append('vm detail context already has ISO mount data')
 
@@ -146,11 +157,14 @@ def vm_iso_unmount_apply(request: Request, name: str):
 '''
 
 if '@app.post("/vm/{name}/iso/mount")' not in text:
-    marker = '\n\n@app.post("/vm/{name}/{action}")'
-    if marker not in text:
-        raise SystemExit('generic vm action marker not found')
-    text = text.replace(marker, routes + marker, 1)
-    changed.append('existing VM ISO mount routes added')
+    markers = ['\n\n@app.post("/vm/{name}/{action}")', '\n\n@app.get("/vm/create"', '\n\n@app.get("/operations"']
+    for marker in markers:
+        if marker in text:
+            text = text.replace(marker, routes + marker, 1)
+            changed.append('existing VM ISO mount routes added')
+            break
+    else:
+        changed.append('ISO routes skipped: safe route marker not found')
 else:
     changed.append('existing VM ISO mount routes already present')
 
@@ -197,18 +211,9 @@ boot_card = r'''
         <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid boot-order-form">
           <input type="hidden" name="boot_order" id="boot-order-value" value="{{ current_boot_order }}">
           <div class="boot-order-list" id="boot-order-list" data-current="{{ current_boot_order }}">
-            <div class="boot-order-item" draggable="true" data-device="cdrom">
-              <span class="drag-handle">☰</span>
-              <div><b>ISO / CD-ROM</b><small>Установщик или rescue-образ</small></div>
-            </div>
-            <div class="boot-order-item" draggable="true" data-device="hd">
-              <span class="drag-handle">☰</span>
-              <div><b>Диск</b><small>Основной qcow2/raw диск VM</small></div>
-            </div>
-            <div class="boot-order-item" draggable="true" data-device="network">
-              <span class="drag-handle">☰</span>
-              <div><b>Сеть / PXE</b><small>Загрузка по сети</small></div>
-            </div>
+            <div class="boot-order-item" draggable="true" data-device="cdrom"><span class="drag-handle">☰</span><div><b>ISO / CD-ROM</b><small>Установщик или rescue-образ</small></div></div>
+            <div class="boot-order-item" draggable="true" data-device="hd"><span class="drag-handle">☰</span><div><b>Диск</b><small>Основной qcow2/raw диск VM</small></div></div>
+            <div class="boot-order-item" draggable="true" data-device="network"><span class="drag-handle">☰</span><div><b>Сеть / PXE</b><small>Загрузка по сети</small></div></div>
           </div>
           <button class="primary wide" type="submit">Применить порядок загрузки</button>
         </form>
@@ -218,23 +223,13 @@ boot_card = r'''
             const list = document.getElementById('boot-order-list');
             const input = document.getElementById('boot-order-value');
             if (!list || !input) return;
-            const initialMap = {
-              'cdrom_disk': ['cdrom', 'hd', 'network'],
-              'disk_cdrom': ['hd', 'cdrom', 'network'],
-              'network_disk': ['network', 'hd', 'cdrom'],
-              'disk': ['hd', 'cdrom', 'network'],
-              'auto': ['hd', 'cdrom', 'network']
-            };
+            const initialMap = {'cdrom_disk':['cdrom','hd','network'],'disk_cdrom':['hd','cdrom','network'],'network_disk':['network','hd','cdrom'],'disk':['hd','cdrom','network'],'auto':['hd','cdrom','network']};
             const order = initialMap[list.dataset.current || 'auto'] || initialMap.auto;
             const nodes = Array.from(list.querySelectorAll('.boot-order-item'));
-            order.forEach(device => {
-              const node = nodes.find(item => item.dataset.device === device);
-              if (node) list.appendChild(node);
-            });
+            order.forEach(device => { const node = nodes.find(item => item.dataset.device === device); if (node) list.appendChild(node); });
             function updateValue(){
               const devices = Array.from(list.querySelectorAll('.boot-order-item')).map(item => item.dataset.device);
-              const first = devices[0];
-              const second = devices[1];
+              const first = devices[0]; const second = devices[1];
               if (first === 'cdrom' && second === 'hd') input.value = 'cdrom_disk';
               else if (first === 'hd' && second === 'cdrom') input.value = 'disk_cdrom';
               else if (first === 'network' && second === 'hd') input.value = 'network_disk';
@@ -242,27 +237,9 @@ boot_card = r'''
               else input.value = 'auto';
             }
             let dragged = null;
-            list.addEventListener('dragstart', event => {
-              dragged = event.target.closest('.boot-order-item');
-              if (!dragged) return;
-              dragged.classList.add('dragging');
-              event.dataTransfer.effectAllowed = 'move';
-            });
-            list.addEventListener('dragend', () => {
-              if (dragged) dragged.classList.remove('dragging');
-              dragged = null;
-              updateValue();
-            });
-            list.addEventListener('dragover', event => {
-              event.preventDefault();
-              const after = Array.from(list.querySelectorAll('.boot-order-item:not(.dragging)')).find(item => {
-                const box = item.getBoundingClientRect();
-                return event.clientY < box.top + box.height / 2;
-              });
-              if (!dragged) return;
-              if (after) list.insertBefore(dragged, after);
-              else list.appendChild(dragged);
-            });
+            list.addEventListener('dragstart', event => { dragged = event.target.closest('.boot-order-item'); if (!dragged) return; dragged.classList.add('dragging'); event.dataTransfer.effectAllowed = 'move'; });
+            list.addEventListener('dragend', () => { if (dragged) dragged.classList.remove('dragging'); dragged = null; updateValue(); });
+            list.addEventListener('dragover', event => { event.preventDefault(); const after = Array.from(list.querySelectorAll('.boot-order-item:not(.dragging)')).find(item => { const box = item.getBoundingClientRect(); return event.clientY < box.top + box.height / 2; }); if (!dragged) return; if (after) list.insertBefore(dragged, after); else list.appendChild(dragged); });
             updateValue();
           })();
         </script>
@@ -272,88 +249,31 @@ boot_card = r'''
 if template_path.exists():
     tpl = template_path.read_text()
     original = tpl
+    settings_grid = '\n\n    <section class="grid two vm-boot-iso-grid">\n' + iso_card + boot_card + '    </section>\n'
 
-    legacy_boot = r'''
-    <section class="card">
-      <div class="card-head">
-        <h2>Порядок загрузки</h2>
-        <span class="pill">boot order</span>
-      </div>
-      <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid">
-        <label>
-          <span>Порядок загрузки VM</span>
-          <select name="boot_order" required>
-            {% for boot in boot_options %}
-              <option value="{{ boot.value }}" {% if current_boot_order == boot.value %}selected{% endif %}>{{ boot.label }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button class="primary wide" type="submit">Применить порядок загрузки</button>
-      </form>
-      <p class="muted small-note">Настройка меняет XML-конфигурацию VM через virsh define. Если машина сейчас запущена, новый порядок загрузки сработает после перезапуска.</p>
-    </section>
-'''
-    legacy_iso = r'''
-    <section class="card">
-      <div class="card-head">
-        <h2>ISO-привод</h2>
-        <span class="pill">cdrom</span>
-      </div>
-      {% if current_iso %}
-        <div class="notice">Сейчас подключен ISO: <b>{{ current_iso }}</b></div>
-      {% else %}
-        <div class="muted small-note">ISO сейчас не подключён.</div>
-      {% endif %}
-      <form method="post" action="/vm/{{ vm.name }}/iso/mount" class="form-grid">
-        <label>
-          <span>ISO образ</span>
-          <select name="iso_path" required>
-            {% for iso in isos %}
-              <option value="{{ iso.path }}" {% if current_iso == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button class="primary wide" type="submit" {% if not isos %}disabled{% endif %}>Смонтировать ISO в VM</button>
-      </form>
-      <form method="post" action="/vm/{{ vm.name }}/iso/unmount" class="form-grid" onsubmit="return confirm('Отмонтировать ISO из VM {{ vm.name }}?');">
-        <button type="submit" class="ghost wide">Отмонтировать ISO</button>
-      </form>
-      {% if not isos %}
-        <div class="alert danger">ISO-образов пока нет. Сначала загрузи .iso в разделе ISO.</div>
-      {% endif %}
-      <p class="muted small-note">Для запущенной VM ISO подключается live и сохраняется в конфигурации. Для выключенной VM ISO будет доступен при следующем старте. Чтобы загрузиться с ISO, выставь порядок загрузки “Сначала ISO/CD-ROM, потом диск”.</p>
-    </section>
-'''
-    settings_grid = r'''
-
-    <section class="grid two vm-boot-iso-grid">
-''' + iso_card + boot_card + r'''    </section>
-'''
-
-    if 'vm-boot-iso-grid' in tpl:
-        start = tpl.find('    <section class="grid two vm-boot-iso-grid">')
-        end = tpl.find('\n\n    <section class="grid two">', start + 1)
-        if start != -1 and end != -1:
-            tpl = tpl[:start] + settings_grid.strip('\n') + tpl[end:]
-            changed.append('boot order grid replaced with draggable version')
+    if 'action="/vm/{{ vm.name }}/iso/mount"' not in tpl and 'vm-boot-iso-grid' not in tpl:
+        markers = ['\n\n    <section class="grid three vm-resource-boot-iso-grid">', '\n\n    <section class="grid two">', '\n\n    <section class="card">']
+        for marker in markers:
+            if marker in tpl:
+                if 'vm-resource-boot-iso-grid' in marker:
+                    insert_pos = tpl.find(marker) + len(marker)
+                    tpl = tpl[:insert_pos] + '\n' + iso_card + boot_card + tpl[insert_pos:]
+                    changed.append('ISO and boot cards inserted into three-column grid')
+                else:
+                    tpl = tpl.replace(marker, settings_grid + marker, 1)
+                    changed.append('ISO and boot cards inserted by fallback')
+                break
+        else:
+            changed.append('ISO layout skipped: safe template marker not found')
+    elif 'vm-boot-iso-grid' in tpl and 'boot-order-list' not in tpl:
+        changed.append('ISO grid exists but draggable boot marker absent; left unchanged safely')
     else:
-        if legacy_boot in tpl or legacy_iso in tpl:
-            tpl = tpl.replace(legacy_boot, '')
-            tpl = tpl.replace(legacy_iso, '')
-            marker = '\n\n    <section class="grid two">'
-            if marker not in tpl:
-                raise SystemExit('vm detail grid marker not found')
-            tpl = tpl.replace(marker, settings_grid + marker, 1)
-            changed.append('ISO and boot order cards moved into draggable two-column grid')
-        elif 'action="/vm/{{ vm.name }}/iso/mount"' not in tpl:
-            marker = '\n\n    <section class="grid two">'
-            if marker not in tpl:
-                raise SystemExit('vm detail grid marker not found')
-            tpl = tpl.replace(marker, settings_grid + marker, 1)
-            changed.append('ISO and boot order draggable two-column grid added')
+        changed.append('ISO mount template already present')
 
     if tpl != original:
         template_path.write_text(tpl)
+else:
+    changed.append('ISO template skipped: vm_detail.html not found')
 
 print('existing VM ISO mount patch applied:')
 for item in changed:
