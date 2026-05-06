@@ -107,6 +107,8 @@ ls -lh /var/lib/virtuality/iso</pre>
     const statusLine = document.getElementById('upload-status');
     const loadedLine = document.getElementById('upload-loaded');
     const speedLine = document.getElementById('upload-speed');
+    let activeXhr = null;
+    let uploadActive = false;
 
     function bytesText(bytes) {
       if (!bytes) return '0 MB';
@@ -121,22 +123,51 @@ ls -lh /var/lib/virtuality/iso</pre>
       return file && file.name && file.name.toLowerCase().endsWith('.iso');
     }
 
+    function setUploadMode(active) {
+      uploadActive = active;
+      if (active) {
+        button.disabled = false;
+        button.type = 'button';
+        button.textContent = 'Отменить загрузку';
+        button.classList.remove('primary');
+        button.classList.add('danger');
+        fileInput.disabled = true;
+      } else {
+        activeXhr = null;
+        button.type = 'submit';
+        button.textContent = 'Загрузить ISO';
+        button.classList.add('primary');
+        button.classList.remove('danger');
+        fileInput.disabled = false;
+        button.disabled = !validIsoFile(fileInput.files[0]);
+      }
+    }
+
     fileInput.addEventListener('change', function () {
       const file = fileInput.files[0];
       if (!file) {
         hint.textContent = 'Файл ещё не выбран. В этом разделе разрешены только установочные образы .iso.';
+        button.disabled = false;
         return;
       }
       if (!validIsoFile(file)) {
         hint.textContent = 'Неверный тип файла. Здесь можно выбрать только .iso.';
         fileInput.value = '';
+        button.disabled = true;
         return;
       }
+      button.disabled = false;
       hint.textContent = file.name + ' · ' + bytesText(file.size);
+    });
+
+    button.addEventListener('click', function () {
+      if (!uploadActive) return;
+      if (activeXhr) activeXhr.abort();
     });
 
     form.addEventListener('submit', function (event) {
       event.preventDefault();
+      if (uploadActive) return;
       const file = fileInput.files[0];
       if (!validIsoFile(file)) {
         hint.textContent = 'Выбери установочный образ .iso.';
@@ -144,12 +175,12 @@ ls -lh /var/lib/virtuality/iso</pre>
       }
 
       const xhr = new XMLHttpRequest();
+      activeXhr = xhr;
       const data = new FormData(form);
       const started = Date.now();
 
       box.hidden = false;
-      button.disabled = true;
-      fileInput.disabled = true;
+      setUploadMode(true);
       statusLine.textContent = 'Передача файла на сервер…';
       bar.style.width = '0%';
       percent.textContent = '0%';
@@ -179,15 +210,22 @@ ls -lh /var/lib/virtuality/iso</pre>
           window.location.href = '/iso';
         } else {
           statusLine.textContent = 'Ошибка загрузки: HTTP ' + xhr.status;
-          button.disabled = false;
-          fileInput.disabled = false;
+          setUploadMode(false);
         }
+      };
+
+      xhr.onabort = function () {
+        statusLine.textContent = 'Загрузка отменена пользователем.';
+        bar.style.width = '0%';
+        percent.textContent = '0%';
+        loadedLine.textContent = '0 MB';
+        speedLine.textContent = 'отменено';
+        setUploadMode(false);
       };
 
       xhr.onerror = function () {
         statusLine.textContent = 'Ошибка сети во время загрузки.';
-        button.disabled = false;
-        fileInput.disabled = false;
+        setUploadMode(false);
       };
 
       xhr.open('POST', form.action);
