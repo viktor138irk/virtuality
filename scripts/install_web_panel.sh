@@ -167,6 +167,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_upload_compat.py" ]]; then
 else
   warn "patch_upload_compat.py не найден, совместимость загрузки файлов пропущена"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_upload_navigation_guard.py" ]]; then
+  run_logged "upload navigation guard patch применён" python3 "${REPO_DIR}/scripts/patch_upload_navigation_guard.py" "${APP_DIR}/app.py"
+else
+  warn "patch_upload_navigation_guard.py не найден, защита загрузок от переходов пропущена"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_disk_images.py" ]]; then
   run_logged "disk images patch применён" python3 "${REPO_DIR}/scripts/patch_disk_images.py" "${APP_DIR}/app.py"
 else
