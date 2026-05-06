@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.7.1",
+      "date": "2026-05-07",
+      "title": "Фикс записи XML NAT-сети",
+      "summary": "XML-файл libvirt NAT-сети перенесён из /tmp в /var/lib/virtuality/network, чтобы убрать Permission denied на системах с жёсткими правами /tmp.",
+      "features": [
+        "NAT XML теперь хранится в /var/lib/virtuality/network/virtuality-nat.xml",
+        "Запись XML выполняется атомарно через временный файл в каталоге Virtuality",
+        "virsh net-define использует стабильный путь вместо /tmp/virtuality-nat.xml",
+        "Версия обновлена до 0.7.1"
+      ]
+    },
+    {
       "version": "0.7.0",
       "date": "2026-05-07",
       "title": "Автоустановка обновлений каждые 15 минут",
