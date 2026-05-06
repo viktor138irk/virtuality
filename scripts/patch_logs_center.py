@@ -6,6 +6,8 @@ app_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/opt/virtuality/web
 if not app_path.exists():
     raise SystemExit(f'app.py not found: {app_path}')
 
+templates_dir = app_path.parent / 'templates'
+static_dir = app_path.parent / 'static'
 text = app_path.read_text()
 changed = []
 
@@ -60,11 +62,19 @@ def read_log_source(source: str, lines: int = 220) -> dict[str, Any]:
 '''
 
 if 'LOG_SOURCES = {' not in text:
-    marker = '\n\ndef parse_virsh_list() -> list[dict[str, str]]:'
-    if marker not in text:
-        raise SystemExit('parse_virsh_list marker not found')
-    text = text.replace(marker, helpers + marker, 1)
-    changed.append('log center helpers added')
+    markers = [
+        '\n\ndef parse_virsh_list() -> list[dict[str, str]]:',
+        '\n\ndef list_recent_operations(limit: int = 20) -> list[dict[str, Any]]:',
+        '\n\ndef safe_iso_filename(filename: str) -> str | None:',
+    ]
+    for marker in markers:
+        if marker in text:
+            text = text.replace(marker, helpers + marker, 1)
+            changed.append('log center helpers added')
+            break
+    else:
+        print('WARN: log helper marker not found, skip helper injection')
+        changed.append('log center helpers skipped')
 else:
     changed.append('log center helpers already present')
 
@@ -93,17 +103,71 @@ def api_logs(request: Request, source: str = "web", lines: int = 220):
 '''
 
 if '@app.get("/logs"' not in text:
-    marker = '\n\n@app.get("/vm/create", response_class=HTMLResponse)'
-    if marker not in text:
-        marker = '\n\n@app.get("/api/operations")'
-    if marker not in text:
-        raise SystemExit('route insert marker not found')
-    text = text.replace(marker, route + marker, 1)
-    changed.append('logs routes added')
+    markers = ['\n\n@app.get("/vm/create", response_class=HTMLResponse)', '\n\n@app.get("/api/operations")', '\n\n@app.get("/iso", response_class=HTMLResponse)']
+    for marker in markers:
+        if marker in text:
+            text = text.replace(marker, route + marker, 1)
+            changed.append('logs routes added')
+            break
+    else:
+        print('WARN: logs route insert marker not found, skip route injection')
+        changed.append('logs routes skipped')
 else:
     changed.append('logs routes already present')
 
 app_path.write_text(text)
-print('logs center patch applied:')
+
+sidebar_html = '''{% set path = request.url.path %}
+<aside class="v-sidebar">
+  <div class="v-logo">
+    <strong>Virtuality</strong>
+    <span>control panel</span>
+  </div>
+  <nav class="v-nav">
+    <a class="{{ 'active' if path == '/' else '' }}" href="/">Обзор</a>
+    <a class="{{ 'active' if path.startswith('/vm/create') else '' }}" href="/vm/create">Создать VM</a>
+    <a class="{{ 'active' if path.startswith('/iso') else '' }}" href="/iso">ISO</a>
+    <a class="{{ 'active' if path.startswith('/disk-images') else '' }}" href="/disk-images">Диски</a>
+    <a class="{{ 'active' if path.startswith('/network') else '' }}" href="/network">Сеть</a>
+    <a class="{{ 'active' if path.startswith('/operations') else '' }}" href="/operations">Операции</a>
+    <a class="{{ 'active' if path.startswith('/logs') else '' }}" href="/logs">Журналы</a>
+    <a class="{{ 'active' if path.startswith('/update') else '' }}" href="/update">Обновления</a>
+    <a class="{{ 'active' if path.startswith('/host') else '' }}" href="/host">Хост</a>
+  </nav>
+</aside>
+'''
+
+if templates_dir.exists():
+    sidebar_path = templates_dir / '_sidebar.html'
+    sidebar_path.write_text(sidebar_html)
+    changed.append('_sidebar.html ensured')
+
+    for path in sorted(templates_dir.glob('*.html')):
+        if path.name in {'login.html', 'console.html', '_sidebar.html'}:
+            continue
+        html = path.read_text()
+        if '<script src="/static/panel.js" defer></script>' not in html:
+            html = html.replace('</body>', '  <script src="/static/panel.js" defer></script>\n</body>', 1)
+            changed.append(f'{path.name} panel.js attached')
+        if '{% include "_sidebar.html" %}' not in html and '<div class="v-layout">' not in html and '<div class="shell">' in html:
+            html = html.replace('<body>\n  <div class="shell">', '<body>\n  <div class="v-layout">\n    {% include "_sidebar.html" %}\n    <main class="v-main">\n      <div class="shell v-shell-embedded">', 1)
+            script_marker = '\n\n  <script>'
+            search_end = html.find(script_marker) if script_marker in html else html.find('\n</body>')
+            if search_end == -1:
+                search_end = len(html)
+            close_idx = html.rfind('\n  </div>', 0, search_end)
+            if close_idx != -1:
+                html = html[:close_idx] + '\n      </div>\n    </main>\n  </div>' + html[close_idx + len('\n  </div>'):]
+                changed.append(f'{path.name} wrapped with sidebar')
+            else:
+                print(f'WARN: sidebar close marker not found for {path.name}')
+        path.write_text(html)
+
+if static_dir.exists() and (static_dir / 'panel.js').exists():
+    changed.append('panel.js found')
+else:
+    print('WARN: panel.js not found in installed static dir')
+
+print('logs center and UI dynamics patch applied:')
 for item in changed:
     print(f'- {item}')
