@@ -18,6 +18,7 @@
         <span>{{ system.ip }}</span>
         <span>{{ system.time }}</span>
         <span>user: {{ user }}</span>
+        <a class="link-pill" href="/network">Сеть</a>
         <a class="link-pill" href="/operations">Операции</a>
         <a class="link-pill" href="/iso">ISO</a>
         <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
@@ -113,7 +114,11 @@
         <div class="quick-actions">
           <a class="big-action" href="/vm/create">
             <strong>Создать VM</strong>
-            <span>Запуск мастера с ISO, RAM, CPU, диском и bridge</span>
+            <span>Запуск мастера с ISO, RAM, CPU, диском и выбором Bridge/NAT</span>
+          </a>
+          <a class="big-action" href="/network">
+            <strong>Сеть</strong>
+            <span>NAT Router для VPS, DHCP leases, nftables и проброс портов</span>
           </a>
           <a class="big-action" href="/iso">
             <strong>ISO-менеджер</strong>
@@ -131,6 +136,7 @@
       <div class="card-head">
         <h2>Виртуальные машины</h2>
         <div class="actions">
+          <a class="link-pill" href="/network">Сеть</a>
           <a class="link-pill" href="/operations">Операции</a>
           <a class="link-pill" href="/iso">ISO</a>
           <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
