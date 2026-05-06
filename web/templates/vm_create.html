@@ -15,6 +15,8 @@
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
+        <a class="link-pill" href="/operations">Операции</a>
+        <a class="link-pill" href="/iso">ISO</a>
         <a class="link-pill" href="/">← Дашборд</a>
         <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
       </div>
@@ -28,7 +30,7 @@
       <article class="card">
         <div class="card-head">
           <h2>Параметры</h2>
-          <span class="pill">VM wizard v0.1</span>
+          <span class="pill">VM wizard v0.2</span>
         </div>
 
         <form method="post" action="/vm/create" class="form-grid">
@@ -67,14 +69,21 @@
             <input type="text" name="bridge" value="{{ form.bridge }}" required>
           </label>
 
-          <button type="submit" class="primary wide">Создать виртуальную машину</button>
+          <div class="notice">
+            После нажатия VM создаётся в фоне. Панель откроет экран операции с прогрессом и живым журналом virt-install.
+          </div>
+
+          <button type="submit" class="primary wide" {% if not isos %}disabled{% endif %}>Создать виртуальную машину</button>
+          {% if not isos %}
+            <div class="alert danger">Сначала загрузи ISO-образ в ISO-менеджере.</div>
+          {% endif %}
         </form>
       </article>
 
       <article class="card">
         <div class="card-head">
           <h2>ISO в хранилище</h2>
-          <span class="pill">/var/lib/virtuality/iso</span>
+          <a class="link-pill" href="/iso">Открыть ISO-менеджер</a>
         </div>
         <div class="services">
           {% for iso in isos %}
@@ -83,7 +92,7 @@
               <span class="status ok">{{ iso.size }}</span>
             </div>
           {% else %}
-            <div class="muted">ISO пока нет. Загрузи .iso в /var/lib/virtuality/iso</div>
+            <div class="muted">ISO пока нет. Загрузи .iso через ISO-менеджер, не руками в темноте.</div>
           {% endfor %}
         </div>
         <pre>sudo cp image.iso /var/lib/virtuality/iso/
