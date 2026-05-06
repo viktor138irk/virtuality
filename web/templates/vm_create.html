@@ -41,13 +41,23 @@
             <input type="text" name="name" value="{{ form.name or '' }}" placeholder="ubuntu-test" required>
           </label>
 
-          <label>
-            <span>Источник VM</span>
-            <select id="source-type" name="source_type" required>
-              <option value="iso" {% if form.source_type != 'disk_image' %}selected{% endif %}>ISO-установщик</option>
-              <option value="disk_image" {% if form.source_type == 'disk_image' %}selected{% endif %}>Готовый диск .img / .raw / .qcow2</option>
-            </select>
-          </label>
+          <div class="form-row">
+            <label>
+              <span>Источник VM</span>
+              <select id="source-type" name="source_type" required>
+                <option value="iso" {% if form.source_type != 'disk_image' %}selected{% endif %}>ISO-установщик</option>
+                <option value="disk_image" {% if form.source_type == 'disk_image' %}selected{% endif %}>Готовый диск .img / .raw / .qcow2</option>
+              </select>
+            </label>
+            <label>
+              <span>Архитектура VM</span>
+              <select name="guest_arch" required>
+                {% for arch in arch_options %}
+                  <option value="{{ arch.value }}" {% if form.guest_arch == arch.value %}selected{% endif %}>{{ arch.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
 
           <div class="form-row">
             <label>
@@ -97,7 +107,7 @@
           </label>
 
           <div class="notice">
-            ISO создаёт пустой qcow2-диск и запускает установщик. Готовый .img/.raw/.qcow2 импортируется как диск VM через qemu-img convert, оригинальный образ остаётся шаблоном.
+            Для обычных ISO выбирай x86_64 на ПК/VPS. Для Raspberry/Orange Pi образов обычно нужен ARM64/aarch64. ISO создаёт пустой диск, готовый образ импортируется через qemu-img convert.
           </div>
 
           <button id="create-vm-button" type="submit" class="primary wide">Создать виртуальную машину</button>
@@ -112,26 +122,26 @@
 
       <article class="card">
         <div class="card-head">
-          <h2>Источники VM</h2>
+          <h2>Архитектура и источник</h2>
           <a class="link-pill" href="/disk-images">Открыть диски</a>
         </div>
         <div class="quick-actions">
           <div class="big-action static">
-            <strong>ISO-установщик</strong>
-            <span>Классический сценарий: создаём пустой qcow2-диск и устанавливаем систему с ISO.</span>
+            <strong>x86_64 / amd64</strong>
+            <span>Обычные ПК, серверы, большинство VPS и стандартные Ubuntu/Debian ISO.</span>
+          </div>
+          <div class="big-action static">
+            <strong>ARM64 / aarch64</strong>
+            <span>Raspberry Pi, Orange Pi 5, ARM-серверы и ARM64 cloud/disk images.</span>
           </div>
           <div class="big-action static">
             <strong>Готовый диск</strong>
-            <span>Для Raspberry/Orange Pi образов и готовых .img/.raw/.qcow2. Virtuality импортирует образ в отдельный диск VM.</span>
-          </div>
-          <div class="big-action static">
-            <strong>Сеть</strong>
-            <span>Для VPS выбирай NAT Router. Bridge нужен только если br0 реально есть на сервере.</span>
+            <span>Virtuality импортирует .img/.raw/.qcow2 в отдельный qcow2-диск VM, не изменяя оригинал.</span>
           </div>
         </div>
-        <pre>ISO:    virt-install --cdrom ubuntu.iso --disk VM.qcow2
-IMG:    qemu-img convert -O qcow2 image.img VM.qcow2
-        virt-install --import --disk VM.qcow2</pre>
+        <pre>ISO x86: virt-install --arch x86_64 --cdrom ubuntu.iso
+IMG ARM: qemu-img convert -O qcow2 image.img VM.qcow2
+         virt-install --arch aarch64 --machine virt --boot uefi --import</pre>
       </article>
     </section>
   </div>
