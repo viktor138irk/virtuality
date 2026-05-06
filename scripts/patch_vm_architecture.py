@@ -16,10 +16,12 @@ def vm_arch_options(profile: dict[str, Any]) -> list[dict[str, str]]:
     options = [
         {"value": "auto", "label": "Авто — рекомендовано для этого хоста"},
         {"value": "x86_64", "label": "x86_64 / amd64 — обычные ПК и серверы"},
-        {"value": "aarch64", "label": "ARM64 / aarch64 — Raspberry Pi / Orange Pi / ARM Server"},
     ]
-    if host_arch not in ("x86_64", "amd64", "aarch64", "arm64"):
-        options.append({"value": "generic", "label": "Generic QEMU — экспериментально"})
+    if host_arch in ("aarch64", "arm64"):
+        options.append({"value": "aarch64", "label": "ARM64 / aarch64 — KVM на ARM-хосте"})
+    else:
+        options.append({"value": "aarch64", "label": "ARM64 / aarch64 — QEMU-эмуляция, медленно"})
+    options.append({"value": "generic", "label": "Generic QEMU — экспериментально"})
     return options
 
 
@@ -31,22 +33,32 @@ def resolve_vm_arch(arch_choice: str, profile: dict[str, Any]) -> str:
     return str(profile.get("recommended_guest_arch") or "x86_64")
 
 
-def append_arch_args(cmd: list[str], guest_arch: str) -> list[str]:
+def append_arch_args(cmd: list[str], guest_arch: str, profile: dict[str, Any]) -> list[str]:
+    host_arch = str(profile.get("arch", ""))
     if guest_arch == "aarch64":
-        return cmd + ["--arch", "aarch64", "--machine", "virt", "--cpu", "host", "--virt-type", "kvm", "--boot", "uefi"]
+        if host_arch in ("aarch64", "arm64"):
+            return cmd + ["--arch", "aarch64", "--machine", "virt", "--cpu", "host", "--virt-type", "kvm", "--boot", "uefi"]
+        return cmd + ["--arch", "aarch64", "--machine", "virt", "--cpu", "cortex-a57", "--virt-type", "qemu", "--boot", "uefi"]
     if guest_arch == "x86_64":
-        return cmd + ["--arch", "x86_64"]
+        if host_arch in ("x86_64", "amd64"):
+            return cmd + ["--arch", "x86_64"]
+        return cmd + ["--arch", "x86_64", "--virt-type", "qemu"]
     return cmd
 '''
 
-if 'def vm_arch_options(profile: dict[str, Any])' not in text:
+start = text.find('def vm_arch_options(profile: dict[str, Any])')
+if start != -1:
+    end = text.find('\n\ndef vm_form_context(', start)
+    if end == -1:
+        raise SystemExit('vm_form_context end marker not found')
+    text = text[:start] + helpers.strip() + text[end:]
+    changed.append('architecture helpers replaced')
+else:
     marker = '\n\ndef vm_form_context('
     if marker not in text:
         raise SystemExit('vm_form_context marker not found')
     text = text.replace(marker, helpers + marker, 1)
     changed.append('architecture helpers added')
-else:
-    changed.append('architecture helpers already present')
 
 old_context = '"disk_images": list_disk_image_files(), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "source_type": "iso", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}'
 new_context = '"disk_images": list_disk_image_files(), "arch_options": vm_arch_options(profile), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "source_type": "iso", "guest_arch": "auto", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}'
@@ -56,7 +68,6 @@ if old_context in text:
 elif '"arch_options": vm_arch_options(profile)' in text:
     changed.append('vm form context already has arch options')
 else:
-    # support older app without disk_images patch
     old_context2 = '"isos": list_iso_files(), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}'
     new_context2 = '"isos": list_iso_files(), "disk_images": list_disk_image_files() if "list_disk_image_files" in globals() else [], "arch_options": vm_arch_options(profile), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "source_type": "iso", "guest_arch": "auto", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}'
     if old_context2 in text:
@@ -114,13 +125,16 @@ new_arch_block = '''    profile = host_profile.load_host_profile()
     resolved_guest_arch = resolve_vm_arch(guest_arch, profile)
     network_arg = f"network={network_core.NETWORK_NAME},model=virtio" if network_mode == "nat" else f"bridge={bridge},model=virtio"
     cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus)]
-    cmd = append_arch_args(cmd, resolved_guest_arch)
+    cmd = append_arch_args(cmd, resolved_guest_arch, profile)
 '''
 if old_arch_block in text:
     text = text.replace(old_arch_block, new_arch_block, 1)
     changed.append('virt-install arch args made selectable')
-elif 'resolved_guest_arch = resolve_vm_arch' in text:
-    changed.append('virt-install arch args already selectable')
+elif 'cmd = append_arch_args(cmd, resolved_guest_arch)' in text:
+    text = text.replace('cmd = append_arch_args(cmd, resolved_guest_arch)', 'cmd = append_arch_args(cmd, resolved_guest_arch, profile)')
+    changed.append('virt-install arch args now use host profile')
+elif 'cmd = append_arch_args(cmd, resolved_guest_arch, profile)' in text:
+    changed.append('virt-install arch args already use host profile')
 else:
     raise SystemExit('arch command block marker not found')
 
