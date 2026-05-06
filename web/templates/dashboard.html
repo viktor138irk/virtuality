@@ -18,6 +18,7 @@
         <span>{{ system.ip }}</span>
         <span>{{ system.time }}</span>
         <span>user: {{ user }}</span>
+        <a class="link-pill" href="/operations">Операции</a>
         <a class="link-pill" href="/iso">ISO</a>
         <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
         <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
@@ -61,6 +62,28 @@
 
       <article class="card">
         <div class="card-head">
+          <h2>Последние операции</h2>
+          <a class="link-pill" href="/operations">Журнал</a>
+        </div>
+        <div class="services">
+          {% for operation in operations %}
+            <a class="service-row service-link" href="/operations/{{ operation.id }}">
+              <span>
+                <strong>{{ operation.title }}</strong>
+                <small>{{ operation.created_at }} · {{ operation.message }}</small>
+              </span>
+              <span class="status {{ operation_css(operation.status) }}">{{ operation.status }}</span>
+            </a>
+          {% else %}
+            <div class="muted">Операций пока нет. Чистый лист — редкость, почти музей.</div>
+          {% endfor %}
+        </div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-head">
           <h2>Storage pools</h2>
           <span class="pill">libvirt</span>
         </div>
@@ -81,12 +104,34 @@
           </tbody>
         </table>
       </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Быстрые действия</h2>
+          <span class="pill">control plane</span>
+        </div>
+        <div class="quick-actions">
+          <a class="big-action" href="/vm/create">
+            <strong>Создать VM</strong>
+            <span>Запуск мастера с ISO, RAM, CPU, диском и bridge</span>
+          </a>
+          <a class="big-action" href="/iso">
+            <strong>ISO-менеджер</strong>
+            <span>Загрузка, удаление и refresh ISO storage pool</span>
+          </a>
+          <a class="big-action" href="/operations">
+            <strong>Журнал операций</strong>
+            <span>Прогресс, stdout/stderr virt-install и причины ошибок</span>
+          </a>
+        </div>
+      </article>
     </section>
 
     <section class="card">
       <div class="card-head">
         <h2>Виртуальные машины</h2>
         <div class="actions">
+          <a class="link-pill" href="/operations">Операции</a>
           <a class="link-pill" href="/iso">ISO</a>
           <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
         </div>
