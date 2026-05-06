@@ -15,7 +15,7 @@
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
-        <a class="link-pill accent" href="/vm/{{ vm.name }}/console">Консоль</a>
+        <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Консоль ↗</a>
         <a class="link-pill" href="/">← Дашборд</a>
         <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
       </div>
@@ -27,7 +27,7 @@
         <span class="pill">virsh actions</span>
       </div>
       <div class="actions big-actions">
-        <a class="link-pill accent" href="/vm/{{ vm.name }}/console">Открыть консоль</a>
+        <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Открыть консоль ↗</a>
         <form method="post" action="/vm/{{ vm.name }}/start"><button>Start</button></form>
         <form method="post" action="/vm/{{ vm.name }}/shutdown"><button>Shutdown</button></form>
         <form method="post" action="/vm/{{ vm.name }}/reboot"><button>Reboot</button></form>
@@ -49,14 +49,14 @@
       <article class="card">
         <div class="card-head">
           <h2>Консоль</h2>
-          <a class="link-pill accent" href="/vm/{{ vm.name }}/console">noVNC</a>
+          <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">noVNC ↗</a>
         </div>
         <div class="services">
           <div class="service-row"><span>VNC display</span><span class="status ok">{{ vm.vnc }}</span></div>
           <div class="service-row"><span>Host</span><span class="status ok">{{ host_ip }}</span></div>
           <div class="service-row"><span>Web console</span><span class="status ok">/vm/{{ vm.name }}/console</span></div>
         </div>
-        <p class="muted small-note">VNC наружу открывать не нужно: web-консоль работает через авторизованную Virtuality web-панель.</p>
+        <p class="muted small-note">Консоль открывается в новой вкладке и занимает всё окно браузера. VNC наружу открывать не нужно.</p>
       </article>
     </section>
 
@@ -83,7 +83,7 @@
         <h2>Опасная зона</h2>
         <span class="pill">delete VM</span>
       </div>
-      <p class="muted">Удаление остановит VM, удалит определение libvirt и попытается удалить все привязанные storage-диски. Это действие без корзины — как rm -rf, только в костюме.</p>
+      <p class="muted">Удаление остановит VM, удалит определение libvirt и попытается удалить все привязанные storage-диски. Это действие необратимо.</p>
       <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');">
         <button class="danger">Удалить VM вместе с дисками</button>
       </form>
