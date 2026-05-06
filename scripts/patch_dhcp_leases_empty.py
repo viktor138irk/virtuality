@@ -47,11 +47,21 @@ def dhcp_leases_hint(info: dict[str, Any], leases: list[dict[str, str]]) -> str:
 '''
 
 if 'def parse_dhcp_leases_output(' not in text:
-    marker = '\n\ndef list_libvirt_networks() -> list[dict[str, str]]:'
-    if marker not in text:
-        raise SystemExit('list_libvirt_networks marker not found')
-    text = text.replace(marker, helpers + marker, 1)
-    changed.append('DHCP leases parser added')
+    markers = [
+        '\n\ndef libvirt_network_info() -> dict[str, Any]:',
+        '\n\ndef network_context() -> dict[str, Any]:',
+        '\n\ndef parse_virsh_list() -> list[dict[str, str]]:',
+    ]
+    inserted = False
+    for marker in markers:
+        if marker in text:
+            text = text.replace(marker, helpers + marker, 1)
+            inserted = True
+            changed.append('DHCP leases parser added')
+            break
+    if not inserted:
+        print('WARN: DHCP helper marker not found, skip helper injection')
+        changed.append('DHCP leases parser skipped')
 else:
     changed.append('DHCP leases parser already present')
 
@@ -73,7 +83,7 @@ new_info = '''def libvirt_network_info() -> dict[str, Any]:
     info = run_cmd(['virsh', 'net-info', NETWORK_NAME], timeout=8)
     leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
     leases_text = leases['stdout'] if leases['ok'] else leases['stderr']
-    lease_rows = parse_dhcp_leases_output(leases['stdout'] if leases['ok'] else '')
+    lease_rows = parse_dhcp_leases_output(leases['stdout'] if leases['ok'] else '') if 'parse_dhcp_leases_output' in globals() else []
     data = {
         'name': NETWORK_NAME,
         'bridge': NAT_BRIDGE,
@@ -87,7 +97,7 @@ new_info = '''def libvirt_network_info() -> dict[str, Any]:
         'lease_count': len(lease_rows),
         'lease_hint': '',
     }
-    data['lease_hint'] = dhcp_leases_hint(data, lease_rows)
+    data['lease_hint'] = dhcp_leases_hint(data, lease_rows) if 'dhcp_leases_hint' in globals() else 'DHCP leases пусты.'
     return data
 '''
 if old_info in text:
@@ -96,7 +106,8 @@ if old_info in text:
 elif "'lease_rows':" in text:
     changed.append('libvirt network info already enriched')
 else:
-    raise SystemExit('libvirt_network_info marker not found')
+    print('WARN: libvirt_network_info marker not found, skip function rewrite')
+    changed.append('libvirt network info rewrite skipped')
 
 app_path.write_text(text)
 
@@ -145,7 +156,8 @@ if old_html in html:
 elif 'ctx.nat.lease_rows' in html:
     changed.append('DHCP leases UI already updated')
 else:
-    raise SystemExit('DHCP leases template marker not found')
+    print('WARN: DHCP leases template marker not found, skip UI rewrite')
+    changed.append('DHCP leases UI rewrite skipped')
 
 template_path.write_text(html)
 
