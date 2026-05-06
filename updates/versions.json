@@ -1,0 +1,69 @@
+{
+  "versions": [
+    {
+      "version": "0.5.0",
+      "date": "2026-05-07",
+      "title": "GitHub Update Center",
+      "summary": "Автообновление Virtuality напрямую из GitHub с проверкой новых версий, списком пропущенных изменений и запуском обновления из панели.",
+      "features": [
+        "Добавлена страница /update для проверки обновлений",
+        "Добавлен список пропущенных версий и функций",
+        "Добавлен backend update_core.py для сравнения локального и удалённого состояния GitHub",
+        "Добавлен исполнитель scripts/apply_github_update.sh",
+        "Добавлен VERSION-файл проекта",
+        "Добавлен updates/versions.json как человекочитаемый changelog"
+      ]
+    },
+    {
+      "version": "0.4.0",
+      "date": "2026-05-07",
+      "title": "ISO upload progress and NAT ranges",
+      "summary": "Улучшены загрузка ISO и сетевой блок для VPS/VoIP сценариев.",
+      "features": [
+        "Добавлен прогресс загрузки ISO в процентах",
+        "Добавлена скорость передачи и статус сохранения ISO",
+        "Добавлена поддержка диапазонов портов, например 10000-20000/udp",
+        "Добавлена диагностика рядом с правилами проброса портов",
+        "Добавлена защита от создания VM через отсутствующий bridge br0"
+      ]
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-05-06",
+      "title": "VPS NAT Router",
+      "summary": "Добавлена NAT-сеть virtuality-nat для VPS-сценариев и автоматизация DNAT/MASQUERADE.",
+      "features": [
+        "Добавлена libvirt NAT-сеть virtuality-nat / virbr100",
+        "Добавлен проброс портов через nftables",
+        "Добавлен UFW route allow fallback",
+        "Добавлен iptables-nft fallback",
+        "Добавлена диагностика публичного доступа VM"
+      ]
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-05-06",
+      "title": "noVNC console and VM operations",
+      "summary": "Добавлена web-консоль VM и журнал операций.",
+      "features": [
+        "Добавлена noVNC-консоль VM",
+        "Консоль открывается в отдельном полноэкранном окне",
+        "Добавлен журнал операций создания VM",
+        "Добавлен live log virt-install"
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "date": "2026-05-06",
+      "title": "Initial Virtuality panel",
+      "summary": "Базовая web-панель Virtuality для KVM/QEMU/libvirt.",
+      "features": [
+        "Авторизация через Linux-пользователя",
+        "Дашборд хоста",
+        "Создание VM через web-панель",
+        "ISO-менеджер",
+        "Установщик web-панели"
+      ]
+    }
+  ]
+}
