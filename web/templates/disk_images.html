@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <div class="brand">Диски</div>
-        <div class="muted">Готовые образы установленных систем: .img / .raw / .qcow2</div>
+        <div class="muted">Готовые образы установленных систем: .img / .raw / .qcow2, а также архивы .zip / .tar.gz / .tgz</div>
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
@@ -30,14 +30,14 @@
       <article class="card">
         <div class="card-head">
           <h2>Загрузить образ установленной системы</h2>
-          <span class="pill">только .img .raw .qcow2</span>
+          <span class="pill">.img .raw .qcow2 .zip .tar.gz</span>
         </div>
         <form id="disk-upload-form" method="post" action="/disk-images/upload" enctype="multipart/form-data" class="form-grid">
           <label class="upload-box">
-            <span>Выбери файл готового диска</span>
-            <input id="disk-file-input" type="file" name="image_file" accept=".img,.raw,.qcow2" required>
+            <span>Выбери файл готового диска или архив с диском</span>
+            <input id="disk-file-input" type="file" name="image_file" accept=".img,.raw,.qcow2,.zip,.tar.gz,.tgz" required>
           </label>
-          <div id="disk-file-hint" class="muted small-note">Файл ещё не выбран. В этом разделе разрешены только .img, .raw и .qcow2.</div>
+          <div id="disk-file-hint" class="muted small-note">Файл ещё не выбран. Разрешены .img, .raw, .qcow2, .zip, .tar.gz и .tgz.</div>
           <div id="upload-progress-wrap" class="upload-progress-wrap" hidden>
             <div class="upload-progress-head">
               <strong id="upload-status">Подготовка…</strong>
@@ -51,7 +51,7 @@
           </div>
           <button id="disk-upload-button" type="submit" class="primary wide">Загрузить образ диска</button>
         </form>
-        <p class="muted small-note">После загрузки .img/.raw прогресс начнётся заново и покажет конвертацию в qcow2. Установочные .iso загружаются отдельно в разделе <b>ISO</b>.</p>
+        <p class="muted small-note">Архив будет распакован автоматически. Virtuality найдёт внутри .img/.raw/.qcow2 и положит их в <b>/var/lib/virtuality/disk-images</b>. После загрузки .img/.raw запускается конвертация в qcow2. Установочные .iso загружаются отдельно в разделе <b>ISO</b>.</p>
       </article>
 
       <article class="card">
@@ -62,11 +62,11 @@
         <div class="quick-actions">
           <div class="big-action static">
             <strong>Raspberry / Orange Pi images</strong>
-            <span>Загрузи .img, дождись конвертации, затем в “Создать VM” выбери режим “Готовый диск”.</span>
+            <span>Загрузи .img или архив с .img, дождись распаковки/конвертации, затем в “Создать VM” выбери режим “Готовый диск”.</span>
           </div>
           <div class="big-action static">
-            <strong>Оригинал не трогаем</strong>
-            <span>Virtuality сохраняет исходник и создаёт рядом готовый qcow2-шаблон.</span>
+            <strong>Архивы безопасно распаковываются</strong>
+            <span>Поддерживаются .zip, .tar.gz и .tgz. Из архива берём только .img/.raw/.qcow2.</span>
           </div>
         </div>
         <pre>qemu-img convert -p -f raw -O qcow2 source.img source.qcow2</pre>
@@ -97,7 +97,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="5" class="muted">Образов пока нет. Загрузи .img, .raw или .qcow2.</td></tr>
+          <tr><td colspan="5" class="muted">Образов пока нет. Загрузи .img, .raw, .qcow2 или архив .zip/.tar.gz/.tgz.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -115,7 +115,7 @@
     const statusLine = document.getElementById('upload-status');
     const loadedLine = document.getElementById('upload-loaded');
     const speedLine = document.getElementById('upload-speed');
-    const allowedExtensions = ['.img', '.raw', '.qcow2'];
+    const allowedExtensions = ['.img', '.raw', '.qcow2', '.zip', '.tar.gz', '.tgz'];
 
     function bytesText(bytes) {
       if (!bytes) return '0 MB';
@@ -173,11 +173,11 @@
     fileInput.addEventListener('change', function () {
       const file = fileInput.files[0];
       if (!file) {
-        hint.textContent = 'Файл ещё не выбран. В этом разделе разрешены только .img, .raw и .qcow2.';
+        hint.textContent = 'Файл ещё не выбран. Разрешены .img, .raw, .qcow2, .zip, .tar.gz и .tgz.';
         return;
       }
       if (!validDiskFile(file)) {
-        hint.textContent = 'Неверный тип файла. Здесь можно выбрать только .img, .raw или .qcow2.';
+        hint.textContent = 'Неверный тип файла. Здесь можно выбрать только .img, .raw, .qcow2, .zip, .tar.gz или .tgz.';
         fileInput.value = '';
         return;
       }
@@ -188,7 +188,7 @@
       event.preventDefault();
       const file = fileInput.files[0];
       if (!validDiskFile(file)) {
-        hint.textContent = 'Выбери образ установленной системы: .img, .raw или .qcow2.';
+        hint.textContent = 'Выбери образ установленной системы или архив: .img, .raw, .qcow2, .zip, .tar.gz или .tgz.';
         return;
       }
 
@@ -199,7 +199,7 @@
       box.hidden = false;
       button.disabled = true;
       fileInput.disabled = true;
-      resetProgress('Передача образа на сервер…', '0 MB из ' + bytesText(file.size));
+      resetProgress('Передача файла на сервер…', '0 MB из ' + bytesText(file.size));
 
       xhr.upload.onprogress = function (event) {
         if (!event.lengthComputable) {
@@ -213,7 +213,7 @@
         percent.textContent = pct + '%';
         loadedLine.textContent = bytesText(event.loaded) + ' из ' + bytesText(event.total);
         speedLine.textContent = bytesText(speed) + '/s';
-        if (pct >= 100) statusLine.textContent = 'Файл передан. Сервер сохраняет образ…';
+        if (pct >= 100) statusLine.textContent = 'Файл передан. Сервер сохраняет и при необходимости распаковывает архив…';
       };
 
       xhr.onload = async function () {
