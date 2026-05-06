@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }} Panel</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div>
+        <div class="brand">Virtuality</div>
+        <div class="muted">Лёгкая панель управления виртуализацией</div>
+      </div>
+      <div class="top-meta">
+        <span>{{ system.hostname }}</span>
+        <span>{{ system.ip }}</span>
+        <span>{{ system.time }}</span>
+      </div>
+    </header>
+
+    <section class="grid stats">
+      <article class="card stat">
+        <div class="label">Uptime</div>
+        <div class="value">{{ system.uptime }}</div>
+      </article>
+      <article class="card stat">
+        <div class="label">Load</div>
+        <div class="value">{{ system.load }}</div>
+      </article>
+      <article class="card stat">
+        <div class="label">Kernel</div>
+        <div class="value small">{{ system.kernel }}</div>
+      </article>
+      <article class="card stat">
+        <div class="label">VM</div>
+        <div class="value">{{ vms|length }}</div>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-head">
+          <h2>Сервисы</h2>
+          <span class="pill">systemd</span>
+        </div>
+        <div class="services">
+          {% for name, state in services.items() %}
+          <div class="service-row">
+            <span>{{ name }}</span>
+            <span class="status {{ 'ok' if state == 'active' else 'warn' }}">{{ state }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Storage pools</h2>
+          <span class="pill">libvirt</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Name</th><th>State</th><th>Autostart</th></tr>
+          </thead>
+          <tbody>
+          {% for pool in pools %}
+            <tr>
+              <td>{{ pool.name }}</td>
+              <td><span class="status {{ 'ok' if pool.state == 'active' else 'warn' }}">{{ pool.state }}</span></td>
+              <td>{{ pool.autostart }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3" class="muted">Storage pools не найдены</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Виртуальные машины</h2>
+        <span class="pill">virsh list --all</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Name</th><th>State</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        {% for vm in vms %}
+          <tr>
+            <td>{{ vm.id }}</td>
+            <td class="strong">{{ vm.name }}</td>
+            <td><span class="status {{ 'ok' if 'running' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
+            <td class="actions">
+              <form method="post" action="/vm/{{ vm.name }}/start"><button>Start</button></form>
+              <form method="post" action="/vm/{{ vm.name }}/shutdown"><button>Shutdown</button></form>
+              <form method="post" action="/vm/{{ vm.name }}/reboot"><button>Reboot</button></form>
+              <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="danger">Power off</button></form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="muted">Виртуальных машин пока нет</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-head">
+          <h2>Интерфейсы</h2>
+          <span class="pill">ip -br a</span>
+        </div>
+        <pre>{{ network.interfaces }}</pre>
+      </article>
+      <article class="card">
+        <div class="card-head">
+          <h2>Маршруты</h2>
+          <span class="pill">ip route</span>
+        </div>
+        <pre>{{ network.routes }}</pre>
+      </article>
+    </section>
+  </div>
+</body>
+</html>
