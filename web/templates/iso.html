@@ -31,12 +31,24 @@
           <h2>Загрузить ISO</h2>
           <span class="pill">upload .iso</span>
         </div>
-        <form method="post" action="/iso/upload" enctype="multipart/form-data" class="form-grid">
+        <form id="iso-upload-form" method="post" action="/iso/upload" enctype="multipart/form-data" class="form-grid">
           <label class="upload-box">
             <span>Выбери ISO-файл</span>
-            <input type="file" name="iso_file" accept=".iso,application/x-iso9660-image" required>
+            <input id="iso-file-input" type="file" name="iso_file" accept=".iso,application/x-iso9660-image" required>
           </label>
-          <button type="submit" class="primary wide">Загрузить ISO</button>
+          <div id="iso-file-hint" class="muted small-note">Файл ещё не выбран.</div>
+          <div id="upload-progress-wrap" class="upload-progress-wrap" hidden>
+            <div class="upload-progress-head">
+              <strong id="upload-status">Подготовка…</strong>
+              <span id="upload-percent">0%</span>
+            </div>
+            <div class="progress big"><span id="upload-progress-bar"></span></div>
+            <div class="upload-progress-meta">
+              <span id="upload-loaded">0 MB</span>
+              <span id="upload-speed">скорость считается…</span>
+            </div>
+          </div>
+          <button id="iso-upload-button" type="submit" class="primary wide">Загрузить ISO</button>
         </form>
         <p class="muted small-note">Файл попадёт в <b>/var/lib/virtuality/iso</b>, после загрузки будет выполнен refresh pool <b>virtuality-iso</b>.</p>
       </article>
@@ -83,5 +95,88 @@ ls -lh /var/lib/virtuality/iso</pre>
       </table>
     </section>
   </div>
+
+  <script>
+    const form = document.getElementById('iso-upload-form');
+    const fileInput = document.getElementById('iso-file-input');
+    const button = document.getElementById('iso-upload-button');
+    const hint = document.getElementById('iso-file-hint');
+    const box = document.getElementById('upload-progress-wrap');
+    const bar = document.getElementById('upload-progress-bar');
+    const percent = document.getElementById('upload-percent');
+    const statusLine = document.getElementById('upload-status');
+    const loadedLine = document.getElementById('upload-loaded');
+    const speedLine = document.getElementById('upload-speed');
+
+    function bytesText(bytes) {
+      if (!bytes) return '0 MB';
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let value = bytes;
+      let i = 0;
+      while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+      return value.toFixed(value >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
+    }
+
+    fileInput.addEventListener('change', function () {
+      const file = fileInput.files[0];
+      hint.textContent = file ? file.name + ' · ' + bytesText(file.size) : 'Файл ещё не выбран.';
+    });
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      const xhr = new XMLHttpRequest();
+      const data = new FormData(form);
+      const started = Date.now();
+
+      box.hidden = false;
+      button.disabled = true;
+      fileInput.disabled = true;
+      statusLine.textContent = 'Передача файла на сервер…';
+      bar.style.width = '0%';
+      percent.textContent = '0%';
+      loadedLine.textContent = '0 MB из ' + bytesText(file.size);
+      speedLine.textContent = 'скорость считается…';
+
+      xhr.upload.onprogress = function (event) {
+        if (!event.lengthComputable) {
+          statusLine.textContent = 'Загрузка идёт…';
+          return;
+        }
+        const pct = Math.round((event.loaded / event.total) * 100);
+        const seconds = Math.max(1, (Date.now() - started) / 1000);
+        const speed = event.loaded / seconds;
+        bar.style.width = pct + '%';
+        percent.textContent = pct + '%';
+        loadedLine.textContent = bytesText(event.loaded) + ' из ' + bytesText(event.total);
+        speedLine.textContent = bytesText(speed) + '/s';
+        if (pct >= 100) statusLine.textContent = 'Файл передан. Сервер сохраняет ISO и обновляет pool…';
+      };
+
+      xhr.onload = function () {
+        if (xhr.status >= 200 && xhr.status < 400) {
+          bar.style.width = '100%';
+          percent.textContent = '100%';
+          statusLine.textContent = 'Готово. Обновляем список ISO…';
+          window.location.href = '/iso';
+        } else {
+          statusLine.textContent = 'Ошибка загрузки: HTTP ' + xhr.status;
+          button.disabled = false;
+          fileInput.disabled = false;
+        }
+      };
+
+      xhr.onerror = function () {
+        statusLine.textContent = 'Ошибка сети во время загрузки.';
+        button.disabled = false;
+        fileInput.disabled = false;
+      };
+
+      xhr.open('POST', form.action);
+      xhr.send(data);
+    });
+  </script>
 </body>
 </html>
