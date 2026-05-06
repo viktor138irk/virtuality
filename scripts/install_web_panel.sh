@@ -167,6 +167,16 @@ if [[ -f "${REPO_DIR}/scripts/patch_upload_compat.py" ]]; then
 else
   warn "patch_upload_compat.py не найден, совместимость загрузки файлов пропущена"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_disk_images.py" ]]; then
+  run_logged "disk images patch применён" python3 "${REPO_DIR}/scripts/patch_disk_images.py" "${APP_DIR}/app.py"
+else
+  warn "patch_disk_images.py не найден, менеджер дисковых образов пропущен"
+fi
+if [[ -f "${REPO_DIR}/scripts/patch_disk_archives.py" ]]; then
+  run_logged "disk archive import patch применён" python3 "${REPO_DIR}/scripts/patch_disk_archives.py" "${APP_DIR}/app.py"
+else
+  warn "patch_disk_archives.py не найден, импорт архивов дисков пропущен"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_dhcp_leases_empty.py" ]]; then
   run_logged "DHCP leases empty-state patch применён" python3 "${REPO_DIR}/scripts/patch_dhcp_leases_empty.py" "${APP_DIR}/app.py"
 else
