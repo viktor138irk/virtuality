@@ -48,12 +48,14 @@ body {
 }
 
 .muted { color: var(--muted); }
+.small-note { font-size: 13px; line-height: 1.45; }
 
 .top-meta {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
 }
 
 .top-meta span,
@@ -73,7 +75,8 @@ body {
 .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 16px; }
 .two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
 
-.card {
+.card,
+.auth-card {
   background: linear-gradient(180deg, rgba(16, 23, 34, .96), rgba(13, 19, 29, .96));
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -125,7 +128,7 @@ th { color: var(--muted); font-size: 13px; font-weight: 700; }
 tr:last-child td { border-bottom: 0; }
 
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.actions form { margin: 0; }
+.actions form, .logout-form { margin: 0; }
 button {
   border: 1px solid var(--line);
   background: rgba(55,214,255,.08);
@@ -137,6 +140,9 @@ button {
 }
 button:hover { border-color: var(--accent); }
 button.danger { background: rgba(255,92,122,.09); color: var(--red); }
+button.primary { background: rgba(55,214,255,.18); border-color: rgba(55,214,255,.55); }
+button.ghost { background: rgba(255,255,255,.035); color: var(--muted); }
+button.wide { width: 100%; padding: 12px 14px; }
 
 pre {
   overflow: auto;
@@ -148,6 +154,34 @@ pre {
   color: #d9e5f6;
   line-height: 1.55;
 }
+
+.auth-body {
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.auth-shell { width: min(440px, 100%); }
+.auth-card { padding: 28px; }
+.auth-brand { margin-bottom: 6px; }
+.auth-form { display: grid; gap: 14px; margin-top: 22px; }
+.auth-form label { display: grid; gap: 7px; color: var(--muted); font-size: 13px; font-weight: 700; }
+.auth-form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(7,11,18,.82);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 12px 13px;
+  outline: none;
+}
+.auth-form input:focus { border-color: var(--accent); }
+.alert {
+  padding: 12px 13px;
+  border-radius: 14px;
+  margin-top: 14px;
+  font-weight: 700;
+}
+.alert.danger { color: var(--red); background: rgba(255,92,122,.08); border: 1px solid rgba(255,92,122,.28); }
 
 @media (max-width: 900px) {
   .topbar { align-items: flex-start; flex-direction: column; }
