@@ -4,7 +4,7 @@
     refreshTimers: [],
   };
 
-  const fullLoadPages = ['/iso', '/disk-images', '/vm/create'];
+  const fullLoadPages = ['/iso', '/disk-images', '/vm/create', '/update'];
 
   function qs(selector, root = document) {
     return root.querySelector(selector);
