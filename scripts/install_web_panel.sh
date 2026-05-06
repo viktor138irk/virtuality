@@ -17,6 +17,7 @@ LOG_DIR="/var/log/virtuality"
 LOG_FILE="${LOG_DIR}/install_web_panel_$(date +%Y%m%d_%H%M%S).log"
 PROFILE_DIR="/var/lib/virtuality/config"
 PROFILE_FILE="${PROFILE_DIR}/host_profile.json"
+UPLOAD_TMP_DIR="/var/lib/virtuality/tmp"
 TOTAL_STEPS=13
 CURRENT_STEP=0
 
@@ -31,7 +32,8 @@ CYAN="${ESC}[36m"
 BLUE="${ESC}[34m"
 GRAY="${ESC}[90m"
 
-mkdir -p "$LOG_DIR" "$PROFILE_DIR"
+mkdir -p "$LOG_DIR" "$PROFILE_DIR" "$UPLOAD_TMP_DIR"
+chmod 1777 "$UPLOAD_TMP_DIR"
 
 timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
 line() { printf '%*s\n' 72 '' | tr ' ' '─'; }
@@ -159,6 +161,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_web_console.py" ]]; then
 else
   warn "patch_web_console.py не найден, noVNC console patch пропущен"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_upload_compat.py" ]]; then
+  run_logged "upload compatibility patch применён" python3 "${REPO_DIR}/scripts/patch_upload_compat.py" "${APP_DIR}/app.py"
+else
+  warn "patch_upload_compat.py не найден, совместимость загрузки файлов пропущена"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_network_diagnostics.py" ]]; then
   run_logged "network diagnostics patch применён" python3 "${REPO_DIR}/scripts/patch_network_diagnostics.py" "${APP_DIR}/app.py"
 else
@@ -196,9 +203,13 @@ SESSION_SECRET="$(openssl rand -hex 32)"
 cat > "${APP_DIR}/.env" <<EOF
 VIRTUALITY_AUTH_USER=${AUTH_USER}
 VIRTUALITY_SESSION_SECRET=${SESSION_SECRET}
+TMPDIR=${UPLOAD_TMP_DIR}
+TEMP=${UPLOAD_TMP_DIR}
+TMP=${UPLOAD_TMP_DIR}
 EOF
 chmod 600 "${APP_DIR}/.env"
 ok "Создан ${APP_DIR}/.env"
+ok "Временный каталог загрузок: ${UPLOAD_TMP_DIR}"
 ok "Вход будет по Linux-пользователю: ${AUTH_USER}"
 
 step "Создаём Python virtualenv"
@@ -230,6 +241,9 @@ Group=root
 Environment=PYTHONUNBUFFERED=1
 Environment=VIRTUALITY_AUTH_USER=${AUTH_USER}
 Environment=VIRTUALITY_SOURCE_DIR=${REPO_DIR}
+Environment=TMPDIR=${UPLOAD_TMP_DIR}
+Environment=TEMP=${UPLOAD_TMP_DIR}
+Environment=TMP=${UPLOAD_TMP_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -251,6 +265,7 @@ Type=oneshot
 User=root
 Group=root
 Environment=VIRTUALITY_SOURCE_DIR=${REPO_DIR}
+Environment=TMPDIR=${UPLOAD_TMP_DIR}
 ExecStart=/bin/bash ${REPO_DIR}/scripts/auto_update_check.sh
 EOF
   cat > "$AUTO_UPDATE_TIMER_FILE" <<EOF
@@ -311,6 +326,7 @@ echo -e "${BOLD}Profile:${RESET}    ${LABEL:-$PROFILE}"
 echo -e "${BOLD}Arch:${RESET}       ${ARCH:-unknown}"
 echo -e "${BOLD}Service:${RESET}    virtuality-web.service"
 echo -e "${BOLD}Auto update:${RESET} virtuality-auto-update.timer / каждые 15 минут"
+echo -e "${BOLD}Upload tmp:${RESET}  ${UPLOAD_TMP_DIR}"
 echo -e "${BOLD}Status:${RESET}     systemctl status virtuality-web --no-pager"
 echo -e "${BOLD}Logs:${RESET}       journalctl -u virtuality-web -f"
 echo -e "${BOLD}Install log:${RESET} ${LOG_FILE}"
