@@ -73,13 +73,13 @@
       <article class="card">
         <div class="card-head">
           <h2>Состояние установки</h2>
-          <span class="status {{ 'ok' if info.state.status == 'success' else 'err' if info.state.status == 'error' else 'warn' }}">{{ info.state.status }}</span>
+          <span id="update-status-badge" class="status {{ 'ok' if info.state.status == 'success' else 'err' if info.state.status == 'error' else 'warn' }}">{{ info.state.status }}</span>
         </div>
-        <div class="notice">{{ info.state.message }}</div>
+        <div id="update-message" class="notice">{{ info.state.message }}</div>
         <div class="meta-grid top-space">
-          <div><span>Started</span><strong>{{ info.state.started_at or '—' }}</strong></div>
-          <div><span>Updated</span><strong>{{ info.state.updated_at or '—' }}</strong></div>
-          <div><span>Finished</span><strong>{{ info.state.finished_at or '—' }}</strong></div>
+          <div><span>Started</span><strong id="update-started">{{ info.state.started_at or '—' }}</strong></div>
+          <div><span>Updated</span><strong id="update-updated">{{ info.state.updated_at or '—' }}</strong></div>
+          <div><span>Finished</span><strong id="update-finished">{{ info.state.finished_at or '—' }}</strong></div>
         </div>
       </article>
     </section>
@@ -127,11 +127,49 @@
       <article class="card">
         <div class="card-head">
           <h2>Лог обновления</h2>
-          <span class="pill">/var/log/virtuality/update.log</span>
+          <span id="update-log-state" class="pill">live</span>
         </div>
-        <pre>{{ info.log_tail or 'Лог пока пуст.' }}</pre>
+        <pre id="update-log">{{ info.log_tail or 'Лог пока пуст.' }}</pre>
       </article>
     </section>
   </div>
+
+  <script>
+    const statusBadge = document.getElementById('update-status-badge');
+    const messageBox = document.getElementById('update-message');
+    const startedBox = document.getElementById('update-started');
+    const updatedBox = document.getElementById('update-updated');
+    const finishedBox = document.getElementById('update-finished');
+    const logBox = document.getElementById('update-log');
+    const logState = document.getElementById('update-log-state');
+
+    function statusClass(status) {
+      if (status === 'success') return 'status ok';
+      if (status === 'error') return 'status err';
+      return 'status warn';
+    }
+
+    async function refreshUpdateStatus() {
+      try {
+        const response = await fetch('/update/status', {cache: 'no-store'});
+        const payload = await response.json();
+        if (!payload.ok) return;
+        const state = payload.state || {};
+        statusBadge.textContent = state.status || 'idle';
+        statusBadge.className = statusClass(state.status || 'idle');
+        messageBox.textContent = state.message || 'Готово к проверке обновлений';
+        startedBox.textContent = state.started_at || '—';
+        updatedBox.textContent = state.updated_at || '—';
+        finishedBox.textContent = state.finished_at || '—';
+        logBox.textContent = payload.log_tail || 'Лог пока пуст.';
+        logState.textContent = 'live · ' + (payload.checked_at || 'now');
+      } catch (error) {
+        logState.textContent = 'live error';
+      }
+    }
+
+    refreshUpdateStatus();
+    setInterval(refreshUpdateStatus, 2000);
+  </script>
 </body>
 </html>
