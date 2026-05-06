@@ -16,6 +16,11 @@ RUN_TEST_VM="${VIRTUALITY_CREATE_TEST_VM:-0}"
 WEB_PORT="${VIRTUALITY_WEB_PORT:-8088}"
 LOG_DIR="/var/log/virtuality"
 LOG_FILE="${LOG_DIR}/bootstrap_$(date +%Y%m%d_%H%M%S).log"
+MIN_ROOT_FREE_MB="${VIRTUALITY_MIN_ROOT_FREE_MB:-8192}"
+MIN_VAR_FREE_MB="${VIRTUALITY_MIN_VAR_FREE_MB:-20480}"
+MIN_RAM_MB="${VIRTUALITY_MIN_RAM_MB:-4096}"
+MIN_CPU_CORES="${VIRTUALITY_MIN_CPU_CORES:-2}"
+SKIP_REQUIREMENTS="${VIRTUALITY_SKIP_REQUIREMENTS:-0}"
 
 ESC="\033"
 RESET="${ESC}[0m"
@@ -55,6 +60,56 @@ require_root() {
   [[ "$EUID" -eq 0 ]] || fail "Запусти от root: curl ... | sudo bash"
 }
 
+free_mb_for_path() {
+  local path="$1"
+  mkdir -p "$path" 2>/dev/null || true
+  df -Pm "$path" | awk 'NR==2 {print $4}'
+}
+
+check_requirements() {
+  step "Проверяем минимальные системные требования"
+  if [[ "$SKIP_REQUIREMENTS" == "1" ]]; then
+    warn "Проверка требований отключена через VIRTUALITY_SKIP_REQUIREMENTS=1"
+    return 0
+  fi
+
+  local root_free var_free ram_mb cpu_cores
+  root_free="$(free_mb_for_path /)"
+  var_free="$(free_mb_for_path /var/lib 2>/dev/null || free_mb_for_path /)"
+  ram_mb="$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)"
+  cpu_cores="$(nproc 2>/dev/null || echo 1)"
+
+  if (( root_free >= MIN_ROOT_FREE_MB )); then
+    ok "Свободно на /: ${root_free} MB минимум ${MIN_ROOT_FREE_MB} MB"
+  else
+    fail "Недостаточно места на /: ${root_free} MB. Нужно минимум ${MIN_ROOT_FREE_MB} MB. Очисти диск: apt clean; journalctl --vacuum-time=3d"
+  fi
+
+  if (( var_free >= MIN_VAR_FREE_MB )); then
+    ok "Свободно для /var/lib: ${var_free} MB минимум ${MIN_VAR_FREE_MB} MB"
+  else
+    fail "Недостаточно места для VM-хранилища /var/lib: ${var_free} MB. Нужно минимум ${MIN_VAR_FREE_MB} MB"
+  fi
+
+  if (( ram_mb >= MIN_RAM_MB )); then
+    ok "RAM: ${ram_mb} MB минимум ${MIN_RAM_MB} MB"
+  else
+    warn "RAM: ${ram_mb} MB меньше рекомендуемых ${MIN_RAM_MB} MB. Установка возможна, но VM будут ограничены"
+  fi
+
+  if (( cpu_cores >= MIN_CPU_CORES )); then
+    ok "CPU cores: ${cpu_cores} минимум ${MIN_CPU_CORES}"
+  else
+    warn "CPU cores: ${cpu_cores} меньше рекомендуемых ${MIN_CPU_CORES}"
+  fi
+
+  if grep -E -q '(vmx|svm)' /proc/cpuinfo; then
+    ok "CPU virtualization vmx/svm найдена"
+  else
+    warn "CPU virtualization vmx/svm не найдена. Проверь BIOS/UEFI или настройки VPS"
+  fi
+}
+
 ensure_user() {
   if id "$INSTALL_USER" >/dev/null 2>&1; then
     ok "Пользователь уже существует: ${INSTALL_USER}"
@@ -78,12 +133,21 @@ command -v apt >/dev/null 2>&1 || fail "apt не найден. Нужен Debian
 ok "root подтверждён"
 ok "apt найден"
 
+check_requirements
+
 step "Устанавливаем базовые пакеты"
 run_logged "apt update выполнен" apt update
 run_logged "Установлены sudo/git/curl/ca-certificates" apt install -y sudo git curl ca-certificates openssh-client nano htop
 
 step "Создаём или проверяем пользователя"
 ensure_user
+
+step "Проверяем место после создания пользователя"
+root_free_after="$(free_mb_for_path /)"
+if (( root_free_after < MIN_ROOT_FREE_MB )); then
+  fail "После подготовки пользователя свободного места стало мало: ${root_free_after} MB на /. Очисти диск и повтори установку"
+fi
+ok "Место после подготовки пользователя: ${root_free_after} MB на /"
 
 step "Клонируем или обновляем репозиторий"
 if [[ -d "$PROJECT_DIR/.git" ]]; then
