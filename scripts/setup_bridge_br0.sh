@@ -27,8 +27,10 @@ fi
 
 CURRENT_IP="$(ip -4 addr show "$IFACE" | awk '/inet / {print $2; exit}')"
 CURRENT_GW="$(ip route | awk '/default/ {print $3; exit}')"
-CURRENT_DNS="$(resolvectl dns "$IFACE" 2>/dev/null | awk -F': ' '{print $2; exit}' || true)"
-CURRENT_DNS="${CURRENT_DNS:-1.1.1.1 8.8.8.8}"
+
+# Use stable IPv4 DNS by default. Link-local IPv6 DNS can break YAML/routes without scope id.
+DNS_1="${VIRTUALITY_DNS_1:-10.0.0.1}"
+DNS_2="${VIRTUALITY_DNS_2:-1.1.1.1}"
 
 echo "============================================================"
 echo "Virtuality safe bridge setup"
@@ -38,6 +40,7 @@ echo "Bridge:          $BRIDGE"
 echo "Mode:            $MODE"
 echo "Current IP:      ${CURRENT_IP:-unknown}"
 echo "Current gateway: ${CURRENT_GW:-unknown}"
+echo "DNS:             ${DNS_1}, ${DNS_2}"
 echo "Backup:          $BACKUP_DIR"
 echo
 
@@ -61,7 +64,7 @@ echo "Netplan rollback applied from $BACKUP_DIR"
 EOF
 chmod +x "$ROLLBACK_SCRIPT"
 
-# Keep cloud-init file neutral for this interface to avoid duplicate DHCP.
+# Keep existing netplan files neutral for this interface to avoid duplicate DHCP/IP.
 for file in "$NETPLAN_DIR"/*.yaml; do
   [[ "$file" == "$BRIDGE_FILE" ]] && continue
   if grep -q "${IFACE}:" "$file"; then
@@ -84,10 +87,6 @@ if [[ "$MODE" == "static" ]]; then
     echo "Откат: sudo $ROLLBACK_SCRIPT"
     exit 1
   fi
-  DNS_YAML=""
-  for dns in $CURRENT_DNS; do
-    DNS_YAML="${DNS_YAML}        - ${dns}\n"
-  done
   cat > "$BRIDGE_FILE" <<EOF
 network:
   version: 2
@@ -106,7 +105,9 @@ network:
           via: ${CURRENT_GW}
       nameservers:
         addresses:
-$(printf "$DNS_YAML")      dhcp4: false
+          - ${DNS_1}
+          - ${DNS_2}
+      dhcp4: false
       dhcp6: false
       parameters:
         stp: false
