@@ -108,7 +108,7 @@ step "Обновляем apt cache"
 run_logged "apt update выполнен" apt update
 
 step "Устанавливаем системные зависимости"
-run_logged "Пакеты Python/venv/pip/rsync установлены" apt install -y python3 python3-venv python3-pip rsync openssl
+run_logged "Пакеты Python/venv/pip/rsync/nftables установлены" apt install -y python3 python3-venv python3-pip rsync openssl nftables
 
 step "Копируем web-панель в /opt/virtuality"
 run_logged "Создана директория /opt/virtuality" mkdir -p /opt/virtuality
@@ -198,5 +198,5 @@ echo -e "${BOLD}Logs:${RESET}       journalctl -u virtuality-web -f"
 echo -e "${BOLD}Install log:${RESET} ${LOG_FILE}"
 echo
 line
-echo -e "${DIM}Следующий шаг: страница создания VM из интерфейса.${RESET}"
+echo -e "${DIM}Следующий шаг: настройка сети /network и создание VM.${RESET}"
 line
