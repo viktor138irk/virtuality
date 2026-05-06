@@ -63,8 +63,24 @@ log "before version: $BEFORE_VERSION"
 write_state "running" "Получаем изменения из GitHub"
 run_step git fetch "$REMOTE" "$BRANCH"
 
-write_state "running" "Применяем git pull"
-run_step git pull --ff-only "$REMOTE" "$BRANCH"
+TARGET_REF="${REMOTE}/${BRANCH}"
+TARGET_COMMIT="$(git rev-parse "$TARGET_REF" 2>/dev/null || true)"
+if [ -z "$TARGET_COMMIT" ]; then
+  log "ERROR: remote ref not found: $TARGET_REF"
+  write_state "error" "Не найден удалённый ref: $TARGET_REF"
+  exit 1
+fi
+
+LOCAL_STATUS="$(git status --porcelain 2>/dev/null || true)"
+if [ -n "$LOCAL_STATUS" ]; then
+  log "Local changes before update:"
+  printf '%s\n' "$LOCAL_STATUS" >> "$LOG_FILE"
+fi
+
+write_state "running" "Синхронизируем исходники с GitHub"
+log "Deploy mode: git reset --hard $TARGET_REF"
+run_step git reset --hard "$TARGET_REF"
+run_step git clean -fd
 
 AFTER_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
 AFTER_VERSION="$(cat VERSION 2>/dev/null || echo unknown)"
