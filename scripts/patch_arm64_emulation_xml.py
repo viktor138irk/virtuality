@@ -19,6 +19,32 @@ def is_arm64_guest_on_x86(guest_arch: str, profile: dict[str, Any]) -> bool:
     return guest_arch == "aarch64" and is_x86_host(profile)
 
 
+def available_memory_mib() -> int:
+    try:
+        for line in Path('/proc/meminfo').read_text().splitlines():
+            if line.startswith('MemAvailable:'):
+                return int(line.split()[1]) // 1024
+    except Exception:
+        return 0
+    return 0
+
+
+def arm64_emulation_memory_error(memory: int) -> str | None:
+    available = available_memory_mib()
+    requested = int(memory)
+    reserve = 768
+    if available <= 0:
+        return None
+    if requested + reserve <= available:
+        return None
+    recommended = max(512, available - reserve)
+    return (
+        f"Недостаточно RAM для ARM64-эмуляции: запрошено {requested} MB, "
+        f"доступно около {available} MB, нужен запас минимум {reserve} MB. "
+        f"Уменьши RAM VM примерно до {recommended} MB или освободи память на хосте."
+    )
+
+
 def xml_escape(value: str) -> str:
     return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
@@ -88,6 +114,41 @@ if 'def arm64_emulation_xml(' not in text:
     text = text.replace(marker, helpers + marker, 1)
     changed.append('ARM64 emulation XML helpers added')
 else:
+    if 'def arm64_emulation_memory_error(' not in text:
+        marker = '\n\ndef xml_escape(value: str) -> str:'
+        if marker not in text:
+            raise SystemExit('xml_escape marker not found')
+        memory_helpers = r'''
+
+def available_memory_mib() -> int:
+    try:
+        for line in Path('/proc/meminfo').read_text().splitlines():
+            if line.startswith('MemAvailable:'):
+                return int(line.split()[1]) // 1024
+    except Exception:
+        return 0
+    return 0
+
+
+def arm64_emulation_memory_error(memory: int) -> str | None:
+    available = available_memory_mib()
+    requested = int(memory)
+    reserve = 768
+    if available <= 0:
+        return None
+    if requested + reserve <= available:
+        return None
+    recommended = max(512, available - reserve)
+    return (
+        f"Недостаточно RAM для ARM64-эмуляции: запрошено {requested} MB, "
+        f"доступно около {available} MB, нужен запас минимум {reserve} MB. "
+        f"Уменьши RAM VM примерно до {recommended} MB или освободи память на хосте."
+    )
+'''
+        text = text.replace(marker, memory_helpers + marker, 1)
+        changed.append('ARM64 memory guard helpers added')
+    else:
+        changed.append('ARM64 memory guard helpers already present')
     changed.append('ARM64 emulation XML helpers already present')
 
 old_disk_cmd = '''    if source_type == "disk_image":
@@ -104,6 +165,9 @@ new_disk_cmd = '''    if source_type == "disk_image":
         source_format = disk_image_format(source_disk)
         convert_cmd = f"qemu-img convert -p -f {source_format} -O qcow2 {source_disk} {disk_path}"
         if is_arm64_guest_on_x86(resolved_guest_arch, profile):
+            memory_error = arm64_emulation_memory_error(memory)
+            if memory_error:
+                return vm_form_context(request, error=memory_error, form=form, status_code=400)
             create_cmd = make_arm64_emulation_script(name, memory, vcpus, disk_path, network_mode, bridge)
             cmd = ["bash", "-lc", f"set -euo pipefail; {convert_cmd}; {create_cmd}"]
         else:
@@ -114,9 +178,27 @@ new_disk_cmd = '''    if source_type == "disk_image":
             return vm_form_context(request, error="ARM64 ISO на x86-хосте пока не поддерживается. Загрузи готовый ARM64 .img/.qcow2 в разделе «Диски» и создай VM из готового диска.", form=form, status_code=400)
         cmd += ["--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"]
 '''
+old_arm64_xml_cmd = '''        if is_arm64_guest_on_x86(resolved_guest_arch, profile):
+            create_cmd = make_arm64_emulation_script(name, memory, vcpus, disk_path, network_mode, bridge)
+            cmd = ["bash", "-lc", f"set -euo pipefail; {convert_cmd}; {create_cmd}"]
+        else:
+'''
+new_arm64_xml_cmd = '''        if is_arm64_guest_on_x86(resolved_guest_arch, profile):
+            memory_error = arm64_emulation_memory_error(memory)
+            if memory_error:
+                return vm_form_context(request, error=memory_error, form=form, status_code=400)
+            create_cmd = make_arm64_emulation_script(name, memory, vcpus, disk_path, network_mode, bridge)
+            cmd = ["bash", "-lc", f"set -euo pipefail; {convert_cmd}; {create_cmd}"]
+        else:
+'''
 if old_disk_cmd in text:
     text = text.replace(old_disk_cmd, new_disk_cmd, 1)
-    changed.append('ARM64 disk image on x86 uses direct libvirt XML')
+    changed.append('ARM64 disk image on x86 uses direct libvirt XML with memory guard')
+elif old_arm64_xml_cmd in text:
+    text = text.replace(old_arm64_xml_cmd, new_arm64_xml_cmd, 1)
+    changed.append('ARM64 memory guard added to existing XML path')
+elif 'memory_error = arm64_emulation_memory_error(memory)' in text:
+    changed.append('ARM64 memory guard already present')
 elif 'make_arm64_emulation_script' in text:
     changed.append('ARM64 disk image XML path already present')
 else:
