@@ -67,8 +67,24 @@ fail() { echo -e "  ${RED}✗${RESET} $*"; log "ERROR: $*"; echo; echo -e "${RED
 run_logged() {
   local description="$1"
   shift
+  local start_ts pid code spinner elapsed symbol i
   log "RUN: $*"
-  if "$@" >> "$LOG_FILE" 2>&1; then
+  start_ts="$(date +%s)"
+  "$@" >> "$LOG_FILE" 2>&1 &
+  pid=$!
+  spinner=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    elapsed=$(( $(date +%s) - start_ts ))
+    symbol="${spinner[$((i % ${#spinner[@]}))]}"
+    printf "\r  ${CYAN}%s${RESET} %s... ${GRAY}%ss${RESET} ${GRAY}(лог: %s)${RESET}" "$symbol" "$description" "$elapsed" "$LOG_FILE"
+    sleep 1
+    i=$((i + 1))
+  done
+  wait "$pid"
+  code=$?
+  printf "\r%*s\r" 120 ""
+  if [[ "$code" -eq 0 ]]; then
     ok "$description"
   else
     fail "$description"
