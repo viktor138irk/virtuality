@@ -44,7 +44,33 @@ ok() { echo -e "  ${GREEN}✓${RESET} $*"; log "OK: $*"; }
 warn() { echo -e "  ${YELLOW}!${RESET} $*"; log "WARN: $*"; }
 fail() { echo -e "  ${RED}✗${RESET} $*"; log "ERROR: $*"; echo; echo -e "${RED}${BOLD}Bootstrap остановлен.${RESET} Лог: ${LOG_FILE}"; exit 1; }
 step() { echo; echo -e "${BLUE}${BOLD}▶${RESET} ${BOLD}$*${RESET}"; log "STEP: $*"; }
-run_logged() { local desc="$1"; shift; log "RUN: $*"; if "$@" >> "$LOG_FILE" 2>&1; then ok "$desc"; else fail "$desc"; fi; }
+
+run_logged() {
+  local desc="$1"
+  shift
+  local start_ts pid code spinner elapsed symbol
+  log "RUN: $*"
+  start_ts="$(date +%s)"
+  "$@" >> "$LOG_FILE" 2>&1 &
+  pid=$!
+  spinner=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    elapsed=$(( $(date +%s) - start_ts ))
+    symbol="${spinner[$((i % ${#spinner[@]}))]}"
+    printf "\r  ${CYAN}%s${RESET} %s... ${GRAY}%ss${RESET} ${GRAY}(лог: %s)${RESET}" "$symbol" "$desc" "$elapsed" "$LOG_FILE"
+    sleep 1
+    i=$((i + 1))
+  done
+  wait "$pid"
+  code=$?
+  printf "\r%*s\r" 120 ""
+  if [[ "$code" -eq 0 ]]; then
+    ok "$desc"
+  else
+    fail "$desc"
+  fi
+}
 
 header() {
   clear 2>/dev/null || true
@@ -193,7 +219,21 @@ step "Устанавливаем консольный dashboard"
 run_logged "Console dashboard установлен" bash "$PROJECT_DIR/scripts/install_console_dashboard.sh"
 
 step "Устанавливаем web-панель"
-VIRTUALITY_AUTH_USER="$INSTALL_USER" VIRTUALITY_WEB_PORT="$WEB_PORT" bash "$PROJECT_DIR/scripts/install_web_panel.sh" >> "$LOG_FILE" 2>&1 && ok "Web-панель установлена" || fail "Web-панель не установлена"
+VIRTUALITY_AUTH_USER="$INSTALL_USER" VIRTUALITY_WEB_PORT="$WEB_PORT" bash "$PROJECT_DIR/scripts/install_web_panel.sh" >> "$LOG_FILE" 2>&1 &
+web_pid=$!
+web_start="$(date +%s)"
+web_i=0
+web_spinner=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+while kill -0 "$web_pid" 2>/dev/null; do
+  web_elapsed=$(( $(date +%s) - web_start ))
+  printf "\r  ${CYAN}%s${RESET} Web-панель устанавливается... ${GRAY}%ss${RESET} ${GRAY}(лог: %s)${RESET}" "${web_spinner[$((web_i % ${#web_spinner[@]}))]}" "$web_elapsed" "$LOG_FILE"
+  sleep 1
+  web_i=$((web_i + 1))
+done
+wait "$web_pid"
+web_code=$?
+printf "\r%*s\r" 120 ""
+[[ "$web_code" -eq 0 ]] && ok "Web-панель установлена" || fail "Web-панель не установлена"
 
 if [[ "$RUN_BRIDGE" == "1" ]]; then
   step "Настраиваем bridge br0"
@@ -212,7 +252,7 @@ fi
 
 if [[ "$RUN_TEST_VM" == "1" ]]; then
   step "Создаём тестовую VM"
-  bash "$PROJECT_DIR/scripts/create_test_vm.sh" >> "$LOG_FILE" 2>&1 && ok "Тестовая VM создана" || warn "Тестовая VM не создана. Проверь ISO/bridge/log"
+  run_logged "Тестовая VM создана" bash "$PROJECT_DIR/scripts/create_test_vm.sh" || warn "Тестовая VM не создана. Проверь ISO/bridge/log"
 fi
 
 step "Финальная диагностика"
