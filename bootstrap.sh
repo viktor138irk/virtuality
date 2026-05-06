@@ -8,7 +8,11 @@ set -euo pipefail
 
 REPO_URL="${VIRTUALITY_REPO_URL:-https://github.com/viktor138irk/virtuality.git}"
 INSTALL_USER="${VIRTUALITY_USER:-viktor}"
-INSTALL_HOME="/home/${INSTALL_USER}"
+if [[ "$INSTALL_USER" == "root" ]]; then
+  INSTALL_HOME="/root"
+else
+  INSTALL_HOME="/home/${INSTALL_USER}"
+fi
 PROJECT_DIR="${INSTALL_HOME}/virtuality"
 RUN_BRIDGE="${VIRTUALITY_SETUP_BRIDGE:-0}"
 BRIDGE_IFACE="${VIRTUALITY_BRIDGE_IFACE:-}"
@@ -66,6 +70,17 @@ free_mb_for_path() {
   df -Pm "$path" | awk 'NR==2 {print $4}'
 }
 
+check_password_state() {
+  local user="$1"
+  local hash
+  hash="$(getent shadow "$user" | cut -d: -f2 || true)"
+  if [[ -z "$hash" || "$hash" == "!" || "$hash" == "*" || "$hash" == "!!" ]]; then
+    warn "У пользователя ${user} пароль не задан или заблокирован. Для входа в панель выполни: passwd ${user}"
+  else
+    ok "У пользователя ${user} есть пароль для входа в панель"
+  fi
+}
+
 check_requirements() {
   step "Проверяем минимальные системные требования"
   if [[ "$SKIP_REQUIREMENTS" == "1" ]]; then
@@ -111,6 +126,12 @@ check_requirements() {
 }
 
 ensure_user() {
+  if [[ "$INSTALL_USER" == "root" ]]; then
+    ok "Установка выбрана из-под root. Пользователь root уже существует"
+    check_password_state root
+    return 0
+  fi
+
   if id "$INSTALL_USER" >/dev/null 2>&1; then
     ok "Пользователь уже существует: ${INSTALL_USER}"
   else
@@ -119,10 +140,15 @@ ensure_user() {
   fi
   usermod -aG sudo "$INSTALL_USER" >> "$LOG_FILE" 2>&1 || true
   ok "Пользователь ${INSTALL_USER} добавлен в sudo"
+  check_password_state "$INSTALL_USER"
 }
 
 run_as_user() {
-  sudo -H -u "$INSTALL_USER" bash -lc "$*"
+  if [[ "$INSTALL_USER" == "root" ]]; then
+    bash -lc "$*"
+  else
+    sudo -H -u "$INSTALL_USER" bash -lc "$*"
+  fi
 }
 
 header
@@ -142,7 +168,7 @@ run_logged "Установлены sudo/git/curl/ca-certificates" apt install -y
 step "Создаём или проверяем пользователя"
 ensure_user
 
-step "Проверяем место после создания пользователя"
+step "Проверяем место после подготовки пользователя"
 root_free_after="$(free_mb_for_path /)"
 if (( root_free_after < MIN_ROOT_FREE_MB )); then
   fail "После подготовки пользователя свободного места стало мало: ${root_free_after} MB на /. Очисти диск и повтори установку"
@@ -150,6 +176,7 @@ fi
 ok "Место после подготовки пользователя: ${root_free_after} MB на /"
 
 step "Клонируем или обновляем репозиторий"
+mkdir -p "$INSTALL_HOME"
 if [[ -d "$PROJECT_DIR/.git" ]]; then
   run_logged "Репозиторий обновлён" run_as_user "cd '$PROJECT_DIR' && git reset --hard origin/main && git pull"
 else
@@ -209,7 +236,7 @@ echo -e "${BOLD}Project:${RESET}       ${PROJECT_DIR}"
 echo -e "${BOLD}Log:${RESET}           ${LOG_FILE}"
 echo
 echo -e "${BOLD}После установки:${RESET}"
-echo "  sudo passwd ${INSTALL_USER}        # если пароль ещё не задан"
+echo "  passwd ${INSTALL_USER}        # если пароль ещё не задан или заблокирован"
 echo "  sudo vhealth"
 echo "  cd ${PROJECT_DIR}"
 echo "  ip -br a"
