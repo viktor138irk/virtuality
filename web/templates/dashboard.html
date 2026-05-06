@@ -21,11 +21,27 @@
         <a class="link-pill" href="/network">Сеть</a>
         <a class="link-pill" href="/operations">Операции</a>
         <a class="link-pill" href="/iso">ISO</a>
-        <a class="link-pill" href="/update">Обновления</a>
+        <a class="link-pill" href="/disk-images">Диски</a>
+        <a class="link-pill {{ 'accent' if update_notice and update_notice.has_update else '' }}" href="/update">Обновления{% if update_notice and update_notice.has_update %} · доступно{% endif %}</a>
         <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
         <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
       </div>
     </header>
+
+    {% if update_notice and update_notice.has_update %}
+      <section class="card update-banner">
+        <div>
+          <div class="label">Доступно обновление Virtuality</div>
+          <div class="value small">{{ update_notice.current_version }} → {{ update_notice.latest_version }}</div>
+          <div class="muted small-note">
+            Пропущено версий: {{ update_notice.missing_count }} · новых коммитов: {{ update_notice.commit_count }}
+          </div>
+        </div>
+        <div class="actions">
+          <a class="link-pill accent" href="/update">Посмотреть изменения</a>
+        </div>
+      </section>
+    {% endif %}
 
     <section class="grid stats">
       <article class="card stat">
@@ -115,7 +131,7 @@
         <div class="quick-actions">
           <a class="big-action" href="/vm/create">
             <strong>Создать VM</strong>
-            <span>Запуск мастера с ISO, RAM, CPU, диском и выбором Bridge/NAT</span>
+            <span>Запуск мастера с ISO, RAM, CPU, диском, архитектурой и выбором Bridge/NAT</span>
           </a>
           <a class="big-action" href="/network">
             <strong>Сеть</strong>
@@ -124,6 +140,10 @@
           <a class="big-action" href="/iso">
             <strong>ISO-менеджер</strong>
             <span>Загрузка, удаление и refresh ISO storage pool</span>
+          </a>
+          <a class="big-action" href="/disk-images">
+            <strong>Диски</strong>
+            <span>Загрузка .img/.raw/.qcow2 и импорт готовых системных образов</span>
           </a>
           <a class="big-action" href="/operations">
             <strong>Журнал операций</strong>
@@ -144,6 +164,7 @@
           <a class="link-pill" href="/network">Сеть</a>
           <a class="link-pill" href="/operations">Операции</a>
           <a class="link-pill" href="/iso">ISO</a>
+          <a class="link-pill" href="/disk-images">Диски</a>
           <a class="link-pill" href="/update">Обновления</a>
           <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
         </div>
