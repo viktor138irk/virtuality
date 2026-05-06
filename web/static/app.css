@@ -114,6 +114,10 @@ pre { overflow: auto; margin: 12px 0 0; padding: 12px; border-radius: 7px; backg
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .auth-form input, .form-grid input, .form-grid select { width: 100%; border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 7px; padding: 10px 11px; outline: none; }
 .auth-form input:focus, .form-grid input:focus, .form-grid select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(25,118,210,.12); }
+.form-subcard { display: grid; gap: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.form-subcard label { margin: 0; }
+.check-row { display: flex !important; grid-template-columns: none !important; align-items: flex-start; gap: 9px !important; color: var(--text) !important; font-size: 13px !important; }
+.check-row input { width: auto !important; margin-top: 2px; }
 .alert, .notice { padding: 10px 12px; border-radius: 7px; margin: 0 0 12px; font-weight: 700; }
 .notice { margin: 0; color: var(--accent); background: #eef6ff; border: 1px solid #bfdbfe; }
 .alert.danger { color: var(--red); background: rgba(220,38,38,.08); border: 1px solid rgba(220,38,38,.22); }
