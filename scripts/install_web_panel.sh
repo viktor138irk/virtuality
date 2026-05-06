@@ -133,7 +133,7 @@ step "Обновляем apt cache"
 run_logged "apt update выполнен" apt update
 
 step "Устанавливаем системные зависимости под выбранную сборку"
-COMMON_PACKAGES=(python3 python3-venv python3-pip rsync openssl nftables novnc python3-websockify)
+COMMON_PACKAGES=(python3 python3-venv python3-pip rsync openssl curl wget unzip nftables novnc python3-websockify)
 X86_PACKAGES=(qemu-system-x86 qemu-system-arm qemu-efi-aarch64 virtinst libvirt-daemon-system libvirt-clients bridge-utils cloud-image-utils)
 ARM_PACKAGES=(qemu-system-arm qemu-efi-aarch64 virtinst libvirt-daemon-system libvirt-clients bridge-utils cloud-image-utils)
 PACKAGES=("${COMMON_PACKAGES[@]}")
