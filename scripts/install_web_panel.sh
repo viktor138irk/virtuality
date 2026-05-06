@@ -1,33 +1,150 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Virtuality Web Panel Installer
+# Clean step-by-step installer with readable statuses and log file.
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WEB_DIR="${REPO_DIR}/web"
 APP_DIR="/opt/virtuality/web"
 VENV_DIR="/opt/virtuality/venv"
 SERVICE_FILE="/etc/systemd/system/virtuality-web.service"
 PORT="${VIRTUALITY_WEB_PORT:-8088}"
+LOG_DIR="/var/log/virtuality"
+LOG_FILE="${LOG_DIR}/install_web_panel_$(date +%Y%m%d_%H%M%S).log"
+TOTAL_STEPS=10
+CURRENT_STEP=0
 
-if [[ "$EUID" -ne 0 ]]; then
-  echo "Ошибка: запусти через sudo: sudo bash scripts/install_web_panel.sh"
+ESC="\033"
+RESET="${ESC}[0m"
+BOLD="${ESC}[1m"
+DIM="${ESC}[2m"
+GREEN="${ESC}[32m"
+YELLOW="${ESC}[33m"
+RED="${ESC}[31m"
+CYAN="${ESC}[36m"
+BLUE="${ESC}[34m"
+GRAY="${ESC}[90m"
+
+mkdir -p "$LOG_DIR"
+
+timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
+line() { printf '%*s\n' 72 '' | tr ' ' '─'; }
+
+log() {
+  echo "[$(timestamp)] $*" >> "$LOG_FILE"
+}
+
+print_header() {
+  clear 2>/dev/null || true
+  echo -e "${CYAN}${BOLD}╭────────────────────────────────────────────────────────────╮${RESET}"
+  echo -e "${CYAN}${BOLD}│${RESET} ${BOLD}Virtuality Web Panel Installer${RESET}                         ${CYAN}${BOLD}│${RESET}"
+  echo -e "${CYAN}${BOLD}│${RESET} Панель управления VM, сервисами, сетью и storage pools     ${CYAN}${BOLD}│${RESET}"
+  echo -e "${CYAN}${BOLD}╰────────────────────────────────────────────────────────────╯${RESET}"
+  echo
+  echo -e "${GRAY}Лог установки:${RESET} ${LOG_FILE}"
+  echo -e "${GRAY}Порт панели:${RESET} ${PORT}"
+  echo
+}
+
+step() {
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  echo
+  echo -e "${BLUE}${BOLD}[${CURRENT_STEP}/${TOTAL_STEPS}]${RESET} ${BOLD}$*${RESET}"
+  log "STEP ${CURRENT_STEP}/${TOTAL_STEPS}: $*"
+}
+
+ok() {
+  echo -e "  ${GREEN}✓${RESET} $*"
+  log "OK: $*"
+}
+
+warn() {
+  echo -e "  ${YELLOW}!${RESET} $*"
+  log "WARN: $*"
+}
+
+fail() {
+  echo -e "  ${RED}✗${RESET} $*"
+  log "ERROR: $*"
+  echo
+  echo -e "${RED}${BOLD}Установка остановлена.${RESET} Подробности в логе: ${LOG_FILE}"
   exit 1
+}
+
+run_logged() {
+  local description="$1"
+  shift
+  log "RUN: $*"
+  if "$@" >> "$LOG_FILE" 2>&1; then
+    ok "$description"
+  else
+    fail "$description"
+  fi
+}
+
+service_state() {
+  systemctl is-active "$1" 2>/dev/null || echo "inactive"
+}
+
+require_root() {
+  if [[ "$EUID" -ne 0 ]]; then
+    fail "Запусти через sudo: sudo bash scripts/install_web_panel.sh"
+  fi
+}
+
+print_header
+
+step "Проверяем права и структуру проекта"
+require_root
+ok "Права root подтверждены"
+if [[ -d "$WEB_DIR" ]]; then
+  ok "Исходники web найдены: $WEB_DIR"
+else
+  fail "Не найдена директория web: $WEB_DIR"
+fi
+if [[ -f "$WEB_DIR/app.py" ]]; then
+  ok "FastAPI entrypoint найден: web/app.py"
+else
+  fail "Не найден web/app.py"
+fi
+if [[ -f "$WEB_DIR/requirements.txt" ]]; then
+  ok "requirements.txt найден"
+else
+  fail "Не найден web/requirements.txt"
 fi
 
-if [[ ! -d "$WEB_DIR" ]]; then
-  echo "Ошибка: web directory not found: $WEB_DIR"
-  exit 1
+step "Проверяем базовые команды"
+for cmd in apt systemctl rsync python3 hostname; do
+  if command -v "$cmd" >/dev/null 2>&1; then
+    ok "$cmd найден: $(command -v "$cmd")"
+  else
+    fail "$cmd не найден"
+  fi
+done
+
+step "Обновляем apt cache"
+run_logged "apt update выполнен" apt update
+
+step "Устанавливаем системные зависимости"
+run_logged "Пакеты Python/venv/pip/rsync установлены" apt install -y python3 python3-venv python3-pip rsync
+
+step "Копируем web-панель в /opt/virtuality"
+run_logged "Создана директория /opt/virtuality" mkdir -p /opt/virtuality
+run_logged "Файлы панели синхронизированы в $APP_DIR" rsync -a --delete "$WEB_DIR/" "$APP_DIR/"
+
+step "Создаём Python virtualenv"
+if [[ -d "$VENV_DIR" ]]; then
+  warn "Virtualenv уже существует, будет переиспользован: $VENV_DIR"
+else
+  run_logged "Virtualenv создан: $VENV_DIR" python3 -m venv "$VENV_DIR"
 fi
 
-apt update
-apt install -y python3 python3-venv python3-pip rsync
+step "Устанавливаем Python-зависимости"
+run_logged "pip обновлён" "$VENV_DIR/bin/pip" install --upgrade pip
+run_logged "Python-зависимости установлены" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 
-mkdir -p /opt/virtuality
-rsync -a --delete "$WEB_DIR/" "$APP_DIR/"
-
-python3 -m venv "$VENV_DIR"
-"$VENV_DIR/bin/pip" install --upgrade pip
-"$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
-
+step "Создаём systemd service"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Virtuality Web Panel
@@ -47,21 +164,46 @@ Environment=PYTHONUNBUFFERED=1
 [Install]
 WantedBy=multi-user.target
 EOF
+ok "Создан service: $SERVICE_FILE"
+run_logged "systemd daemon-reload выполнен" systemctl daemon-reload
 
-systemctl daemon-reload
-systemctl enable --now virtuality-web.service
+step "Запускаем Virtuality Web Panel"
+run_logged "virtuality-web.service включён и запущен" systemctl enable --now virtuality-web.service
+sleep 2
+STATE="$(service_state virtuality-web.service)"
+if [[ "$STATE" == "active" ]]; then
+  ok "virtuality-web.service active"
+else
+  warn "virtuality-web.service состояние: $STATE"
+  journalctl -u virtuality-web.service -n 40 --no-pager >> "$LOG_FILE" 2>&1 || true
+fi
 
+step "Настраиваем firewall и проверяем порт"
 if command -v ufw >/dev/null 2>&1; then
-  ufw allow "${PORT}/tcp" || true
+  ufw allow "${PORT}/tcp" >> "$LOG_FILE" 2>&1 || warn "Не удалось добавить UFW правило для ${PORT}/tcp"
+  ok "UFW правило добавлено/проверено: ${PORT}/tcp"
+else
+  warn "ufw не установлен, firewall-правило пропущено"
+fi
+if command -v ss >/dev/null 2>&1 && ss -tulpn | grep -q ":${PORT}"; then
+  ok "Порт ${PORT} слушается"
+else
+  warn "Порт ${PORT} пока не найден в ss; проверь service logs"
 fi
 
 SERVER_IP="$(hostname -I | awk '{print $1}')"
 
-echo "============================================================"
-echo "Virtuality Web Panel installed"
-echo "============================================================"
-echo "URL: http://${SERVER_IP}:${PORT}"
-echo "Service: virtuality-web.service"
-echo "Status: systemctl status virtuality-web --no-pager"
-echo "Logs: journalctl -u virtuality-web -f"
-echo "============================================================"
+echo
+echo -e "${GREEN}${BOLD}╭────────────────────────────────────────────────────────────╮${RESET}"
+echo -e "${GREEN}${BOLD}│${RESET} ${BOLD}Установка Virtuality Web Panel завершена${RESET}                 ${GREEN}${BOLD}│${RESET}"
+echo -e "${GREEN}${BOLD}╰────────────────────────────────────────────────────────────╯${RESET}"
+echo
+echo -e "${BOLD}URL:${RESET}        http://${SERVER_IP}:${PORT}"
+echo -e "${BOLD}Service:${RESET}    virtuality-web.service"
+echo -e "${BOLD}Status:${RESET}     systemctl status virtuality-web --no-pager"
+echo -e "${BOLD}Logs:${RESET}       journalctl -u virtuality-web -f"
+echo -e "${BOLD}Install log:${RESET} ${LOG_FILE}"
+echo
+line
+echo -e "${DIM}Следующий шаг: добавить авторизацию и страницу создания VM.${RESET}"
+line
