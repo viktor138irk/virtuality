@@ -19,7 +19,7 @@ if not dashboard_template_path.exists():
 text = app_path.read_text(encoding='utf-8')
 
 # Older versions of this patch injected helper blocks. Remove them first so repeated
-# installs stay deterministic and do not accumulate stale NETWORK_NAME references.
+# installs stay deterministic and do not accumulate stale references.
 text, removed_helpers = re.subn(
     r"\n\ndef parse_dhcp_leases_output\(output: str\).*?\n\ndef parse_virsh_list\(\) -> list\[dict\[str, str\]\]:",
     "\n\ndef parse_virsh_list() -> list[dict[str, str]]:",
@@ -65,9 +65,11 @@ new_parse_virsh_list = '''def parse_virsh_list() -> list[dict[str, str]]:
     return rows
 '''
 
+pattern = r"def parse_virsh_list\(\) -> list\[dict\[str, str\]\]:.*?\n\ndef parse_pool_list\(\) -> list\[dict\[str, str\]\]:"
+replacement = new_parse_virsh_list + "\n\ndef parse_pool_list() -> list[dict[str, str]]:"
 text, replaced = re.subn(
-    r"def parse_virsh_list\(\) -> list\[dict\[str, str\]\]:.*?\n\ndef parse_pool_list\(\) -> list\[dict\[str, str\]\]:",
-    new_parse_virsh_list + "\n\ndef parse_pool_list() -> list[dict[str, str]]:",
+    pattern,
+    lambda _match: replacement,
     text,
     count=1,
     flags=re.S,
@@ -108,6 +110,4 @@ for item in changed:
 for item in warnings:
     print(f'WARN: {item}')
 
-# This patch must never break the installer. If it cannot find an older marker,
-# the panel can still run without the extra IP column logic.
 raise SystemExit(0)
