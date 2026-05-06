@@ -10,6 +10,7 @@ CONFIG_DIR = Path('/var/lib/virtuality/config')
 NETWORK_DIR = Path('/var/lib/virtuality/network')
 NFT_DIR = Path('/etc/virtuality/nftables')
 PORT_FORWARDS_FILE = NETWORK_DIR / 'port_forwards.json'
+NAT_XML_FILE = NETWORK_DIR / 'virtuality-nat.xml'
 NFT_FILE = NFT_DIR / 'virtuality.nft'
 NETWORK_NAME = 'virtuality-nat'
 NAT_BRIDGE = 'virbr100'
@@ -175,12 +176,20 @@ def list_libvirt_networks() -> list[dict[str, str]]:
     return rows
 
 
+def write_nat_network_xml() -> Path:
+    ensure_dirs()
+    tmp_path = NAT_XML_FILE.with_suffix('.xml.tmp')
+    tmp_path.write_text(nat_network_xml())
+    tmp_path.replace(NAT_XML_FILE)
+    return NAT_XML_FILE
+
+
 def create_nat_network() -> dict[str, Any]:
     ensure_dirs()
-    Path('/tmp/virtuality-nat.xml').write_text(nat_network_xml())
+    xml_file = write_nat_network_xml()
     existing = run_cmd(['virsh', 'net-info', NETWORK_NAME], timeout=8)
     if not existing['ok']:
-        defined = run_cmd(['virsh', 'net-define', '/tmp/virtuality-nat.xml'], timeout=15)
+        defined = run_cmd(['virsh', 'net-define', str(xml_file)], timeout=15)
         if not defined['ok']:
             raise NetworkError(defined['stderr'] or defined['stdout'] or 'Не удалось создать libvirt NAT-сеть')
     started = run_cmd(['virsh', 'net-start', NETWORK_NAME], timeout=15)
