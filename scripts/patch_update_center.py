@@ -1,10 +1,26 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import runpy
 import sys
 
 app_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/opt/virtuality/web/app.py')
 if not app_path.exists():
     raise SystemExit(f'app.py not found: {app_path}')
+
+script_dir = Path(__file__).resolve().parent
+
+# New installs run this patch from install_web_panel.sh. Keep feature patches here too
+# so a fresh install gets disk images, VM architecture selector and update center
+# without requiring extra manual commands.
+for optional_patch in ('patch_disk_images.py', 'patch_vm_architecture.py'):
+    patch_path = script_dir / optional_patch
+    if patch_path.exists():
+        old_argv = sys.argv[:]
+        try:
+            sys.argv = [str(patch_path), str(app_path)]
+            runpy.run_path(str(patch_path), run_name='__main__')
+        finally:
+            sys.argv = old_argv
 
 text = app_path.read_text()
 changed = []
