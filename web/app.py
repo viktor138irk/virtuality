@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
+import host_profile
 import network_core
 from network_core import NetworkError
 
@@ -338,8 +339,15 @@ def network_summary() -> dict[str, str]:
     return {"interfaces": run_cmd(["ip", "-br", "a"])["stdout"], "routes": run_cmd(["ip", "route"])["stdout"]}
 
 
+def default_network_mode() -> str:
+    profile = host_profile.load_host_profile()
+    return profile.get("recommended_network", "bridge")
+
+
 def vm_form_context(request: Request, error: str | None = None, form: dict[str, Any] | None = None, status_code: int = 200):
-    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": error, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "network_mode": "nat", "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
+    profile = host_profile.load_host_profile()
+    default_mode = profile.get("recommended_network", "nat")
+    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -374,7 +382,26 @@ def dashboard(request: Request):
     if auth_redirect:
         return auth_redirect
     services = {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}
-    return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "user": AUTH_USER, "operations": list_operations(5), "operation_css": operation_css})
+    return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "user": AUTH_USER, "profile": host_profile.load_host_profile(), "operations": list_operations(5), "operation_css": operation_css})
+
+
+@app.get("/host", response_class=HTMLResponse)
+def host_page(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    profile = host_profile.load_host_profile()
+    return templates.TemplateResponse("host.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "profile": profile, "profile_json": json.dumps(profile, ensure_ascii=False, indent=2)})
+
+
+@app.post("/host/refresh")
+def host_refresh(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    profile = host_profile.detect_host_profile()
+    host_profile.save_host_profile(profile)
+    return RedirectResponse(url="/host", status_code=303)
 
 
 @app.get("/iso", response_class=HTMLResponse)
@@ -570,11 +597,16 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
     if disk_path.exists():
         return vm_form_context(request, error=f"Диск уже существует: {disk_path}", form=form, status_code=400)
 
+    profile = host_profile.load_host_profile()
+    is_arm = profile.get("recommended_guest_arch") == "aarch64"
     network_arg = f"network={network_core.NETWORK_NAME},model=virtio" if network_mode == "nat" else f"bridge={bridge},model=virtio"
-    cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"]
+    cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus)]
+    if is_arm:
+        cmd += ["--arch", "aarch64", "--machine", "virt", "--cpu", "host", "--virt-type", "kvm", "--boot", "uefi"]
+    cmd += ["--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"]
 
     operation_id = str(uuid.uuid4())
-    operation = {"id": operation_id, "type": "vm_create", "title": f"Создание VM {name}", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": name, "disk_path": str(disk_path), "iso_path": iso_path, "network_mode": network_mode, "network": network_arg, "bridge": bridge, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "cmd": " ".join(cmd)}
+    operation = {"id": operation_id, "type": "vm_create", "title": f"Создание VM {name}", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": name, "disk_path": str(disk_path), "iso_path": iso_path, "host_profile": profile.get("profile"), "guest_arch": profile.get("recommended_guest_arch"), "network_mode": network_mode, "network": network_arg, "bridge": bridge, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "cmd": " ".join(cmd)}
     start_background_operation(operation, cmd)
     return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
 
@@ -609,4 +641,4 @@ def vm_action(request: Request, name: str, action: str):
 def api_health(request: Request):
     if not get_current_user(request):
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    return {"system": system_summary(), "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "virtuality_nat": network_core.network_context()}
+    return {"system": system_summary(), "host_profile": host_profile.load_host_profile(), "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "virtuality_nat": network_core.network_context()}
