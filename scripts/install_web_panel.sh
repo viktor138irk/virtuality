@@ -150,6 +150,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_web_console.py" ]]; then
 else
   warn "patch_web_console.py не найден, noVNC console patch пропущен"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_network_diagnostics.py" ]]; then
+  run_logged "network diagnostics patch применён" python3 "${REPO_DIR}/scripts/patch_network_diagnostics.py" "${APP_DIR}/app.py"
+else
+  warn "patch_network_diagnostics.py не найден, диагностика сети пропущена"
+fi
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
   ok "Профиль уже сохранён: $PROFILE_FILE"
