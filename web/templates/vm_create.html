@@ -15,6 +15,7 @@
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
+        <a class="link-pill" href="/network">Сеть</a>
         <a class="link-pill" href="/operations">Операции</a>
         <a class="link-pill" href="/iso">ISO</a>
         <a class="link-pill" href="/">← Дашборд</a>
@@ -30,7 +31,7 @@
       <article class="card">
         <div class="card-head">
           <h2>Параметры</h2>
-          <span class="pill">VM wizard v0.2</span>
+          <span class="pill">VM wizard v0.3</span>
         </div>
 
         <form method="post" action="/vm/create" class="form-grid">
@@ -65,12 +66,20 @@
           </label>
 
           <label>
-            <span>Bridge</span>
-            <input type="text" name="bridge" value="{{ form.bridge }}" required>
+            <span>Режим сети</span>
+            <select name="network_mode" required>
+              <option value="nat" {% if form.network_mode != 'bridge' %}selected{% endif %}>VPS NAT Router — virtuality-nat</option>
+              <option value="bridge" {% if form.network_mode == 'bridge' %}selected{% endif %}>Bridge — br0 / локальная сеть</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Bridge для режима Bridge</span>
+            <input type="text" name="bridge" value="{{ form.bridge }}" placeholder="br0">
           </label>
 
           <div class="notice">
-            После нажатия VM создаётся в фоне. Панель откроет экран операции с прогрессом и живым журналом virt-install.
+            Для VPS выбирай NAT Router: VM получит внутренний адрес 192.168.100.x, а доступ снаружи делается через проброс портов в разделе «Сеть».
           </div>
 
           <button type="submit" class="primary wide" {% if not isos %}disabled{% endif %}>Создать виртуальную машину</button>
@@ -82,21 +91,21 @@
 
       <article class="card">
         <div class="card-head">
-          <h2>ISO в хранилище</h2>
-          <a class="link-pill" href="/iso">Открыть ISO-менеджер</a>
+          <h2>Сетевые режимы</h2>
+          <a class="link-pill" href="/network">Открыть сеть</a>
         </div>
-        <div class="services">
-          {% for iso in isos %}
-            <div class="service-row">
-              <span>{{ iso.name }}</span>
-              <span class="status ok">{{ iso.size }}</span>
-            </div>
-          {% else %}
-            <div class="muted">ISO пока нет. Загрузи .iso через ISO-менеджер, не руками в темноте.</div>
-          {% endfor %}
+        <div class="quick-actions">
+          <div class="big-action static">
+            <strong>VPS NAT Router</strong>
+            <span>Правильный режим для VPS с одним внешним IP. VM сидят за NAT, входящие порты пробрасываются вручную.</span>
+          </div>
+          <div class="big-action static">
+            <strong>Bridge br0</strong>
+            <span>Режим для домашнего или офисного сервера, где VM могут получать IP из локальной сети.</span>
+          </div>
         </div>
-        <pre>sudo cp image.iso /var/lib/virtuality/iso/
-sudo virsh pool-refresh virtuality-iso</pre>
+        <pre>VPS:    --network network=virtuality-nat,model=virtio
+LAN:    --network bridge=br0,model=virtio</pre>
       </article>
     </section>
   </div>
