@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Журналы — {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="v-layout">
+    <aside class="v-sidebar">
+      <div class="v-logo">
+        <strong>Virtuality</strong>
+        <span>control panel</span>
+      </div>
+      <nav class="v-nav">
+        <a href="/">Обзор</a>
+        <a href="/vm/create">Создать VM</a>
+        <a href="/iso">ISO</a>
+        <a href="/disk-images">Диски</a>
+        <a href="/network">Сеть</a>
+        <a href="/operations">Операции</a>
+        <a class="active" href="/logs">Журналы</a>
+        <a href="/update">Обновления</a>
+        <a href="/host">Хост</a>
+      </nav>
+    </aside>
+
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">Журналы</div>
+          <div class="v-subtitle">systemd, libvirt, update, install и операции Virtuality</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
+
+      <section class="grid stats compact-stats">
+        {% for key, source in sources.items() %}
+          <a class="card stat log-source-card {{ 'selected' if key == selected.key else '' }}" href="/logs?source={{ key }}&lines={{ selected.lines }}">
+            <div class="label">Источник</div>
+            <div class="value small">{{ source.title }}</div>
+          </a>
+        {% endfor %}
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2>{{ selected.title }}</h2>
+            <div class="muted small-note">{{ selected.cmd }}</div>
+          </div>
+          <div class="actions">
+            <a class="link-pill" href="/logs?source={{ selected.key }}&lines=120">120</a>
+            <a class="link-pill" href="/logs?source={{ selected.key }}&lines=300">300</a>
+            <a class="link-pill" href="/logs?source={{ selected.key }}&lines=1000">1000</a>
+            <button class="primary" onclick="refreshLog()">Обновить</button>
+          </div>
+        </div>
+        <pre id="log-content" class="op-log">{{ selected.content }}</pre>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    async function refreshLog() {
+      const params = new URLSearchParams(window.location.search);
+      const source = params.get('source') || '{{ selected.key }}';
+      const lines = params.get('lines') || '{{ selected.lines }}';
+      const box = document.getElementById('log-content');
+      try {
+        const response = await fetch('/api/logs?source=' + encodeURIComponent(source) + '&lines=' + encodeURIComponent(lines), {cache: 'no-store'});
+        const payload = await response.json();
+        if (payload.ok && payload.log) {
+          box.textContent = payload.log.content || 'Лог пуст';
+        }
+      } catch (error) {
+        box.textContent = 'Ошибка обновления лога: ' + error;
+      }
+    }
+    setInterval(refreshLog, 5000);
+  </script>
+</body>
+</html>
