@@ -107,7 +107,6 @@ else:
 
 text = text.replace('\n\ndef bridge_exists(name: str) -> bool:\n    if not name or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", name):\n        return False\n    return run_cmd(["ip", "link", "show", name], timeout=5)["ok"]\n\n\ndef bridge_exists(name: str) -> bool:\n    if not name or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", name):\n        return False\n    return run_cmd(["ip", "link", "show", name], timeout=5)["ok"]\n', '\n\ndef bridge_exists(name: str) -> bool:\n    if not name or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", name):\n        return False\n    return run_cmd(["ip", "link", "show", name], timeout=5)["ok"]\n')
 
-# Upgrade vm_form_context robustly.
 old_context = '"isos": list_iso_files(), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}'
 new_context = '"isos": list_iso_files(), "disk_images": list_disk_image_files(), "arch_options": vm_arch_options(), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "source_type": "iso", "guest_arch": "auto", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}'
 if old_context in text:
@@ -247,8 +246,10 @@ new_cmd = '''    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
     profile = host_profile.load_host_profile()
     selected_arch = normalize_guest_arch(guest_arch, profile)
+    host_arch = str(profile.get("arch") or platform.machine() or "")
     is_arm = selected_arch == "aarch64"
-    virt_type = "kvm" if profile.get("kvm_device") else "qemu"
+    # ARM64 guest on x86 host cannot use KVM. It must use QEMU emulation.
+    virt_type = "qemu" if (is_arm and host_arch not in ("aarch64", "arm64")) else ("kvm" if profile.get("kvm_device") else "qemu")
     network_arg = f"network={network_core.NETWORK_NAME},model=virtio" if network_mode == "nat" else f"bridge={bridge},model=virtio"
     cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--virt-type", virt_type]
     if selected_arch == "x86_64":
@@ -267,18 +268,23 @@ new_cmd = '''    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 '''
 if old_cmd in text:
     text = text.replace(old_cmd, new_cmd, 1)
-    changed.append('vm create command supports qemu fallback, guest arch and disk image import')
+    changed.append('vm create command supports ARM64 qemu fallback, guest arch and disk image import')
 elif 'selected_arch = normalize_guest_arch' in text:
-    changed.append('vm create command already supports guest arch')
+    # Upgrade existing selected_arch block if it still uses kvm for aarch64 on x86.
+    text = re.sub(
+        r'virt_type = "kvm" if profile\.get\("kvm_device"\) else "qemu"',
+        'host_arch = str(profile.get("arch") or platform.machine() or "")\n    # ARM64 guest on x86 host cannot use KVM. It must use QEMU emulation.\n    virt_type = "qemu" if (is_arm and host_arch not in ("aarch64", "arm64")) else ("kvm" if profile.get("kvm_device") else "qemu")',
+        text,
+        count=1,
+    )
+    changed.append('existing vm create command was upgraded with ARM64 qemu fallback')
 elif 'virt_type = "kvm" if profile.get("kvm_device") else "qemu"' in text:
-    # Upgrade existing qemu fallback block to use selected guest arch.
-    text = text.replace('is_arm = profile.get("recommended_guest_arch") == "aarch64"\n    virt_type =', 'selected_arch = normalize_guest_arch(guest_arch, profile)\n    is_arm = selected_arch == "aarch64"\n    virt_type =', 1)
+    text = text.replace('is_arm = profile.get("recommended_guest_arch") == "aarch64"\n    virt_type =', 'selected_arch = normalize_guest_arch(guest_arch, profile)\n    host_arch = str(profile.get("arch") or platform.machine() or "")\n    is_arm = selected_arch == "aarch64"\n    virt_type = "qemu" if (is_arm and host_arch not in ("aarch64", "arm64")) else', 1)
     text = text.replace('if is_arm:\n        cmd += ["--arch", "aarch64", "--machine", "virt", "--cpu", "host" if virt_type == "kvm" else "cortex-a57", "--boot", "uefi"]', 'if selected_arch == "x86_64":\n        cmd += ["--arch", "x86_64"]\n    elif is_arm:\n        cmd += ["--arch", "aarch64", "--machine", "virt", "--cpu", "host" if virt_type == "kvm" else "cortex-a57", "--boot", "uefi"]', 1)
-    changed.append('existing vm create command was upgraded with guest arch')
+    changed.append('existing vm create command was upgraded with guest arch and ARM64 qemu fallback')
 else:
     warnings.append('vm command marker not found')
 
-# Ensure operation metadata keeps selected arch and source.
 if '"guest_arch": selected_arch' not in text and '"guest_arch": profile.get("recommended_guest_arch")' in text:
     text = text.replace('"guest_arch": profile.get("recommended_guest_arch")', '"guest_arch": selected_arch')
 if '"disk_image_path": disk_image_path' not in text:
