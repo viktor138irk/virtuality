@@ -128,7 +128,7 @@ step "Обновляем apt cache"
 run_logged "apt update выполнен" apt update
 
 step "Устанавливаем системные зависимости под выбранную сборку"
-COMMON_PACKAGES=(python3 python3-venv python3-pip rsync openssl nftables)
+COMMON_PACKAGES=(python3 python3-venv python3-pip rsync openssl nftables novnc python3-websockify)
 X86_PACKAGES=(qemu-system-x86 virtinst libvirt-daemon-system libvirt-clients bridge-utils)
 ARM_PACKAGES=(qemu-system-arm qemu-efi-aarch64 virtinst libvirt-daemon-system libvirt-clients bridge-utils cloud-image-utils)
 PACKAGES=("${COMMON_PACKAGES[@]}")
@@ -145,6 +145,11 @@ run_logged "Системные пакеты установлены для про
 step "Копируем web-панель в /opt/virtuality"
 run_logged "Создана директория /opt/virtuality" mkdir -p /opt/virtuality
 run_logged "Файлы панели синхронизированы в $APP_DIR" rsync -a --delete "$WEB_DIR/" "$APP_DIR/"
+if [[ -f "${REPO_DIR}/scripts/patch_web_console.py" ]]; then
+  run_logged "noVNC web-console patch применён" python3 "${REPO_DIR}/scripts/patch_web_console.py" "${APP_DIR}/app.py"
+else
+  warn "patch_web_console.py не найден, noVNC console patch пропущен"
+fi
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
   ok "Профиль уже сохранён: $PROFILE_FILE"
@@ -238,5 +243,5 @@ echo -e "${BOLD}Logs:${RESET}       journalctl -u virtuality-web -f"
 echo -e "${BOLD}Install log:${RESET} ${LOG_FILE}"
 echo
 line
-echo -e "${DIM}Следующий шаг: /host для проверки профиля, /network для NAT, /vm/create для VM.${RESET}"
+echo -e "${DIM}Следующий шаг: /host, /network, /vm/create, /vm/NAME/console.${RESET}"
 line
