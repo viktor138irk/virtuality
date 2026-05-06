@@ -59,6 +59,11 @@ def list_bridges() -> list[str]:
     return [item.strip() for item in result['stdout'].splitlines() if item.strip()]
 
 
+def cpu_virtualization_flags_count() -> int:
+    cpuinfo = read_text('/proc/cpuinfo')
+    return len(re.findall(r'\b(vmx|svm)\b', cpuinfo))
+
+
 def classify_profile(arch: str, model: str) -> dict[str, str]:
     low = model.lower()
     if arch in ('aarch64', 'arm64'):
@@ -87,7 +92,7 @@ def classify_profile(arch: str, model: str) -> dict[str, str]:
         }
     return {
         'profile': 'x86_64',
-        'label': 'x86_64 KVM Node',
+        'label': 'x86_64 KVM/QEMU Node',
         'recommended_network': 'bridge',
         'recommended_guest_arch': 'x86_64',
         'recommended_vm_mode': 'x86_64-iso',
@@ -110,6 +115,10 @@ def detect_host_profile() -> dict[str, Any]:
     if recommended_network == 'bridge' and not bridge_available:
         recommended_network = 'nat'
 
+    kvm_device = Path('/dev/kvm').exists()
+    virtualization_flags = cpu_virtualization_flags_count()
+    virtualization_mode = 'kvm' if kvm_device else 'qemu'
+
     data: dict[str, Any] = {
         'arch': arch,
         'model': model,
@@ -122,7 +131,11 @@ def detect_host_profile() -> dict[str, Any]:
         'bridges': bridges,
         'default_bridge': DEFAULT_BRIDGE,
         'bridge_available': bridge_available,
-        'kvm_device': Path('/dev/kvm').exists(),
+        'kvm_device': kvm_device,
+        'virtualization_flags': virtualization_flags,
+        'virtualization_mode': virtualization_mode,
+        'virtualization_label': 'KVM hardware acceleration' if virtualization_mode == 'kvm' else 'QEMU software emulation',
+        'virtualization_warning': '' if virtualization_mode == 'kvm' else 'KVM недоступен: VM будут запускаться через медленный QEMU fallback без аппаратного ускорения.',
         'qemu_system_x86_64': command_exists('qemu-system-x86_64'),
         'qemu_system_aarch64': command_exists('qemu-system-aarch64'),
         'virt_install': command_exists('virt-install'),
@@ -135,7 +148,8 @@ def detect_host_profile() -> dict[str, Any]:
         ]),
     }
     checks = []
-    checks.append({'name': '/dev/kvm', 'ok': data['kvm_device'], 'hint': 'Нужен KVM. На VPS проверь вложенную виртуализацию у провайдера; без /dev/kvm будет медленный qemu.'})
+    checks.append({'name': '/dev/kvm', 'ok': data['kvm_device'], 'hint': 'KVM недоступен. На VPS проверь nested virtualization у провайдера; Virtuality может использовать медленный QEMU fallback.'})
+    checks.append({'name': 'CPU vmx/svm', 'ok': virtualization_flags > 0, 'hint': 'CPU-флаги vmx/svm не видны. Это нормально для VPS без nested virtualization, но KVM невозможен.'})
     if is_arm:
         checks.append({'name': 'qemu-system-aarch64', 'ok': data['qemu_system_aarch64'], 'hint': 'Пакет qemu-system-arm / qemu-system-aarch64.'})
         checks.append({'name': 'AArch64 UEFI', 'ok': data['uefi_aarch64_hint'], 'hint': 'Пакет qemu-efi-aarch64 или AAVMF.'})
@@ -145,7 +159,8 @@ def detect_host_profile() -> dict[str, Any]:
     checks.append({'name': 'nftables', 'ok': data['nft'], 'hint': 'Пакет nftables для NAT port forwarding.'})
     checks.append({'name': f'bridge {DEFAULT_BRIDGE}', 'ok': bridge_available, 'hint': 'Если br0 отсутствует, Virtuality будет использовать VPS NAT Router / virtuality-nat.'})
     data['checks'] = checks
-    data['ready'] = all(item['ok'] for item in checks if item['name'] not in ('AArch64 UEFI', f'bridge {DEFAULT_BRIDGE}'))
+    # No /dev/kvm is no longer fatal: qemu fallback is supported, just slower.
+    data['ready'] = data['virt_install'] and (data['qemu_system_aarch64'] if is_arm else data['qemu_system_x86_64']) and data['nft']
     return data
 
 
@@ -158,8 +173,7 @@ def load_host_profile() -> dict[str, Any]:
     if PROFILE_FILE.exists():
         try:
             profile = json.loads(PROFILE_FILE.read_text())
-            # Older installs stored x86_64 as bridge by default. Re-detect once when bridge metadata is missing.
-            if 'bridge_available' not in profile:
+            if 'bridge_available' not in profile or 'virtualization_mode' not in profile:
                 profile = detect_host_profile()
                 save_host_profile(profile)
             return profile
