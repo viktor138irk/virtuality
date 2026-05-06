@@ -202,6 +202,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_vm_detail_resource_layout.py" ]]; then
 else
   warn "patch_vm_detail_resource_layout.py не найден, раскладка ресурсов VM пропущена"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_remove_legacy_boot_order_card.py" ]]; then
+  run_logged "legacy boot order cleanup patch применён" python3 "${REPO_DIR}/scripts/patch_remove_legacy_boot_order_card.py" "${APP_DIR}/app.py"
+else
+  warn "patch_remove_legacy_boot_order_card.py не найден, удаление старого блока порядка загрузки пропущено"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_disk_archives.py" ]]; then
   run_logged "disk archive import patch применён" python3 "${REPO_DIR}/scripts/patch_disk_archives.py" "${APP_DIR}/app.py"
 else
