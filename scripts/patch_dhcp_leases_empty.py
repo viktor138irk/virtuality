@@ -11,15 +11,15 @@ if not app_path.exists():
     print(f'WARN: app.py not found: {app_path}')
     raise SystemExit(0)
 
-dashboard_template_path = app_path.parent / 'templates' / 'dashboard.html'
+templates_dir = app_path.parent / 'templates'
+dashboard_template_path = templates_dir / 'dashboard.html'
+network_template_path = templates_dir / 'network.html'
 if not dashboard_template_path.exists():
     print(f'WARN: dashboard.html not found: {dashboard_template_path}')
     raise SystemExit(0)
 
 text = app_path.read_text(encoding='utf-8')
 
-# Older versions of this patch injected helper blocks. Remove them first so repeated
-# installs stay deterministic and do not accumulate stale references.
 text, removed_helpers = re.subn(
     r"\n\ndef parse_dhcp_leases_output\(output: str\).*?\n\ndef parse_virsh_list\(\) -> list\[dict\[str, str\]\]:",
     "\n\ndef parse_virsh_list() -> list[dict[str, str]]:",
@@ -37,15 +37,24 @@ new_parse_virsh_list = '''def parse_virsh_list() -> list[dict[str, str]]:
             return ""
         return ip
 
+    def manual_ip_map() -> dict[str, str]:
+        path = Path("/var/lib/virtuality/network/vm_ips.json")
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return {str(k): clean_ip(str(v)) for k, v in data.items() if clean_ip(str(v))}
+        except Exception:
+            pass
+        return {}
+
     def vm_macs(name: str) -> list[str]:
         try:
             result = run_cmd(["virsh", "domiflist", name], timeout=8)
             if not result.get("ok"):
                 return []
-            macs = []
-            for mac in re.findall(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", result.get("stdout", "")):
-                macs.append(mac.lower())
-            return macs
+            return [mac.lower() for mac in re.findall(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", result.get("stdout", ""))]
         except Exception:
             return []
 
@@ -91,12 +100,7 @@ new_parse_virsh_list = '''def parse_virsh_list() -> list[dict[str, str]]:
     def ip_from_neighbor_tables(macs: list[str]) -> str:
         if not macs:
             return ""
-        commands = [
-            ["ip", "neigh", "show"],
-            ["ip", "neigh", "show", "dev", "virbr100"],
-            ["ip", "neigh", "show", "dev", "br0"],
-            ["arp", "-an"],
-        ]
+        commands = [["ip", "neigh", "show"], ["ip", "neigh", "show", "dev", "virbr100"], ["ip", "neigh", "show", "dev", "br0"], ["arp", "-an"]]
         for cmd in commands:
             try:
                 result = run_cmd(cmd, timeout=8)
@@ -106,8 +110,7 @@ new_parse_virsh_list = '''def parse_virsh_list() -> list[dict[str, str]]:
                     low = line.lower()
                     if not any(mac in low for mac in macs):
                         continue
-                    matches = re.findall(r"\\b(\\d{1,3}(?:\\.\\d{1,3}){3})\\b", line)
-                    for value in matches:
+                    for value in re.findall(r"\\b(\\d{1,3}(?:\\.\\d{1,3}){3})\\b", line):
                         ip = clean_ip(value)
                         if ip:
                             return ip
@@ -115,16 +118,15 @@ new_parse_virsh_list = '''def parse_virsh_list() -> list[dict[str, str]]:
                 pass
         return ""
 
+    manual_ips = manual_ip_map()
+
     def resolve_ip(name: str) -> str:
         if not name:
             return "—"
+        if manual_ips.get(name):
+            return manual_ips[name]
         macs = vm_macs(name)
-        for resolver in (
-            lambda: ip_from_domifaddr(name),
-            lambda: ip_from_network_core(name),
-            lambda: ip_from_dnsmasq_leases(macs),
-            lambda: ip_from_neighbor_tables(macs),
-        ):
+        for resolver in (lambda: ip_from_domifaddr(name), lambda: ip_from_network_core(name), lambda: ip_from_dnsmasq_leases(macs), lambda: ip_from_neighbor_tables(macs)):
             try:
                 ip = resolver()
                 if ip:
@@ -145,27 +147,61 @@ new_parse_virsh_list = '''def parse_virsh_list() -> list[dict[str, str]]:
             rows.append({"id": "-", "name": parts[0], "state": parts[1]})
     for row in rows:
         row["ip"] = resolve_ip(row.get("name", ""))
+        row["manual_ip"] = manual_ips.get(row.get("name", ""), "")
     return rows
 '''
 
 pattern = r"def parse_virsh_list\(\) -> list\[dict\[str, str\]\]:.*?\n\ndef parse_pool_list\(\) -> list\[dict\[str, str\]\]:"
 replacement = new_parse_virsh_list + "\n\ndef parse_pool_list() -> list[dict[str, str]]:"
-text, replaced = re.subn(
-    pattern,
-    lambda _match: replacement,
-    text,
-    count=1,
-    flags=re.S,
-)
+text, replaced = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)
 if replaced:
-    changed.append('parse_virsh_list was replaced with multi-source VM IP resolver')
+    changed.append('parse_virsh_list was replaced with manual-first VM IP resolver')
 else:
     warnings.append('parse_virsh_list block not found, app.py IP injection skipped')
+
+manual_route = '''
+
+@app.post("/network/vm-ip/save")
+def network_vm_ip_save(request: Request, vm_name: str = Form(...), manual_ip: str = Form("")):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    if not valid_vm_name(vm_name):
+        return RedirectResponse(url="/network", status_code=303)
+    manual_ip = (manual_ip or "").strip()
+    if manual_ip and not re.fullmatch(r"(25[0-5]|2[0-4]\\d|1?\\d?\\d)(\\.(25[0-5]|2[0-4]\\d|1?\\d?\\d)){3}", manual_ip):
+        return templates.TemplateResponse("network.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vms": parse_virsh_list(), "ctx": network_core.network_context(), "error": "Некорректный ручной IP VM"}, status_code=400)
+    path = Path("/var/lib/virtuality/network/vm_ips.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    if manual_ip:
+        data[vm_name] = manual_ip
+    else:
+        data.pop(vm_name, None)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    return RedirectResponse(url="/network", status_code=303)
+'''
+
+if '/network/vm-ip/save' not in text:
+    marker = '\n\n@app.post("/network/nat/setup")'
+    if marker in text:
+        text = text.replace(marker, manual_route + marker, 1)
+        changed.append('manual VM IP route was added')
+    else:
+        warnings.append('network NAT route marker not found, manual IP route skipped')
+else:
+    changed.append('manual VM IP route was already present')
 
 app_path.write_text(text, encoding='utf-8')
 
 dashboard_html = dashboard_template_path.read_text(encoding='utf-8')
-
 header_old = '<tr><th>ID</th><th>Name</th><th>State</th><th>Actions</th></tr>'
 header_new = '<tr><th>ID</th><th>Name</th><th>IP</th><th>State</th><th>Actions</th></tr>'
 name_cell = '''<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
@@ -173,19 +209,58 @@ name_cell = '''<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}"
 name_ip_cell = '''<td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
               <td class="strong">{{ vm.ip|default("—") }}</td>
               <td><span'''
-
 if '<th>IP</th>' not in dashboard_html:
-    dashboard_html = dashboard_html.replace(header_old, header_new)
-    dashboard_html = dashboard_html.replace(name_cell, name_ip_cell)
-    dashboard_html = dashboard_html.replace('colspan="4" class="muted">Виртуальных машин пока нет', 'colspan="5" class="muted">Виртуальных машин пока нет')
+    dashboard_html = dashboard_html.replace(header_old, header_new).replace(name_cell, name_ip_cell).replace('colspan="4" class="muted">Виртуальных машин пока нет', 'colspan="5" class="muted">Виртуальных машин пока нет')
     changed.append('Dashboard VM IP column was added')
 elif 'vm.ip' not in dashboard_html:
     dashboard_html = dashboard_html.replace(name_cell, name_ip_cell)
     changed.append('Dashboard VM IP cell was added')
 else:
     changed.append('Dashboard VM IP column was already present')
-
 dashboard_template_path.write_text(dashboard_html, encoding='utf-8')
+
+if network_template_path.exists():
+    network_html = network_template_path.read_text(encoding='utf-8')
+    manual_card = '''
+      <article class="card">
+        <div class="card-head">
+          <h2>Ручные IP VM</h2>
+          <span class="pill">override</span>
+        </div>
+        <div class="notice">Если VM в bridge/static-сети и IP не виден через DHCP/ARP, укажи адрес вручную. Этот IP будет первым источником для таблицы и проброса портов.</div>
+        <table class="top-space">
+          <thead><tr><th>VM</th><th>Текущий IP</th><th>Ручной IP</th><th>Действие</th></tr></thead>
+          <tbody>
+          {% for vm in vms %}
+            <tr>
+              <td class="strong">{{ vm.name }}</td>
+              <td>{{ vm.ip|default("—") }}</td>
+              <td>
+                <form method="post" action="/network/vm-ip/save" class="inline-form">
+                  <input type="hidden" name="vm_name" value="{{ vm.name }}">
+                  <input type="text" name="manual_ip" value="{{ vm.manual_ip|default("") }}" placeholder="например 10.0.0.50" pattern="(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}">
+              </td>
+              <td><button>Сохранить</button></form></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="muted">VM пока нет</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </article>
+'''
+    if 'Ручные IP VM' not in network_html:
+        marker = '      <article class="card">\n        <div class="card-head">\n          <h2>Диагностика публичного доступа</h2>'
+        if marker in network_html:
+            network_html = network_html.replace(marker, manual_card + '\n' + marker, 1)
+            changed.append('manual VM IP card was added to network page')
+        else:
+            warnings.append('network diagnostics card marker not found, manual IP card skipped')
+    else:
+        changed.append('manual VM IP card was already present')
+    network_template_path.write_text(network_html, encoding='utf-8')
+else:
+    warnings.append('network.html not found, manual IP card skipped')
 
 print('DHCP leases empty-state patch completed:')
 for item in changed:
