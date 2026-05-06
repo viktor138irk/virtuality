@@ -112,7 +112,6 @@ if '"current_iso": current_vm_iso(name)' not in text:
     old = '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", "")})'
     new = '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})'
     if old not in text:
-        # Fallback for installations without boot-order patch context yet.
         old = '"host_ip": system_summary()["ip"]})'
         new = '"host_ip": system_summary()["ip"], "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})'
     if old not in text:
@@ -157,19 +156,85 @@ else:
 
 app_path.write_text(text)
 
+iso_card = r'''
+      <article class="card">
+        <div class="card-head">
+          <h2>ISO-привод</h2>
+          <span class="pill">cdrom</span>
+        </div>
+        {% if current_iso %}
+          <div class="notice">Сейчас подключен ISO: <b>{{ current_iso }}</b></div>
+        {% else %}
+          <div class="muted small-note">ISO сейчас не подключён.</div>
+        {% endif %}
+        <form method="post" action="/vm/{{ vm.name }}/iso/mount" class="form-grid">
+          <label>
+            <span>ISO образ</span>
+            <select name="iso_path" required>
+              {% for iso in isos %}
+                <option value="{{ iso.path }}" {% if current_iso == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="primary wide" type="submit" {% if not isos %}disabled{% endif %}>Смонтировать ISO в VM</button>
+        </form>
+        <form method="post" action="/vm/{{ vm.name }}/iso/unmount" class="form-grid" onsubmit="return confirm('Отмонтировать ISO из VM {{ vm.name }}?');">
+          <button type="submit" class="ghost wide">Отмонтировать ISO</button>
+        </form>
+        {% if not isos %}
+          <div class="alert danger">ISO-образов пока нет. Сначала загрузи .iso в разделе ISO.</div>
+        {% endif %}
+        <p class="muted small-note">Для запущенной VM ISO подключается live и сохраняется в конфигурации. Для выключенной VM ISO будет доступен при следующем старте.</p>
+      </article>
+'''
+
+boot_card = r'''
+      <article class="card">
+        <div class="card-head">
+          <h2>Порядок загрузки</h2>
+          <span class="pill">boot order</span>
+        </div>
+        <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid">
+          <label>
+            <span>Порядок загрузки VM</span>
+            <select name="boot_order" required>
+              {% for boot in boot_options %}
+                <option value="{{ boot.value }}" {% if current_boot_order == boot.value %}selected{% endif %}>{{ boot.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="primary wide" type="submit">Применить порядок загрузки</button>
+        </form>
+        <p class="muted small-note">Чтобы загрузиться с ISO, выбери “Сначала ISO/CD-ROM, потом диск”. Если VM запущена, новый порядок сработает после перезапуска.</p>
+      </article>
+'''
+
 if template_path.exists():
     tpl = template_path.read_text()
     original = tpl
-    if 'action="/vm/{{ vm.name }}/iso/mount"' not in tpl:
-        block = r'''
 
-    {% if iso_message %}
-      <div class="alert success">{{ iso_message }}</div>
-    {% endif %}
-    {% if iso_error %}
-      <div class="alert danger">{{ iso_error }}</div>
-    {% endif %}
-
+    # Normalize legacy separate cards into one two-column settings grid.
+    legacy_boot = r'''
+    <section class="card">
+      <div class="card-head">
+        <h2>Порядок загрузки</h2>
+        <span class="pill">boot order</span>
+      </div>
+      <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid">
+        <label>
+          <span>Порядок загрузки VM</span>
+          <select name="boot_order" required>
+            {% for boot in boot_options %}
+              <option value="{{ boot.value }}" {% if current_boot_order == boot.value %}selected{% endif %}>{{ boot.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button class="primary wide" type="submit">Применить порядок загрузки</button>
+      </form>
+      <p class="muted small-note">Настройка меняет XML-конфигурацию VM через virsh define. Если машина сейчас запущена, новый порядок загрузки сработает после перезапуска.</p>
+    </section>
+'''
+    legacy_iso = r'''
     <section class="card">
       <div class="card-head">
         <h2>ISO-привод</h2>
@@ -200,11 +265,28 @@ if template_path.exists():
       <p class="muted small-note">Для запущенной VM ISO подключается live и сохраняется в конфигурации. Для выключенной VM ISO будет доступен при следующем старте. Чтобы загрузиться с ISO, выставь порядок загрузки “Сначала ISO/CD-ROM, потом диск”.</p>
     </section>
 '''
-        marker = '\n\n    <section class="grid two">'
-        if marker not in tpl:
-            raise SystemExit('vm detail grid marker not found')
-        tpl = tpl.replace(marker, block + marker, 1)
-        changed.append('ISO mount card added to vm_detail.html')
+    settings_grid = r'''
+
+    <section class="grid two vm-boot-iso-grid">
+''' + iso_card + boot_card + r'''    </section>
+'''
+
+    if 'vm-boot-iso-grid' not in tpl:
+        if legacy_boot in tpl or legacy_iso in tpl:
+            tpl = tpl.replace(legacy_boot, '')
+            tpl = tpl.replace(legacy_iso, '')
+            marker = '\n\n    <section class="grid two">'
+            if marker not in tpl:
+                raise SystemExit('vm detail grid marker not found')
+            tpl = tpl.replace(marker, settings_grid + marker, 1)
+            changed.append('ISO and boot order cards moved into two-column grid')
+        elif 'action="/vm/{{ vm.name }}/iso/mount"' not in tpl:
+            marker = '\n\n    <section class="grid two">'
+            if marker not in tpl:
+                raise SystemExit('vm detail grid marker not found')
+            tpl = tpl.replace(marker, settings_grid + marker, 1)
+            changed.append('ISO and boot order two-column grid added')
+
     if tpl != original:
         template_path.write_text(tpl)
 
