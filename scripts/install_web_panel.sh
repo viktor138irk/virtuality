@@ -182,6 +182,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_vm_boot_order.py" ]]; then
 else
   warn "patch_vm_boot_order.py не найден, порядок загрузки VM пропущен"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_boot_order.py" ]]; then
+  run_logged "existing VM boot order patch применён" python3 "${REPO_DIR}/scripts/patch_existing_vm_boot_order.py" "${APP_DIR}/app.py"
+else
+  warn "patch_existing_vm_boot_order.py не найден, порядок загрузки существующих VM пропущен"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_disk_archives.py" ]]; then
   run_logged "disk archive import patch применён" python3 "${REPO_DIR}/scripts/patch_disk_archives.py" "${APP_DIR}/app.py"
 else
