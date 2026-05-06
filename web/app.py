@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-import json
+import crypt
 import os
+import secrets
+import spwd
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -10,9 +12,11 @@ from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from itsdangerous import BadSignature, URLSafeSerializer
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_NAME = "Virtuality"
+ENV_FILE = BASE_DIR / ".env"
 
 app = FastAPI(title="Virtuality Panel")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -20,6 +24,65 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+def load_env() -> dict[str, str]:
+    data: dict[str, str] = {}
+    if ENV_FILE.exists():
+        for raw_line in ENV_FILE.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            data[key.strip()] = value.strip().strip('"').strip("'")
+    return data
+
+
+CONFIG = load_env()
+AUTH_USER = CONFIG.get("VIRTUALITY_AUTH_USER", os.environ.get("VIRTUALITY_AUTH_USER", "viktor"))
+SESSION_SECRET = CONFIG.get("VIRTUALITY_SESSION_SECRET", os.environ.get("VIRTUALITY_SESSION_SECRET", "dev-secret-change-me"))
+serializer = URLSafeSerializer(SESSION_SECRET, salt="virtuality-session")
+
+
+def is_configured() -> bool:
+    return bool(AUTH_USER and SESSION_SECRET != "dev-secret-change-me")
+
+
+def verify_linux_password(username: str, password: str) -> bool:
+    if not username or not password:
+        return False
+    if username != AUTH_USER:
+        return False
+    try:
+        shadow = spwd.getspnam(username)
+    except PermissionError:
+        return False
+    except KeyError:
+        return False
+    stored_hash = shadow.sp_pwdp
+    if stored_hash in ("!", "*", "!!", ""):
+        return False
+    return secrets.compare_digest(crypt.crypt(password, stored_hash), stored_hash)
+
+
+def get_current_user(request: Request) -> str | None:
+    token = request.cookies.get("virtuality_session")
+    if not token:
+        return None
+    try:
+        data = serializer.loads(token)
+    except BadSignature:
+        return None
+    if data.get("user") == AUTH_USER:
+        return AUTH_USER
+    return None
+
+
+def require_auth(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return None
 
 
 def run_cmd(cmd: list[str], timeout: int = 12) -> dict[str, Any]:
@@ -109,8 +172,72 @@ def network_summary() -> dict[str, str]:
     }
 
 
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    if get_current_user(request):
+        return RedirectResponse(url="/", status_code=303)
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "app_name": APP_NAME,
+            "error": None,
+            "configured": is_configured(),
+            "auth_user": AUTH_USER,
+        },
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+    if not is_configured():
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "app_name": APP_NAME,
+                "error": "Панель ещё не настроена. Запусти установщик веб-панели повторно.",
+                "configured": False,
+                "auth_user": AUTH_USER,
+            },
+            status_code=500,
+        )
+    if not verify_linux_password(username, password):
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "app_name": APP_NAME,
+                "error": "Неверный логин или пароль Linux-пользователя",
+                "configured": True,
+                "auth_user": AUTH_USER,
+            },
+            status_code=401,
+        )
+    token = serializer.dumps({"user": AUTH_USER})
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(
+        "virtuality_session",
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=60 * 60 * 12,
+    )
+    return response
+
+
+@app.post("/logout")
+def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie("virtuality_session")
+    return response
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
     vms = parse_virsh_list()
     pools = parse_pool_list()
     services = {
@@ -129,12 +256,16 @@ def dashboard(request: Request):
             "vms": vms,
             "pools": pools,
             "network": network_summary(),
+            "user": AUTH_USER,
         },
     )
 
 
 @app.post("/vm/{name}/{action}")
-def vm_action(name: str, action: str):
+def vm_action(request: Request, name: str, action: str):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
     allowed = {
         "start": ["virsh", "start", name],
         "shutdown": ["virsh", "shutdown", name],
@@ -143,12 +274,14 @@ def vm_action(name: str, action: str):
     }
     if action not in allowed:
         return JSONResponse({"ok": False, "error": "Unsupported action"}, status_code=400)
-    result = run_cmd(allowed[action], timeout=20)
+    run_cmd(allowed[action], timeout=20)
     return RedirectResponse(url="/", status_code=303)
 
 
 @app.get("/api/health")
-def api_health():
+def api_health(request: Request):
+    if not get_current_user(request):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
     return {
         "system": system_summary(),
         "services": {
