@@ -33,6 +33,10 @@ body {
 .v-nav a { position: relative; color: #b9c7dc; text-decoration: none; padding: 10px 12px; border-radius: 8px; font-size: 14px; font-weight: 700; transition: .16s ease; }
 .v-nav a:hover, .v-nav a.active { color: #fff; background: rgba(255,255,255,.1); }
 .v-nav a.active::before { content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px; border-radius: 99px; background: var(--accent); }
+.v-nav-group { display: grid; gap: 3px; margin: 4px 0; padding: 7px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.04); }
+.v-nav-group-title { padding: 4px 6px 5px; color: #8ea0bd; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .09em; }
+.v-nav-group a { padding-left: 18px; font-size: 13px; }
+.v-nav-group.open { background: rgba(25,118,210,.12); border-color: rgba(25,118,210,.22); }
 .v-main { min-width: 0; padding: 16px 18px 40px; }
 .v-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; margin-bottom: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 3px 12px rgba(31,41,55,.06); }
 .v-title { font-size: 22px; font-weight: 800; letter-spacing: -.03em; }
