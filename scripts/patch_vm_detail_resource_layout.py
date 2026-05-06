@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re
 import sys
 
 app_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/opt/virtuality/web/app.py')
@@ -10,7 +9,8 @@ css_path = app_dir / 'static' / 'app.css'
 changed = []
 
 if not template_path.exists():
-    raise SystemExit(f'vm_detail.html not found: {template_path}')
+    print(f'VM detail resource layout patch skipped: vm_detail.html not found: {template_path}')
+    raise SystemExit(0)
 
 tpl = template_path.read_text()
 original = tpl
@@ -65,37 +65,75 @@ if 'resource_message' not in tpl:
     marker = '    {% if iso_message %}'
     if marker in tpl:
         tpl = tpl.replace(marker, resource_messages + '\n' + marker, 1)
-        changed.append('resource messages added')
+        changed.append('resource messages added before ISO messages')
+    else:
+        # Safe fallback: place messages after header/topbar area if exact ISO marker is not present.
+        marker = '    <section'
+        index = tpl.find(marker)
+        if index != -1:
+            tpl = tpl[:index] + resource_messages + '\n' + tpl[index:]
+            changed.append('resource messages added by fallback')
+        else:
+            changed.append('resource messages skipped: no safe marker')
 
 if 'CPU / RAM / Архитектура' not in tpl:
-    marker = '    <section class="grid two vm-boot-iso-grid">'
-    if marker in tpl:
-        tpl = tpl.replace(marker, '    <section class="grid three vm-resource-boot-iso-grid">', 1)
-        insert_at = tpl.find('\n      <article class="card">', tpl.find('vm-resource-boot-iso-grid'))
-        if insert_at != -1:
-            tpl = tpl[:insert_at] + '\n' + resource_card + tpl[insert_at:]
-            changed.append('resource card inserted before ISO card')
-    else:
-        # fallback: insert before first two-column grid in VM detail
-        marker = '\n\n    <section class="grid two">'
-        if marker not in tpl:
-            raise SystemExit('vm detail grid marker not found')
-        settings = '\n\n    <section class="grid three vm-resource-boot-iso-grid">\n' + resource_card + '    </section>\n'
-        tpl = tpl.replace(marker, settings + marker, 1)
-        changed.append('resource grid inserted fallback')
+    candidate_markers = [
+        '    <section class="grid three vm-resource-boot-iso-grid">',
+        '    <section class="grid two vm-boot-iso-grid">',
+        '    <section class="grid two">',
+        '    <section class="card">',
+    ]
+    inserted = False
+    for marker in candidate_markers:
+        pos = tpl.find(marker)
+        if pos == -1:
+            continue
+        if 'vm-boot-iso-grid' in marker:
+            tpl = tpl.replace(marker, '    <section class="grid three vm-resource-boot-iso-grid">', 1)
+            grid_pos = tpl.find('vm-resource-boot-iso-grid')
+            insert_at = tpl.find('\n      <article class="card">', grid_pos)
+            if insert_at != -1:
+                tpl = tpl[:insert_at] + '\n' + resource_card + tpl[insert_at:]
+            else:
+                close_at = tpl.find('</section>', grid_pos)
+                if close_at != -1:
+                    tpl = tpl[:close_at] + resource_card + tpl[close_at:]
+            changed.append('resource card inserted into existing settings grid')
+            inserted = True
+            break
+        elif marker == '    <section class="grid two">':
+            settings = '\n\n    <section class="grid three vm-resource-boot-iso-grid">\n' + resource_card + '    </section>\n'
+            tpl = tpl.replace('\n\n' + marker, settings + '\n\n' + marker, 1)
+            changed.append('resource grid inserted before first two-column grid')
+            inserted = True
+            break
+        else:
+            settings = '\n\n    <section class="grid three vm-resource-boot-iso-grid">\n' + resource_card + '    </section>\n'
+            tpl = tpl[:pos] + settings + tpl[pos:]
+            changed.append('resource grid inserted before first card fallback')
+            inserted = True
+            break
+    if not inserted:
+        changed.append('resource card skipped: no safe layout marker')
 else:
     changed.append('resource card already present')
 
-# If grid is already present from older patch, upgrade two columns to three.
+# Upgrade older two-column settings grid when present.
 tpl = tpl.replace('class="grid two vm-boot-iso-grid"', 'class="grid three vm-resource-boot-iso-grid"')
 
-template_path.write_text(tpl)
+if tpl != original:
+    template_path.write_text(tpl)
 
 if css_path.exists():
     css = css_path.read_text()
     original_css = css
     if '.three {' not in css:
-        css = css.replace('.two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; }', '.two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; }\n.three { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 12px; }')
+        if '.two {' in css:
+            css = css.replace('.two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; }', '.two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; }\n.three { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 12px; }')
+            if '.three {' not in css:
+                css += '\n.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }\n'
+        else:
+            css += '\n.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }\n'
         changed.append('three-column grid CSS added')
     if '.resource-mini-grid' not in css:
         css += '''
@@ -115,6 +153,8 @@ if css_path.exists():
         changed.append('resource and boot-order CSS added')
     if css != original_css:
         css_path.write_text(css)
+else:
+    changed.append('CSS skipped: app.css not found')
 
 print('VM detail resource layout patch applied:')
 for item in changed or ['already applied']:
