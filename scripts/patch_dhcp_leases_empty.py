@@ -31,23 +31,106 @@ if removed_helpers:
     changed.append('old VM IP helper block was removed')
 
 new_parse_virsh_list = '''def parse_virsh_list() -> list[dict[str, str]]:
-    def resolve_ip(name: str) -> str:
-        if not name:
-            return "—"
+    def clean_ip(ip: str) -> str:
+        ip = (ip or "").split("/")[0].strip()
+        if not ip or ip.startswith("127.") or ip.startswith("169.254.") or ip == "0.0.0.0":
+            return ""
+        return ip
+
+    def vm_macs(name: str) -> list[str]:
+        try:
+            result = run_cmd(["virsh", "domiflist", name], timeout=8)
+            if not result.get("ok"):
+                return []
+            macs = []
+            for mac in re.findall(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", result.get("stdout", "")):
+                macs.append(mac.lower())
+            return macs
+        except Exception:
+            return []
+
+    def ip_from_domifaddr(name: str) -> str:
         try:
             result = run_cmd(["virsh", "domifaddr", name], timeout=8)
             if result.get("ok"):
                 for ip in re.findall(r"\\b(\\d{1,3}(?:\\.\\d{1,3}){3})/\\d+", result.get("stdout", "")):
-                    if not ip.startswith("127.") and not ip.startswith("169.254."):
+                    ip = clean_ip(ip)
+                    if ip:
                         return ip
         except Exception:
             pass
+        return ""
+
+    def ip_from_network_core(name: str) -> str:
         try:
             resolved = network_core.resolve_vm_ip(name)
             if resolved:
-                return str(resolved)
+                return clean_ip(str(resolved))
         except Exception:
             pass
+        return ""
+
+    def ip_from_dnsmasq_leases(macs: list[str]) -> str:
+        if not macs:
+            return ""
+        try:
+            for lease_file in Path("/var/lib/libvirt/dnsmasq").glob("*.leases"):
+                for line in lease_file.read_text(errors="ignore").splitlines():
+                    low = line.lower()
+                    if not any(mac in low for mac in macs):
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        ip = clean_ip(parts[2])
+                        if ip:
+                            return ip
+        except Exception:
+            pass
+        return ""
+
+    def ip_from_neighbor_tables(macs: list[str]) -> str:
+        if not macs:
+            return ""
+        commands = [
+            ["ip", "neigh", "show"],
+            ["ip", "neigh", "show", "dev", "virbr100"],
+            ["ip", "neigh", "show", "dev", "br0"],
+            ["arp", "-an"],
+        ]
+        for cmd in commands:
+            try:
+                result = run_cmd(cmd, timeout=8)
+                if not result.get("ok"):
+                    continue
+                for line in result.get("stdout", "").splitlines():
+                    low = line.lower()
+                    if not any(mac in low for mac in macs):
+                        continue
+                    matches = re.findall(r"\\b(\\d{1,3}(?:\\.\\d{1,3}){3})\\b", line)
+                    for value in matches:
+                        ip = clean_ip(value)
+                        if ip:
+                            return ip
+            except Exception:
+                pass
+        return ""
+
+    def resolve_ip(name: str) -> str:
+        if not name:
+            return "—"
+        macs = vm_macs(name)
+        for resolver in (
+            lambda: ip_from_domifaddr(name),
+            lambda: ip_from_network_core(name),
+            lambda: ip_from_dnsmasq_leases(macs),
+            lambda: ip_from_neighbor_tables(macs),
+        ):
+            try:
+                ip = resolver()
+                if ip:
+                    return ip
+            except Exception:
+                pass
         return "—"
 
     result = run_cmd(["virsh", "list", "--all"])
@@ -75,7 +158,7 @@ text, replaced = re.subn(
     flags=re.S,
 )
 if replaced:
-    changed.append('parse_virsh_list was replaced with a safe inline IP resolver')
+    changed.append('parse_virsh_list was replaced with multi-source VM IP resolver')
 else:
     warnings.append('parse_virsh_list block not found, app.py IP injection skipped')
 
