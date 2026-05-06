@@ -129,7 +129,7 @@ run_logged "apt update выполнен" apt update
 
 step "Устанавливаем системные зависимости под выбранную сборку"
 COMMON_PACKAGES=(python3 python3-venv python3-pip rsync openssl nftables novnc python3-websockify)
-X86_PACKAGES=(qemu-system-x86 virtinst libvirt-daemon-system libvirt-clients bridge-utils)
+X86_PACKAGES=(qemu-system-x86 qemu-system-arm qemu-efi-aarch64 virtinst libvirt-daemon-system libvirt-clients bridge-utils cloud-image-utils)
 ARM_PACKAGES=(qemu-system-arm qemu-efi-aarch64 virtinst libvirt-daemon-system libvirt-clients bridge-utils cloud-image-utils)
 PACKAGES=("${COMMON_PACKAGES[@]}")
 case "$PACKAGE_PROFILE" in
@@ -141,6 +141,13 @@ case "$PACKAGE_PROFILE" in
     ;;
 esac
 run_logged "Системные пакеты установлены для профиля ${PACKAGE_PROFILE:-x86}" apt install -y "${PACKAGES[@]}"
+if [[ "${PACKAGE_PROFILE:-x86}" != "raspberry" && "${PACKAGE_PROFILE:-x86}" != "orangepi5" && "${PACKAGE_PROFILE:-x86}" != "arm64" ]]; then
+  if command -v qemu-system-aarch64 >/dev/null 2>&1; then
+    ok "ARM64 QEMU эмулятор найден: $(command -v qemu-system-aarch64)"
+  else
+    fail "Не найден qemu-system-aarch64. Установи пакет: sudo apt install -y qemu-system-arm qemu-efi-aarch64"
+  fi
+fi
 
 step "Копируем web-панель в /opt/virtuality"
 run_logged "Создана директория /opt/virtuality" mkdir -p /opt/virtuality
