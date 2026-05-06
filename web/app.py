@@ -216,16 +216,8 @@ def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": vms, "pools": pools, "network": network_summary(), "user": AUTH_USER})
 
 
-@app.get("/vm/{name}", response_class=HTMLResponse)
-def vm_detail_page(request: Request, name: str):
-    auth_redirect = require_auth(request)
-    if auth_redirect:
-        return auth_redirect
-    if not valid_vm_name(name) or not vm_exists(name):
-        return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("vm_detail.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vm": vm_details(name), "host_ip": system_summary()["ip"]})
-
-
+# Важно: статический маршрут /vm/create должен быть выше динамического /vm/{name}.
+# Иначе FastAPI воспринимает слово "create" как имя виртуальной машины.
 @app.get("/vm/create", response_class=HTMLResponse)
 def vm_create_page(request: Request):
     auth_redirect = require_auth(request)
@@ -270,6 +262,16 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
         return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": result["stderr"] or result["stdout"] or "virt-install failed", "form": form}, status_code=500)
     run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
     return RedirectResponse(url="/", status_code=303)
+
+
+@app.get("/vm/{name}", response_class=HTMLResponse)
+def vm_detail_page(request: Request, name: str):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    if not valid_vm_name(name) or not vm_exists(name):
+        return RedirectResponse(url="/", status_code=303)
+    return templates.TemplateResponse("vm_detail.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vm": vm_details(name), "host_ip": system_summary()["ip"]})
 
 
 @app.post("/vm/{name}/{action}")
