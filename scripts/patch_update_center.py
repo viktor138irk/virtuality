@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import runpy
 import sys
 
 app_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/opt/virtuality/web/app.py')
 if not app_path.exists():
     raise SystemExit(f'app.py not found: {app_path}')
-
-script_dir = Path(__file__).resolve().parent
 
 text = app_path.read_text()
 changed = []
@@ -15,8 +12,10 @@ changed = []
 if 'import update_core' not in text:
     if 'import network_core\n' in text:
         text = text.replace('import network_core\n', 'import network_core\nimport update_core\n', 1)
-    else:
+    elif 'from network_core import NetworkError\n' in text:
         text = text.replace('from network_core import NetworkError\n', 'from network_core import NetworkError\nimport update_core\n', 1)
+    else:
+        raise SystemExit('network_core import marker not found')
     changed.append('import update_core added')
 else:
     changed.append('import update_core already present')
@@ -98,6 +97,7 @@ if '@app.get("/update"' not in text:
     text = text.replace(marker, routes + marker, 1)
     changed.append('update routes added')
 else:
+    changed.append('update route already present')
     if '@app.get("/update/status"' not in text:
         marker = '\n\n@app.post("/update/check")'
         if marker not in text:
@@ -125,22 +125,3 @@ app_path.write_text(text)
 print('update center patch applied:')
 for item in changed:
     print(f'- {item}')
-
-# Extra feature patches are intentionally executed after Update Center routes are written.
-# Some legacy patches can exit early; they must not block /update from being installed.
-for optional_patch in ('patch_disk_images.py', 'patch_disk_convert_progress.py', 'patch_vm_architecture.py', 'patch_arm64_emulation_xml.py', 'patch_vm_disk_replace.py', 'patch_update_badge.py'):
-    patch_path = script_dir / optional_patch
-    if not patch_path.exists():
-        continue
-    old_argv = sys.argv[:]
-    try:
-        sys.argv = [str(patch_path), str(app_path)]
-        try:
-            runpy.run_path(str(patch_path), run_name='__main__')
-        except SystemExit as exc:
-            code = exc.code
-            if code not in (None, 0):
-                raise
-            print(f'optional patch exited after successful run: {optional_patch}')
-    finally:
-        sys.argv = old_argv
