@@ -7,13 +7,10 @@ set -euo pipefail
 # ==========================================================
 
 REPO_URL="${VIRTUALITY_REPO_URL:-https://github.com/viktor138irk/virtuality.git}"
-INSTALL_USER="${VIRTUALITY_USER:-viktor}"
-if [[ "$INSTALL_USER" == "root" ]]; then
-  INSTALL_HOME="/root"
-else
-  INSTALL_HOME="/home/${INSTALL_USER}"
-fi
-PROJECT_DIR="${INSTALL_HOME}/virtuality"
+DEFAULT_INSTALL_USER="${SUDO_USER:-root}"
+INSTALL_USER="${VIRTUALITY_USER:-$DEFAULT_INSTALL_USER}"
+PROJECT_BASE_DIR="${VIRTUALITY_PROJECT_BASE_DIR:-/opt/virtuality}"
+PROJECT_DIR="${VIRTUALITY_PROJECT_DIR:-${PROJECT_BASE_DIR}/source}"
 RUN_BRIDGE="${VIRTUALITY_SETUP_BRIDGE:-0}"
 BRIDGE_IFACE="${VIRTUALITY_BRIDGE_IFACE:-}"
 RUN_TEST_VM="${VIRTUALITY_CREATE_TEST_VM:-0}"
@@ -48,7 +45,7 @@ step() { echo; echo -e "${BLUE}${BOLD}▶${RESET} ${BOLD}$*${RESET}"; log "STEP:
 run_logged() {
   local desc="$1"
   shift
-  local start_ts pid code spinner elapsed symbol
+  local start_ts pid code spinner elapsed symbol i
   log "RUN: $*"
   start_ts="$(date +%s)"
   "$@" >> "$LOG_FILE" 2>&1 &
@@ -80,7 +77,7 @@ header() {
   echo -e "${CYAN}${BOLD}╰────────────────────────────────────────────────────────────╯${RESET}"
   echo
   echo -e "${GRAY}Repository:${RESET} ${REPO_URL}"
-  echo -e "${GRAY}Install user:${RESET} ${INSTALL_USER}"
+  echo -e "${GRAY}Auth/install user:${RESET} ${INSTALL_USER}"
   echo -e "${GRAY}Project dir:${RESET} ${PROJECT_DIR}"
   echo -e "${GRAY}Log:${RESET} ${LOG_FILE}"
   echo
@@ -153,7 +150,7 @@ check_requirements() {
 
 ensure_user() {
   if [[ "$INSTALL_USER" == "root" ]]; then
-    ok "Установка выбрана из-под root. Пользователь root уже существует"
+    ok "Пользователь авторизации: root"
     check_password_state root
     return 0
   fi
@@ -177,6 +174,17 @@ run_as_user() {
   fi
 }
 
+prepare_project_dir() {
+  mkdir -p "$PROJECT_BASE_DIR"
+  if [[ "$INSTALL_USER" == "root" ]]; then
+    chown root:root "$PROJECT_BASE_DIR"
+  else
+    chown "$INSTALL_USER:$INSTALL_USER" "$PROJECT_BASE_DIR"
+  fi
+  chmod 755 "$PROJECT_BASE_DIR"
+  ok "Рабочая директория подготовлена: ${PROJECT_BASE_DIR}"
+}
+
 header
 
 step "Проверяем root и apt"
@@ -194,6 +202,9 @@ run_logged "Установлены sudo/git/curl/ca-certificates" apt install -y
 step "Создаём или проверяем пользователя"
 ensure_user
 
+step "Готовим рабочую директорию в /opt"
+prepare_project_dir
+
 step "Проверяем место после подготовки пользователя"
 root_free_after="$(free_mb_for_path /)"
 if (( root_free_after < MIN_ROOT_FREE_MB )); then
@@ -202,11 +213,10 @@ fi
 ok "Место после подготовки пользователя: ${root_free_after} MB на /"
 
 step "Клонируем или обновляем репозиторий"
-mkdir -p "$INSTALL_HOME"
 if [[ -d "$PROJECT_DIR/.git" ]]; then
   run_logged "Репозиторий обновлён" run_as_user "cd '$PROJECT_DIR' && git reset --hard origin/main && git pull"
 else
-  run_logged "Репозиторий склонирован" run_as_user "cd '$INSTALL_HOME' && git clone '$REPO_URL' virtuality"
+  run_logged "Репозиторий склонирован" run_as_user "cd '$PROJECT_BASE_DIR' && git clone '$REPO_URL' source"
 fi
 
 step "Запускаем основной установщик ноды"
