@@ -106,8 +106,13 @@
             <input type="text" name="bridge" value="{{ form.bridge }}" placeholder="br0">
           </label>
 
+          <label class="check-row">
+            <input type="checkbox" name="replace_existing_disk" value="1" {% if form.replace_existing_disk == '1' %}checked{% endif %}>
+            <span>Заменить существующий диск VM, если остался после неудачной установки</span>
+          </label>
+
           <div class="notice">
-            Для обычных ISO выбирай x86_64 на ПК/VPS. Для Raspberry/Orange Pi образов обычно нужен ARM64/aarch64. ISO создаёт пустой диск, готовый образ импортируется через qemu-img convert.
+            Для обычных ISO выбирай x86_64 на ПК/VPS. Для Raspberry/Orange Pi образов обычно нужен ARM64/aarch64 и источник “Готовый диск”. Опция замены диска удаляет только /var/lib/virtuality/images/ИМЯ_VM.qcow2, если VM с таким именем ещё не существует.
           </div>
 
           <button id="create-vm-button" type="submit" class="primary wide">Создать виртуальную машину</button>
@@ -132,7 +137,7 @@
           </div>
           <div class="big-action static">
             <strong>ARM64 / aarch64</strong>
-            <span>Raspberry Pi, Orange Pi 5, ARM-серверы и ARM64 cloud/disk images.</span>
+            <span>На x86-хосте работает как QEMU-эмуляция из готового диска .img/.qcow2. Это медленно, но честно.</span>
           </div>
           <div class="big-action static">
             <strong>Готовый диск</strong>
@@ -141,7 +146,7 @@
         </div>
         <pre>ISO x86: virt-install --arch x86_64 --cdrom ubuntu.iso
 IMG ARM: qemu-img convert -O qcow2 image.img VM.qcow2
-         virt-install --arch aarch64 --machine virt --boot uefi --import</pre>
+         virsh define /tmp/virtuality-VM-arm64.xml && virsh start VM</pre>
       </article>
     </section>
   </div>
