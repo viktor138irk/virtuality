@@ -68,7 +68,7 @@
           <span class="pill">virsh net-dhcp-leases</span>
         </div>
         <pre>{{ ctx.nat.leases }}</pre>
-        <div class="notice top-space">Если IP VM не виден — внутри гостевой системы нужен qemu-guest-agent или задай статический IP в диапазоне 192.168.100.x.</div>
+        <div class="notice top-space">IP для проброса теперь определяется автоматически: сначала через qemu-guest-agent, затем по DHCP leases и MAC-адресу VM.</div>
       </article>
     </section>
 
@@ -76,24 +76,24 @@
       <article class="card">
         <div class="card-head">
           <h2>Добавить проброс порта</h2>
-          <span class="pill">DNAT</span>
+          <span class="pill">DNAT auto IP</span>
         </div>
         <form method="post" action="/network/forward/add" class="form-grid">
           <label>
-            <span>VM</span>
+            <span>Виртуальная машина</span>
             <select name="vm_name" required>
               {% for vm in vms %}
                 <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
               {% endfor %}
             </select>
           </label>
-          <label>
-            <span>Внутренний IP VM</span>
-            <input type="text" name="guest_ip" placeholder="192.168.100.50" required>
-          </label>
+          <input type="hidden" name="guest_ip" value="auto">
+          <div class="notice">
+            Внутренний IP VM будет подставлен автоматически. VM должна быть запущена и получить адрес в NAT-сети.
+          </div>
           <div class="form-row">
             <label>
-              <span>Внешний порт VPS</span>
+              <span>Внешний порт сервера</span>
               <input type="number" name="external_port" min="1" max="65535" placeholder="2222" required>
             </label>
             <label>
