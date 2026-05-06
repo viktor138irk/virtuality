@@ -1,10 +1,9 @@
 import json
 import re
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Any
-
-from app_runtime import run_cmd
 
 CONFIG_DIR = Path('/var/lib/virtuality/config')
 NETWORK_DIR = Path('/var/lib/virtuality/network')
@@ -21,6 +20,14 @@ DHCP_END = '192.168.100.200'
 
 class NetworkError(Exception):
     pass
+
+
+def run_cmd(cmd: list[str], timeout: int = 12) -> dict[str, Any]:
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        return {'ok': result.returncode == 0, 'code': result.returncode, 'stdout': result.stdout.strip(), 'stderr': result.stderr.strip(), 'cmd': ' '.join(cmd)}
+    except Exception as exc:
+        return {'ok': False, 'code': -1, 'stdout': '', 'stderr': str(exc), 'cmd': ' '.join(cmd)}
 
 
 def ensure_dirs() -> None:
