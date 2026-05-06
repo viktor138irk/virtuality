@@ -13,15 +13,15 @@ if [[ "${EUID}" -ne 0 ]]; then
     echo "Virtuality installer needs root. Downloading a temporary copy and re-running through sudo..."
     tmp_installer="$(mktemp /tmp/virtuality-install.XXXXXX.sh)"
     if command -v curl >/dev/null 2>&1; then
-      curl -fsSL "$SELF_INSTALL_URL" -o "$tmp_installer"
+      curl --connect-timeout 20 --max-time 180 -fsSL "$SELF_INSTALL_URL" -o "$tmp_installer"
     elif command -v wget >/dev/null 2>&1; then
-      wget -qO "$tmp_installer" "$SELF_INSTALL_URL"
+      timeout 180 wget -qO "$tmp_installer" "$SELF_INSTALL_URL"
     else
       echo "curl/wget not found. Run manually: curl -fsSL $SELF_INSTALL_URL | sudo bash" >&2
       exit 1
     fi
     chmod +x "$tmp_installer"
-    exec sudo --preserve-env=VIRTUALITY_INSTALL_URL,VIRTUALITY_USER,VIRTUALITY_WEB_PORT,VIRTUALITY_MIN_ROOT_FREE_MB,VIRTUALITY_MIN_VAR_FREE_MB,VIRTUALITY_MIN_RAM_MB,VIRTUALITY_MIN_CPU_CORES,VIRTUALITY_SKIP_REQUIREMENTS,VIRTUALITY_SETUP_BRIDGE,VIRTUALITY_BRIDGE_IFACE,VIRTUALITY_CREATE_TEST_VM,VIRTUALITY_REPO_URL,VIRTUALITY_PROJECT_BASE_DIR,VIRTUALITY_PROJECT_DIR bash "$tmp_installer" "$@"
+    exec sudo --preserve-env=VIRTUALITY_INSTALL_URL,VIRTUALITY_USER,VIRTUALITY_WEB_PORT,VIRTUALITY_MIN_ROOT_FREE_MB,VIRTUALITY_MIN_VAR_FREE_MB,VIRTUALITY_MIN_RAM_MB,VIRTUALITY_MIN_CPU_CORES,VIRTUALITY_SKIP_REQUIREMENTS,VIRTUALITY_SETUP_BRIDGE,VIRTUALITY_BRIDGE_IFACE,VIRTUALITY_CREATE_TEST_VM,VIRTUALITY_REPO_URL,VIRTUALITY_PROJECT_BASE_DIR,VIRTUALITY_PROJECT_DIR,VIRTUALITY_INSTALL_VERBOSE,VIRTUALITY_CLEAN_BEFORE_INSTALL bash "$tmp_installer" "$@"
   fi
   echo "Root or sudo is required. Run: curl -fsSL $SELF_INSTALL_URL | sudo bash" >&2
   exit 1
@@ -43,6 +43,8 @@ MIN_VAR_FREE_MB="${VIRTUALITY_MIN_VAR_FREE_MB:-20480}"
 MIN_RAM_MB="${VIRTUALITY_MIN_RAM_MB:-4096}"
 MIN_CPU_CORES="${VIRTUALITY_MIN_CPU_CORES:-2}"
 SKIP_REQUIREMENTS="${VIRTUALITY_SKIP_REQUIREMENTS:-0}"
+INSTALL_VERBOSE="${VIRTUALITY_INSTALL_VERBOSE:-0}"
+CLEAN_BEFORE_INSTALL="${VIRTUALITY_CLEAN_BEFORE_INSTALL:-0}"
 
 ESC="\033"
 RESET="${ESC}[0m"
@@ -60,7 +62,17 @@ timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(timestamp)] $*" >> "$LOG_FILE"; }
 ok() { echo -e "  ${GREEN}✓${RESET} $*"; log "OK: $*"; }
 warn() { echo -e "  ${YELLOW}!${RESET} $*"; log "WARN: $*"; }
-fail() { echo -e "  ${RED}✗${RESET} $*"; log "ERROR: $*"; echo; echo -e "${RED}${BOLD}Установка остановлена.${RESET} Лог: ${LOG_FILE}"; exit 1; }
+fail() {
+  echo -e "  ${RED}✗${RESET} $*"
+  log "ERROR: $*"
+  echo
+  echo -e "${RED}${BOLD}Установка остановлена.${RESET} Лог: ${LOG_FILE}"
+  if [[ -f "$LOG_FILE" ]]; then
+    echo -e "${YELLOW}Последние строки лога:${RESET}"
+    tail -n 40 "$LOG_FILE" || true
+  fi
+  exit 1
+}
 step() { echo; echo -e "${BLUE}${BOLD}▶${RESET} ${BOLD}$*${RESET}"; log "STEP: $*"; }
 
 run_logged() {
@@ -69,6 +81,13 @@ run_logged() {
   local start_ts pid code spinner elapsed symbol i
   log "RUN: $*"
   start_ts="$(date +%s)"
+  if [[ "$INSTALL_VERBOSE" == "1" ]]; then
+    echo -e "  ${CYAN}↳${RESET} $*"
+    "$@" 2>&1 | tee -a "$LOG_FILE"
+    code=${PIPESTATUS[0]}
+    [[ "$code" -eq 0 ]] && ok "$desc" || fail "$desc"
+    return
+  fi
   "$@" >> "$LOG_FILE" 2>&1 &
   pid=$!
   spinner=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
@@ -77,6 +96,10 @@ run_logged() {
     elapsed=$(( $(date +%s) - start_ts ))
     symbol="${spinner[$((i % ${#spinner[@]}))]}"
     printf "\r  ${CYAN}%s${RESET} %s... ${GRAY}%ss${RESET} ${GRAY}(лог: %s)${RESET}" "$symbol" "$desc" "$elapsed" "$LOG_FILE"
+    if (( elapsed > 0 && elapsed % 60 == 0 )); then
+      printf "\n  ${YELLOW}!${RESET} Всё ещё работаю. Последние строки лога:\n"
+      tail -n 8 "$LOG_FILE" || true
+    fi
     sleep 1
     i=$((i + 1))
   done
@@ -101,6 +124,7 @@ header() {
   echo -e "${GRAY}Auth/install user:${RESET} ${INSTALL_USER}"
   echo -e "${GRAY}Project dir:${RESET} ${PROJECT_DIR}"
   echo -e "${GRAY}Log:${RESET} ${LOG_FILE}"
+  echo -e "${GRAY}Verbose:${RESET} ${INSTALL_VERBOSE}"
   echo
 }
 
@@ -226,6 +250,13 @@ ensure_user
 step "Готовим рабочую директорию в /opt"
 prepare_project_dir
 
+if [[ "$CLEAN_BEFORE_INSTALL" == "1" && -x "$PROJECT_DIR/scripts/clean_install.sh" ]]; then
+  step "Очищаем старую кривую установку перед установкой"
+  run_logged "Старая установка очищена" bash "$PROJECT_DIR/scripts/clean_install.sh" --yes
+elif [[ "$CLEAN_BEFORE_INSTALL" == "1" ]]; then
+  warn "Очистка запрошена, но clean_install.sh пока недоступен. Продолжаю установку."
+fi
+
 step "Проверяем место после подготовки пользователя"
 root_free_after="$(free_mb_for_path /)"
 if (( root_free_after < MIN_ROOT_FREE_MB )); then
@@ -235,9 +266,14 @@ ok "Место после подготовки пользователя: ${root_
 
 step "Клонируем или обновляем репозиторий"
 if [[ -d "$PROJECT_DIR/.git" ]]; then
-  run_logged "Репозиторий обновлён" run_as_user "cd '$PROJECT_DIR' && git reset --hard origin/main && git pull"
+  run_logged "Репозиторий обновлён" run_as_user "cd '$PROJECT_DIR' && git fetch origin main && git reset --hard origin/main && git pull --ff-only"
 else
   run_logged "Репозиторий склонирован" run_as_user "cd '$PROJECT_BASE_DIR' && git clone '$REPO_URL' source"
+fi
+
+if [[ "$CLEAN_BEFORE_INSTALL" == "1" && -x "$PROJECT_DIR/scripts/clean_install.sh" ]]; then
+  step "Очищаем старую кривую установку после обновления исходников"
+  run_logged "Старая установка очищена" bash "$PROJECT_DIR/scripts/clean_install.sh" --yes
 fi
 
 step "Запускаем основной установщик ноды"
@@ -250,21 +286,31 @@ step "Устанавливаем консольный dashboard"
 run_logged "Console dashboard установлен" bash "$PROJECT_DIR/scripts/install_console_dashboard.sh"
 
 step "Устанавливаем web-панель"
-VIRTUALITY_AUTH_USER="$INSTALL_USER" VIRTUALITY_WEB_PORT="$WEB_PORT" bash "$PROJECT_DIR/scripts/install_web_panel.sh" >> "$LOG_FILE" 2>&1 &
-web_pid=$!
-web_start="$(date +%s)"
-web_i=0
-web_spinner=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
-while kill -0 "$web_pid" 2>/dev/null; do
-  web_elapsed=$(( $(date +%s) - web_start ))
-  printf "\r  ${CYAN}%s${RESET} Web-панель устанавливается... ${GRAY}%ss${RESET} ${GRAY}(лог: %s)${RESET}" "${web_spinner[$((web_i % ${#web_spinner[@]}))]}" "$web_elapsed" "$LOG_FILE"
-  sleep 1
-  web_i=$((web_i + 1))
-done
-wait "$web_pid"
-web_code=$?
-printf "\r%*s\r" 120 ""
-[[ "$web_code" -eq 0 ]] && ok "Web-панель установлена" || fail "Web-панель не установлена"
+if [[ "$INSTALL_VERBOSE" == "1" ]]; then
+  VIRTUALITY_AUTH_USER="$INSTALL_USER" VIRTUALITY_WEB_PORT="$WEB_PORT" bash "$PROJECT_DIR/scripts/install_web_panel.sh" 2>&1 | tee -a "$LOG_FILE"
+  web_code=${PIPESTATUS[0]}
+  [[ "$web_code" -eq 0 ]] && ok "Web-панель установлена" || fail "Web-панель не установлена"
+else
+  VIRTUALITY_AUTH_USER="$INSTALL_USER" VIRTUALITY_WEB_PORT="$WEB_PORT" bash "$PROJECT_DIR/scripts/install_web_panel.sh" >> "$LOG_FILE" 2>&1 &
+  web_pid=$!
+  web_start="$(date +%s)"
+  web_i=0
+  web_spinner=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  while kill -0 "$web_pid" 2>/dev/null; do
+    web_elapsed=$(( $(date +%s) - web_start ))
+    printf "\r  ${CYAN}%s${RESET} Web-панель устанавливается... ${GRAY}%ss${RESET} ${GRAY}(лог: %s)${RESET}" "${web_spinner[$((web_i % ${#web_spinner[@]}))]}" "$web_elapsed" "$LOG_FILE"
+    if (( web_elapsed > 0 && web_elapsed % 60 == 0 )); then
+      printf "\n  ${YELLOW}!${RESET} Web-панель всё ещё устанавливается. Последние строки лога:\n"
+      tail -n 8 "$LOG_FILE" || true
+    fi
+    sleep 1
+    web_i=$((web_i + 1))
+  done
+  wait "$web_pid"
+  web_code=$?
+  printf "\r%*s\r" 120 ""
+  [[ "$web_code" -eq 0 ]] && ok "Web-панель установлена" || fail "Web-панель не установлена"
+fi
 
 if [[ "$RUN_BRIDGE" == "1" ]]; then
   step "Настраиваем bridge br0"
