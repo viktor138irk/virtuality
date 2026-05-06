@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }} Login</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="auth-body">
+  <main class="auth-shell">
+    <section class="auth-card">
+      <div class="brand auth-brand">Virtuality</div>
+      <p class="muted">Вход в панель управления виртуализацией</p>
+
+      {% if not configured %}
+        <div class="alert danger">Панель ещё не настроена. Повтори установку веб-панели.</div>
+      {% endif %}
+
+      {% if error %}
+        <div class="alert danger">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/login" class="auth-form">
+        <label>
+          <span>Linux-пользователь</span>
+          <input type="text" name="username" value="{{ auth_user }}" autocomplete="username" required>
+        </label>
+        <label>
+          <span>Пароль</span>
+          <input type="password" name="password" autocomplete="current-password" required autofocus>
+        </label>
+        <button type="submit" class="primary wide">Войти</button>
+      </form>
+
+      <p class="muted small-note">Используется пароль системного пользователя Linux. Пароль не хранится в Virtuality.</p>
+    </section>
+  </main>
+</body>
+</html>
