@@ -6,6 +6,27 @@ set -euo pipefail
 # Public install entrypoint for clean Ubuntu/Debian servers.
 # ==========================================================
 
+SELF_INSTALL_URL="${VIRTUALITY_INSTALL_URL:-https://raw.githubusercontent.com/viktor138irk/virtuality/main/install.sh}"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  if command -v sudo >/dev/null 2>&1; then
+    echo "Virtuality installer needs root. Downloading a temporary copy and re-running through sudo..."
+    tmp_installer="$(mktemp /tmp/virtuality-install.XXXXXX.sh)"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$SELF_INSTALL_URL" -o "$tmp_installer"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -qO "$tmp_installer" "$SELF_INSTALL_URL"
+    else
+      echo "curl/wget not found. Run manually: curl -fsSL $SELF_INSTALL_URL | sudo bash" >&2
+      exit 1
+    fi
+    chmod +x "$tmp_installer"
+    exec sudo --preserve-env=VIRTUALITY_INSTALL_URL,VIRTUALITY_USER,VIRTUALITY_WEB_PORT,VIRTUALITY_MIN_ROOT_FREE_MB,VIRTUALITY_MIN_VAR_FREE_MB,VIRTUALITY_MIN_RAM_MB,VIRTUALITY_MIN_CPU_CORES,VIRTUALITY_SKIP_REQUIREMENTS,VIRTUALITY_SETUP_BRIDGE,VIRTUALITY_BRIDGE_IFACE,VIRTUALITY_CREATE_TEST_VM,VIRTUALITY_REPO_URL,VIRTUALITY_PROJECT_BASE_DIR,VIRTUALITY_PROJECT_DIR bash "$tmp_installer" "$@"
+  fi
+  echo "Root or sudo is required. Run: curl -fsSL $SELF_INSTALL_URL | sudo bash" >&2
+  exit 1
+fi
+
 REPO_URL="${VIRTUALITY_REPO_URL:-https://github.com/viktor138irk/virtuality.git}"
 DEFAULT_INSTALL_USER="${SUDO_USER:-root}"
 INSTALL_USER="${VIRTUALITY_USER:-$DEFAULT_INSTALL_USER}"
@@ -84,14 +105,7 @@ header() {
 }
 
 require_root() {
-  if [[ "$EUID" -eq 0 ]]; then
-    return 0
-  fi
-  if command -v sudo >/dev/null 2>&1; then
-    echo "Virtuality installer needs root. Re-running through sudo..."
-    exec sudo --preserve-env=VIRTUALITY_USER,VIRTUALITY_WEB_PORT,VIRTUALITY_MIN_ROOT_FREE_MB,VIRTUALITY_MIN_VAR_FREE_MB,VIRTUALITY_MIN_RAM_MB,VIRTUALITY_MIN_CPU_CORES,VIRTUALITY_SKIP_REQUIREMENTS,VIRTUALITY_SETUP_BRIDGE,VIRTUALITY_BRIDGE_IFACE,VIRTUALITY_CREATE_TEST_VM,VIRTUALITY_REPO_URL,VIRTUALITY_PROJECT_BASE_DIR,VIRTUALITY_PROJECT_DIR bash "$0" "$@"
-  fi
-  fail "Нужен root или sudo. Запусти под root или установи sudo."
+  [[ "$EUID" -eq 0 ]] || fail "Нужен root или sudo. Запусти: curl -fsSL ${SELF_INSTALL_URL} | sudo bash"
 }
 
 free_mb_for_path() {
@@ -151,7 +165,7 @@ check_requirements() {
   if grep -E -q '(vmx|svm)' /proc/cpuinfo; then
     ok "CPU virtualization vmx/svm найдена"
   else
-    warn "CPU virtualization vmx/svm не найдена. Проверь BIOS/UEFI или настройки VPS"
+    warn "CPU virtualization vmx/svm не найдена. На Raspberry/Orange Pi это нормально, если используется ARM/QEMU/KVM профиль"
   fi
 }
 
