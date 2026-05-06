@@ -135,7 +135,7 @@ def detect_host_profile() -> dict[str, Any]:
         'virtualization_flags': virtualization_flags,
         'virtualization_mode': virtualization_mode,
         'virtualization_label': 'KVM hardware acceleration' if virtualization_mode == 'kvm' else 'QEMU software emulation',
-        'virtualization_warning': '' if virtualization_mode == 'kvm' else 'KVM недоступен: VM будут запускаться через медленный QEMU fallback без аппаратного ускорения.',
+        'virtualization_warning': '' if virtualization_mode == 'kvm' else 'KVM недоступен: VM будут запускаться через медленный QEMU fallback без аппаратного ускорения. На физическом сервере включи Intel VT-x / AMD-V в BIOS/UEFI.',
         'qemu_system_x86_64': command_exists('qemu-system-x86_64'),
         'qemu_system_aarch64': command_exists('qemu-system-aarch64'),
         'virt_install': command_exists('virt-install'),
@@ -148,18 +148,17 @@ def detect_host_profile() -> dict[str, Any]:
         ]),
     }
     checks = []
-    checks.append({'name': '/dev/kvm', 'ok': data['kvm_device'], 'hint': 'KVM недоступен. На VPS проверь nested virtualization у провайдера; Virtuality может использовать медленный QEMU fallback.'})
-    checks.append({'name': 'CPU vmx/svm', 'ok': virtualization_flags > 0, 'hint': 'CPU-флаги vmx/svm не видны. Это нормально для VPS без nested virtualization, но KVM невозможен.'})
+    checks.append({'name': '/dev/kvm', 'ok': data['kvm_device'], 'level': 'ok' if data['kvm_device'] else 'warn', 'hint': 'KVM недоступен. На физическом сервере включи Intel VT-x / AMD-V в BIOS/UEFI; на VPS проверь nested virtualization. Пока доступен медленный QEMU fallback.'})
+    checks.append({'name': 'CPU vmx/svm', 'ok': virtualization_flags > 0, 'level': 'ok' if virtualization_flags > 0 else 'warn', 'hint': 'CPU-флаги vmx/svm не видны. Для реального сервера это обычно значит, что виртуализация выключена в BIOS/UEFI.'})
     if is_arm:
-        checks.append({'name': 'qemu-system-aarch64', 'ok': data['qemu_system_aarch64'], 'hint': 'Пакет qemu-system-arm / qemu-system-aarch64.'})
-        checks.append({'name': 'AArch64 UEFI', 'ok': data['uefi_aarch64_hint'], 'hint': 'Пакет qemu-efi-aarch64 или AAVMF.'})
+        checks.append({'name': 'qemu-system-aarch64', 'ok': data['qemu_system_aarch64'], 'level': 'ok' if data['qemu_system_aarch64'] else 'err', 'hint': 'Пакет qemu-system-arm / qemu-system-aarch64.'})
+        checks.append({'name': 'AArch64 UEFI', 'ok': data['uefi_aarch64_hint'], 'level': 'ok' if data['uefi_aarch64_hint'] else 'warn', 'hint': 'Пакет qemu-efi-aarch64 или AAVMF.'})
     else:
-        checks.append({'name': 'qemu-system-x86_64', 'ok': data['qemu_system_x86_64'], 'hint': 'Пакет qemu-system-x86.'})
-    checks.append({'name': 'virt-install', 'ok': data['virt_install'], 'hint': 'Пакет virtinst.'})
-    checks.append({'name': 'nftables', 'ok': data['nft'], 'hint': 'Пакет nftables для NAT port forwarding.'})
-    checks.append({'name': f'bridge {DEFAULT_BRIDGE}', 'ok': bridge_available, 'hint': 'Если br0 отсутствует, Virtuality будет использовать VPS NAT Router / virtuality-nat.'})
+        checks.append({'name': 'qemu-system-x86_64', 'ok': data['qemu_system_x86_64'], 'level': 'ok' if data['qemu_system_x86_64'] else 'err', 'hint': 'Пакет qemu-system-x86.'})
+    checks.append({'name': 'virt-install', 'ok': data['virt_install'], 'level': 'ok' if data['virt_install'] else 'err', 'hint': 'Пакет virtinst.'})
+    checks.append({'name': 'nftables', 'ok': data['nft'], 'level': 'ok' if data['nft'] else 'err', 'hint': 'Пакет nftables для NAT port forwarding.'})
+    checks.append({'name': f'bridge {DEFAULT_BRIDGE}', 'ok': bridge_available, 'level': 'ok' if bridge_available else 'warn', 'hint': 'Если br0 отсутствует, Virtuality будет использовать VPS NAT Router / virtuality-nat.'})
     data['checks'] = checks
-    # No /dev/kvm is no longer fatal: qemu fallback is supported, just slower.
     data['ready'] = data['virt_install'] and (data['qemu_system_aarch64'] if is_arm else data['qemu_system_x86_64']) and data['nft']
     return data
 
@@ -173,7 +172,7 @@ def load_host_profile() -> dict[str, Any]:
     if PROFILE_FILE.exists():
         try:
             profile = json.loads(PROFILE_FILE.read_text())
-            if 'bridge_available' not in profile or 'virtualization_mode' not in profile:
+            if 'bridge_available' not in profile or 'virtualization_mode' not in profile or any('level' not in item for item in profile.get('checks', [])):
                 profile = detect_host_profile()
                 save_host_profile(profile)
             return profile
