@@ -1,6 +1,21 @@
 {
   "versions": [
     {
+      "version": "0.8.7",
+      "date": "2026-05-07",
+      "title": "Фикс отображения IP-адресов VM",
+      "summary": "Патч DHCP leases был исправлен: теперь он гарантированно меняет parse_virsh_list и добавляет IP-адреса в данные таблицы виртуальных машин.",
+      "features": [
+        "Патч IP-адресов VM был исправлен",
+        "Старые helper-функции с некорректной ссылкой на NETWORK_NAME теперь удаляются перед повторной вставкой",
+        "Fallback DHCP leases теперь использует network_core.NETWORK_NAME",
+        "parse_virsh_list теперь возвращает enrich_vms_with_ips(rows)",
+        "IP-адрес сначала ищется через virsh domifaddr, затем через network_core.resolve_vm_ip и DHCP leases",
+        "При ошибках определения IP панель больше не должна падать, а показывает прочерк",
+        "Версия обновлена до 0.8.7"
+      ]
+    },
+    {
       "version": "0.8.6",
       "date": "2026-05-07",
       "title": "IP-адреса VM в таблице обзора",
