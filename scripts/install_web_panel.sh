@@ -17,6 +17,7 @@ LOG_DIR="/var/log/virtuality"
 LOG_FILE="${LOG_DIR}/install_web_panel_$(date +%Y%m%d_%H%M%S).log"
 PROFILE_DIR="/var/lib/virtuality/config"
 PROFILE_FILE="${PROFILE_DIR}/host_profile.json"
+SESSION_SECRET_FILE="${PROFILE_DIR}/session_secret"
 UPLOAD_TMP_DIR="/var/lib/virtuality/tmp"
 TOTAL_STEPS=13
 CURRENT_STEP=0
@@ -204,7 +205,15 @@ else
 fi
 
 step "Создаём конфиг авторизации"
-SESSION_SECRET="$(openssl rand -hex 32)"
+if [[ -s "$SESSION_SECRET_FILE" ]]; then
+  SESSION_SECRET="$(cat "$SESSION_SECRET_FILE")"
+  ok "Используем существующий session secret: $SESSION_SECRET_FILE"
+else
+  SESSION_SECRET="$(openssl rand -hex 32)"
+  printf '%s\n' "$SESSION_SECRET" > "$SESSION_SECRET_FILE"
+  chmod 600 "$SESSION_SECRET_FILE"
+  ok "Создан постоянный session secret: $SESSION_SECRET_FILE"
+fi
 cat > "${APP_DIR}/.env" <<EOF
 VIRTUALITY_AUTH_USER=${AUTH_USER}
 VIRTUALITY_SESSION_SECRET=${SESSION_SECRET}
@@ -332,6 +341,7 @@ echo -e "${BOLD}Arch:${RESET}       ${ARCH:-unknown}"
 echo -e "${BOLD}Service:${RESET}    virtuality-web.service"
 echo -e "${BOLD}Auto update:${RESET} virtuality-auto-update.timer / каждые 15 минут"
 echo -e "${BOLD}Upload tmp:${RESET}  ${UPLOAD_TMP_DIR}"
+echo -e "${BOLD}Session key:${RESET} ${SESSION_SECRET_FILE}"
 echo -e "${BOLD}Status:${RESET}     systemctl status virtuality-web --no-pager"
 echo -e "${BOLD}Logs:${RESET}       journalctl -u virtuality-web -f"
 echo -e "${BOLD}Install log:${RESET} ${LOG_FILE}"
