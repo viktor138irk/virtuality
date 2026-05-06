@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <div class="brand">ISO</div>
-        <div class="muted">Управление образами в /var/lib/virtuality/iso</div>
+        <div class="muted">Установочные образы только .iso в /var/lib/virtuality/iso</div>
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
@@ -28,15 +28,15 @@
     <section class="grid two">
       <article class="card">
         <div class="card-head">
-          <h2>Загрузить ISO</h2>
-          <span class="pill">upload .iso</span>
+          <h2>Загрузить установочный ISO</h2>
+          <span class="pill">только .iso</span>
         </div>
         <form id="iso-upload-form" method="post" action="/iso/upload" enctype="multipart/form-data" class="form-grid">
           <label class="upload-box">
-            <span>Выбери ISO-файл</span>
-            <input id="iso-file-input" type="file" name="iso_file" accept=".iso,application/x-iso9660-image" required>
+            <span>Выбери ISO-файл установочного диска</span>
+            <input id="iso-file-input" type="file" name="iso_file" accept=".iso" required>
           </label>
-          <div id="iso-file-hint" class="muted small-note">Файл ещё не выбран.</div>
+          <div id="iso-file-hint" class="muted small-note">Файл ещё не выбран. В этом разделе разрешены только установочные образы .iso.</div>
           <div id="upload-progress-wrap" class="upload-progress-wrap" hidden>
             <div class="upload-progress-head">
               <strong id="upload-status">Подготовка…</strong>
@@ -50,7 +50,7 @@
           </div>
           <button id="iso-upload-button" type="submit" class="primary wide">Загрузить ISO</button>
         </form>
-        <p class="muted small-note">Файл попадёт в <b>/var/lib/virtuality/iso</b>, после загрузки будет выполнен refresh pool <b>virtuality-iso</b>.</p>
+        <p class="muted small-note">Файл попадёт в <b>/var/lib/virtuality/iso</b>. Для готовых системных дисков используй раздел <b>Диски</b>: .img / .raw / .qcow2.</p>
       </article>
 
       <article class="card">
@@ -89,7 +89,7 @@ ls -lh /var/lib/virtuality/iso</pre>
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="4" class="muted">ISO пока нет. Загрузи первый образ через форму выше.</td></tr>
+          <tr><td colspan="4" class="muted">ISO пока нет. Загрузи первый установочный .iso через форму выше.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -117,15 +117,31 @@ ls -lh /var/lib/virtuality/iso</pre>
       return value.toFixed(value >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
     }
 
+    function validIsoFile(file) {
+      return file && file.name && file.name.toLowerCase().endsWith('.iso');
+    }
+
     fileInput.addEventListener('change', function () {
       const file = fileInput.files[0];
-      hint.textContent = file ? file.name + ' · ' + bytesText(file.size) : 'Файл ещё не выбран.';
+      if (!file) {
+        hint.textContent = 'Файл ещё не выбран. В этом разделе разрешены только установочные образы .iso.';
+        return;
+      }
+      if (!validIsoFile(file)) {
+        hint.textContent = 'Неверный тип файла. Здесь можно выбрать только .iso.';
+        fileInput.value = '';
+        return;
+      }
+      hint.textContent = file.name + ' · ' + bytesText(file.size);
     });
 
     form.addEventListener('submit', function (event) {
       event.preventDefault();
       const file = fileInput.files[0];
-      if (!file) return;
+      if (!validIsoFile(file)) {
+        hint.textContent = 'Выбери установочный образ .iso.';
+        return;
+      }
 
       const xhr = new XMLHttpRequest();
       const data = new FormData(form);
