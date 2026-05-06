@@ -3,13 +3,14 @@ import crypt
 import os
 import re
 import secrets
+import shutil
 import spwd
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -134,11 +135,39 @@ def list_iso_files() -> list[dict[str, str]]:
     files = []
     for item in sorted(ISO_DIR.glob("*.iso")):
         try:
-            size_mb = item.stat().st_size / 1024 / 1024
+            stat = item.stat()
+            size_mb = stat.st_size / 1024 / 1024
+            updated = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
         except OSError:
             size_mb = 0
-        files.append({"name": item.name, "path": str(item), "size": f"{size_mb:.1f} MB"})
+            updated = "unknown"
+        files.append({"name": item.name, "path": str(item), "size": f"{size_mb:.1f} MB", "updated": updated})
     return files
+
+
+def safe_iso_filename(filename: str) -> str | None:
+    name = Path(filename or "").name.strip().replace(" ", "-")
+    name = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)
+    if not name.lower().endswith(".iso"):
+        return None
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{1,180}\.iso", name):
+        return None
+    return name
+
+
+def iso_path_by_name(name: str) -> Path | None:
+    safe_name = safe_iso_filename(name)
+    if not safe_name:
+        return None
+    path = (ISO_DIR / safe_name).resolve()
+    iso_root = ISO_DIR.resolve()
+    if iso_root not in path.parents:
+        return None
+    return path
+
+
+def refresh_iso_pool() -> None:
+    run_cmd(["virsh", "pool-refresh", "virtuality-iso"], timeout=20)
 
 
 def valid_vm_name(name: str) -> bool:
@@ -214,6 +243,59 @@ def dashboard(request: Request):
     pools = parse_pool_list()
     services = {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}
     return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": vms, "pools": pools, "network": network_summary(), "user": AUTH_USER})
+
+
+@app.get("/iso", response_class=HTMLResponse)
+def iso_page(request: Request, error: str | None = None):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    return templates.TemplateResponse("iso.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": error})
+
+
+@app.post("/iso/upload", response_class=HTMLResponse)
+def iso_upload(request: Request, iso_file: UploadFile = File(...)):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    safe_name = safe_iso_filename(iso_file.filename or "")
+    if not safe_name:
+        return templates.TemplateResponse("iso.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": "Можно загружать только .iso файлы с безопасным именем."}, status_code=400)
+    ISO_DIR.mkdir(parents=True, exist_ok=True)
+    target = ISO_DIR / safe_name
+    if target.exists():
+        return templates.TemplateResponse("iso.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": f"ISO уже существует: {safe_name}"}, status_code=400)
+    tmp_target = ISO_DIR / f".{safe_name}.uploading"
+    try:
+        with tmp_target.open("wb") as out:
+            shutil.copyfileobj(iso_file.file, out)
+        tmp_target.rename(target)
+        refresh_iso_pool()
+    except Exception as exc:
+        tmp_target.unlink(missing_ok=True)
+        return templates.TemplateResponse("iso.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": f"Ошибка загрузки ISO: {exc}"}, status_code=500)
+    return RedirectResponse(url="/iso", status_code=303)
+
+
+@app.post("/iso/{name}/delete")
+def iso_delete(request: Request, name: str):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    path = iso_path_by_name(name)
+    if path and path.exists() and path.is_file():
+        path.unlink()
+        refresh_iso_pool()
+    return RedirectResponse(url="/iso", status_code=303)
+
+
+@app.post("/iso/refresh")
+def iso_refresh(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    refresh_iso_pool()
+    return RedirectResponse(url="/iso", status_code=303)
 
 
 # Важно: статический маршрут /vm/create должен быть выше динамического /vm/{name}.
