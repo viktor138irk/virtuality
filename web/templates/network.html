@@ -72,6 +72,42 @@
       </article>
     </section>
 
+    <section class="card">
+      <div class="card-head">
+        <h2>Быстрые шаблоны публичного доступа</h2>
+        <span class="pill">one click presets</span>
+      </div>
+      <div class="grid two">
+        {% for key, tpl in templates.items() %}
+        <article class="big-action static">
+          <strong>{{ tpl.title }}</strong>
+          <span>{{ tpl.description }}</span>
+          <form method="post" action="/network/template/apply" class="form-grid top-space">
+            <label>
+              <span>Виртуальная машина</span>
+              <select name="vm_name" required>
+                {% for vm in vms %}
+                  <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <input type="hidden" name="template_key" value="{{ key }}">
+            {% if key == 'ssh' %}
+            <label>
+              <span>Внешний SSH-порт</span>
+              <input type="number" name="external_base_port" min="1" max="65535" value="2222">
+            </label>
+            {% else %}
+              <input type="hidden" name="external_base_port" value="0">
+            {% endif %}
+            <button class="primary wide">Применить шаблон</button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+      <div class="notice top-space">Шаблоны не затирают существующие правила: если внешний порт уже занят, правило будет пропущено.</div>
+    </section>
+
     <section class="grid two">
       <article class="card">
         <div class="card-head">
