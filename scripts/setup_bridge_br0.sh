@@ -7,14 +7,15 @@ NETPLAN_DIR="/etc/netplan"
 BACKUP_DIR="/root/virtuality-netplan-backups/$(date +%Y%m%d_%H%M%S)"
 BRIDGE_FILE="${NETPLAN_DIR}/60-virtuality-br0.yaml"
 ROLLBACK_SCRIPT="/root/virtuality-rollback-netplan.sh"
+MODE="${2:-dhcp}"
 
 if [[ "$EUID" -ne 0 ]]; then
-  echo "Ошибка: запусти через sudo: sudo bash scripts/setup_bridge_br0.sh"
+  echo "Ошибка: запусти через sudo: sudo bash scripts/setup_bridge_br0.sh enp2s0"
   exit 1
 fi
 
 if ! command -v netplan >/dev/null 2>&1; then
-  echo "Ошибка: netplan не найден. Скрипт рассчитан на Ubuntu/Debian с netplan."
+  echo "Ошибка: netplan не найден."
   exit 1
 fi
 
@@ -24,12 +25,25 @@ if ! ip link show "$IFACE" >/dev/null 2>&1; then
   exit 1
 fi
 
+CURRENT_IP="$(ip -4 addr show "$IFACE" | awk '/inet / {print $2; exit}')"
+CURRENT_GW="$(ip route | awk '/default/ {print $3; exit}')"
+CURRENT_DNS="$(resolvectl dns "$IFACE" 2>/dev/null | awk -F': ' '{print $2; exit}' || true)"
+CURRENT_DNS="${CURRENT_DNS:-1.1.1.1 8.8.8.8}"
+
 echo "============================================================"
-echo "Virtuality bridge setup"
+echo "Virtuality safe bridge setup"
 echo "============================================================"
-echo "Interface: $IFACE"
-echo "Bridge:    $BRIDGE"
-echo "Backup:    $BACKUP_DIR"
+echo "Interface:       $IFACE"
+echo "Bridge:          $BRIDGE"
+echo "Mode:            $MODE"
+echo "Current IP:      ${CURRENT_IP:-unknown}"
+echo "Current gateway: ${CURRENT_GW:-unknown}"
+echo "Backup:          $BACKUP_DIR"
+echo
+
+echo "ВАЖНО: скрипт использует netplan try."
+echo "Если сеть пропадёт, netplan должен автоматически откатить изменения."
+echo "Если видишь подтверждение — нажми Enter, только если SSH/сеть не отвалилась."
 echo
 
 mkdir -p "$BACKUP_DIR"
@@ -38,15 +52,68 @@ cp -a "$NETPLAN_DIR"/*.yaml "$BACKUP_DIR"/ 2>/dev/null || true
 cat > "$ROLLBACK_SCRIPT" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-cp -a "$BACKUP_DIR"/*.yaml "$NETPLAN_DIR"/
 rm -f "$BRIDGE_FILE"
+cp -a "$BACKUP_DIR"/*.yaml "$NETPLAN_DIR"/
+chmod 600 "$NETPLAN_DIR"/*.yaml 2>/dev/null || true
 netplan generate
 netplan apply
 echo "Netplan rollback applied from $BACKUP_DIR"
 EOF
 chmod +x "$ROLLBACK_SCRIPT"
 
-cat > "$BRIDGE_FILE" <<EOF
+# Keep cloud-init file neutral for this interface to avoid duplicate DHCP.
+for file in "$NETPLAN_DIR"/*.yaml; do
+  [[ "$file" == "$BRIDGE_FILE" ]] && continue
+  if grep -q "${IFACE}:" "$file"; then
+    cp -a "$file" "${file}.virtuality-before-br0"
+    cat > "$file" <<EOF
+network:
+  version: 2
+  ethernets:
+    ${IFACE}:
+      dhcp4: false
+      dhcp6: false
+EOF
+    chmod 600 "$file"
+  fi
+done
+
+if [[ "$MODE" == "static" ]]; then
+  if [[ -z "${CURRENT_IP:-}" || -z "${CURRENT_GW:-}" ]]; then
+    echo "Ошибка: не удалось определить текущий IP/gateway для static mode."
+    echo "Откат: sudo $ROLLBACK_SCRIPT"
+    exit 1
+  fi
+  DNS_YAML=""
+  for dns in $CURRENT_DNS; do
+    DNS_YAML="${DNS_YAML}        - ${dns}\n"
+  done
+  cat > "$BRIDGE_FILE" <<EOF
+network:
+  version: 2
+  ethernets:
+    ${IFACE}:
+      dhcp4: false
+      dhcp6: false
+  bridges:
+    ${BRIDGE}:
+      interfaces:
+        - ${IFACE}
+      addresses:
+        - ${CURRENT_IP}
+      routes:
+        - to: default
+          via: ${CURRENT_GW}
+      nameservers:
+        addresses:
+$(printf "$DNS_YAML")      dhcp4: false
+      dhcp6: false
+      parameters:
+        stp: false
+        forward-delay: 0
+EOF
+else
+  cat > "$BRIDGE_FILE" <<EOF
 network:
   version: 2
   ethernets:
@@ -63,38 +130,31 @@ network:
         stp: false
         forward-delay: 0
 EOF
+fi
 
-# Disable DHCP on the original cloud-init ethernet file, if it exists.
-# We keep the file but neutralize enp2s0 to avoid duplicate DHCP on iface and bridge.
-for file in "$NETPLAN_DIR"/*.yaml; do
-  [[ "$file" == "$BRIDGE_FILE" ]] && continue
-  if grep -q "${IFACE}:" "$file"; then
-    cp -a "$file" "${file}.virtuality-before-br0"
-    cat > "$file" <<EOF
-network:
-  version: 2
-  ethernets:
-    ${IFACE}:
-      dhcp4: false
-      dhcp6: false
-EOF
-  fi
-done
+chmod 600 "$BRIDGE_FILE"
+chmod 600 "$NETPLAN_DIR"/*.yaml 2>/dev/null || true
 
-echo "[1/4] Generated config:"
+echo "[1/5] Generated config:"
 cat "$BRIDGE_FILE"
 
 echo
- echo "[2/4] Validating netplan..."
+ echo "[2/5] Validating netplan..."
 netplan generate
 
 echo
- echo "[3/4] Applying netplan..."
-netplan apply
-sleep 4
+ echo "[3/5] Testing config with netplan try..."
+echo "Если после применения сеть работает — подтверди netplan try клавишей Enter."
+echo "Если SSH зависнет — жди автооткат или используй физический монитор: sudo $ROLLBACK_SCRIPT"
+netplan try --timeout 30
 
 echo
- echo "[4/4] Result:"
+ echo "[4/5] Applying final netplan..."
+netplan apply
+sleep 3
+
+echo
+ echo "[5/5] Result:"
 ip -br a
 ip route
 
@@ -102,6 +162,7 @@ echo
  echo "============================================================"
 echo "Bridge setup completed"
 echo "============================================================"
-echo "Rollback command if network is broken:"
-echo "sudo $ROLLBACK_SCRIPT"
+echo "Rollback command: sudo $ROLLBACK_SCRIPT"
+echo "If DHCP mode failed, try static mode:"
+echo "sudo bash scripts/setup_bridge_br0.sh ${IFACE} static"
 echo "============================================================"
