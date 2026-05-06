@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import crypt
 import os
+import re
 import secrets
 import spwd
 import subprocess
@@ -17,6 +18,9 @@ from itsdangerous import BadSignature, URLSafeSerializer
 BASE_DIR = Path(__file__).resolve().parent
 APP_NAME = "Virtuality"
 ENV_FILE = BASE_DIR / ".env"
+ISO_DIR = Path("/var/lib/virtuality/iso")
+IMAGES_DIR = Path("/var/lib/virtuality/images")
+DEFAULT_BRIDGE = "br0"
 
 app = FastAPI(title="Virtuality Panel")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -143,6 +147,26 @@ def parse_pool_list() -> list[dict[str, str]]:
     return rows
 
 
+def list_iso_files() -> list[dict[str, str]]:
+    ISO_DIR.mkdir(parents=True, exist_ok=True)
+    files = []
+    for item in sorted(ISO_DIR.glob("*.iso")):
+        try:
+            size_mb = item.stat().st_size / 1024 / 1024
+        except OSError:
+            size_mb = 0
+        files.append({"name": item.name, "path": str(item), "size": f"{size_mb:.1f} MB"})
+    return files
+
+
+def valid_vm_name(name: str) -> bool:
+    return bool(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}", name or ""))
+
+
+def vm_exists(name: str) -> bool:
+    return run_cmd(["virsh", "dominfo", name], timeout=8)["ok"]
+
+
 def system_summary() -> dict[str, str]:
     hostname = run_cmd(["hostname"])["stdout"]
     uptime = run_cmd(["uptime", "-p"])["stdout"]
@@ -216,13 +240,7 @@ def login_submit(request: Request, username: str = Form(...), password: str = Fo
         )
     token = serializer.dumps({"user": AUTH_USER})
     response = RedirectResponse(url="/", status_code=303)
-    response.set_cookie(
-        "virtuality_session",
-        token,
-        httponly=True,
-        samesite="lax",
-        max_age=60 * 60 * 12,
-    )
+    response.set_cookie("virtuality_session", token, httponly=True, samesite="lax", max_age=60 * 60 * 12)
     return response
 
 
@@ -245,6 +263,7 @@ def dashboard(request: Request):
         "virtlogd": service_state("virtlogd.service"),
         "cockpit": service_state("cockpit.socket"),
         "dashboard": service_state("virtuality-console-dashboard.service"),
+        "web": service_state("virtuality-web.service"),
     }
     return templates.TemplateResponse(
         "dashboard.html",
@@ -259,6 +278,104 @@ def dashboard(request: Request):
             "user": AUTH_USER,
         },
     )
+
+
+@app.get("/vm/create", response_class=HTMLResponse)
+def vm_create_page(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    return templates.TemplateResponse(
+        "vm_create.html",
+        {
+            "request": request,
+            "app_name": APP_NAME,
+            "user": AUTH_USER,
+            "isos": list_iso_files(),
+            "error": None,
+            "form": {"memory": 2048, "vcpus": 2, "disk_size": 20, "bridge": DEFAULT_BRIDGE},
+        },
+    )
+
+
+@app.post("/vm/create", response_class=HTMLResponse)
+def vm_create_submit(
+    request: Request,
+    name: str = Form(...),
+    memory: int = Form(...),
+    vcpus: int = Form(...),
+    disk_size: int = Form(...),
+    iso_path: str = Form(...),
+    bridge: str = Form(DEFAULT_BRIDGE),
+    autostart_install: str | None = Form(None),
+):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+
+    form = {"name": name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "iso_path": iso_path, "bridge": bridge}
+    error = None
+
+    if not valid_vm_name(name):
+        error = "Имя VM может содержать латиницу, цифры, точку, дефис и подчёркивание. Длина 2–63 символа."
+    elif vm_exists(name):
+        error = f"VM с именем {name} уже существует."
+    elif memory < 512 or memory > 262144:
+        error = "RAM должна быть от 512 MB до 262144 MB."
+    elif vcpus < 1 or vcpus > 128:
+        error = "CPU должен быть от 1 до 128 vCPU."
+    elif disk_size < 4 or disk_size > 4096:
+        error = "Диск должен быть от 4 GB до 4096 GB."
+    elif not bridge or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", bridge):
+        error = "Некорректное имя bridge."
+    else:
+        iso = Path(iso_path).resolve()
+        iso_root = ISO_DIR.resolve()
+        if iso_root not in iso.parents or iso.suffix.lower() != ".iso" or not iso.exists():
+            error = "ISO должен быть существующим .iso файлом из /var/lib/virtuality/iso."
+
+    if error:
+        return templates.TemplateResponse(
+            "vm_create.html",
+            {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": error, "form": form},
+            status_code=400,
+        )
+
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    disk_path = IMAGES_DIR / f"{name}.qcow2"
+    if disk_path.exists():
+        return templates.TemplateResponse(
+            "vm_create.html",
+            {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": f"Диск уже существует: {disk_path}", "form": form},
+            status_code=400,
+        )
+
+    cmd = [
+        "virt-install",
+        "--name", name,
+        "--memory", str(memory),
+        "--vcpus", str(vcpus),
+        "--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio",
+        "--cdrom", iso_path,
+        "--os-variant", "generic",
+        "--network", f"bridge={bridge},model=virtio",
+        "--graphics", "vnc,listen=0.0.0.0",
+        "--noautoconsole",
+    ]
+    if not autostart_install:
+        # virt-install starts the installer by design; this flag is kept for future behaviour toggles.
+        pass
+
+    result = run_cmd(cmd, timeout=180)
+    if not result["ok"]:
+        return templates.TemplateResponse(
+            "vm_create.html",
+            {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": result["stderr"] or result["stdout"] or "virt-install failed", "form": form},
+            status_code=500,
+        )
+
+    run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/vm/{name}/{action}")
@@ -289,6 +406,7 @@ def api_health(request: Request):
             "virtlogd": service_state("virtlogd.service"),
             "cockpit": service_state("cockpit.socket"),
             "dashboard": service_state("virtuality-console-dashboard.service"),
+            "web": service_state("virtuality-web.service"),
         },
         "vms": parse_virsh_list(),
         "pools": parse_pool_list(),
