@@ -126,8 +126,11 @@ sidebar_html = '''{% set path = request.url.path %}
   <nav class="v-nav">
     <a class="{{ 'active' if path == '/' else '' }}" href="/">Обзор</a>
     <a class="{{ 'active' if path.startswith('/vm/create') else '' }}" href="/vm/create">Создать VM</a>
-    <a class="{{ 'active' if path.startswith('/iso') else '' }}" href="/iso">ISO</a>
-    <a class="{{ 'active' if path.startswith('/disk-images') else '' }}" href="/disk-images">Диски</a>
+    <div class="v-nav-group {{ 'open' if path.startswith('/iso') or path.startswith('/disk-images') else '' }}">
+      <div class="v-nav-group-title">Образы</div>
+      <a class="{{ 'active' if path.startswith('/iso') else '' }}" href="/iso">ISO</a>
+      <a class="{{ 'active' if path.startswith('/disk-images') else '' }}" href="/disk-images">Диски</a>
+    </div>
     <a class="{{ 'active' if path.startswith('/network') else '' }}" href="/network">Сеть</a>
     <a class="{{ 'active' if path.startswith('/operations') else '' }}" href="/operations">Операции</a>
     <a class="{{ 'active' if path.startswith('/logs') else '' }}" href="/logs">Журналы</a>
