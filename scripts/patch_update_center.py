@@ -9,9 +9,7 @@ if not app_path.exists():
 
 script_dir = Path(__file__).resolve().parent
 
-# New installs run this patch from install_web_panel.sh. Keep feature patches here too
-# so a fresh install gets disk images, conversion progress, VM architecture selector,
-# ARM64 emulation XML path, orphan disk replacement, dashboard update notifications and update center.
+# New installs run this patch from install_web_panel.sh. Keep feature patches here too.
 for optional_patch in ('patch_disk_images.py', 'patch_disk_convert_progress.py', 'patch_vm_architecture.py', 'patch_arm64_emulation_xml.py', 'patch_vm_disk_replace.py', 'patch_update_badge.py'):
     patch_path = script_dir / optional_patch
     if patch_path.exists():
@@ -64,6 +62,19 @@ def update_page(request: Request):
     return templates.TemplateResponse("update.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "info": info, "error": error})
 
 
+@app.get("/update/status")
+def update_status(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return JSONResponse({"ok": False, "error": "auth required"}, status_code=401)
+    return JSONResponse({
+        "ok": True,
+        "state": update_core.state(),
+        "log_tail": update_core.update_log_tail(260),
+        "checked_at": utc_now(),
+    })
+
+
 @app.post("/update/check")
 def update_check(request: Request):
     auth_redirect = require_auth(request)
@@ -95,7 +106,28 @@ if '@app.get("/update"' not in text:
     text = text.replace(marker, routes + marker, 1)
     changed.append('update routes added')
 else:
-    changed.append('update routes already present')
+    if '@app.get("/update/status"' not in text:
+        marker = '\n\n@app.post("/update/check")'
+        if marker not in text:
+            raise SystemExit('update/check route marker not found')
+        status_route = r'''
+
+@app.get("/update/status")
+def update_status(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return JSONResponse({"ok": False, "error": "auth required"}, status_code=401)
+    return JSONResponse({
+        "ok": True,
+        "state": update_core.state(),
+        "log_tail": update_core.update_log_tail(260),
+        "checked_at": utc_now(),
+    })
+'''
+        text = text.replace(marker, status_route + marker, 1)
+        changed.append('update status route added')
+    else:
+        changed.append('update status route already present')
 
 app_path.write_text(text)
 print('update center patch applied:')
