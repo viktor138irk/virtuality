@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <div class="brand">Диски</div>
-        <div class="muted">Готовые локальные образы .img / .raw / .qcow2 для импорта VM</div>
+        <div class="muted">Готовые образы установленных систем: .img / .raw / .qcow2</div>
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
@@ -29,15 +29,15 @@
     <section class="grid two">
       <article class="card">
         <div class="card-head">
-          <h2>Загрузить образ диска</h2>
-          <span class="pill">.img .raw .qcow2</span>
+          <h2>Загрузить образ установленной системы</h2>
+          <span class="pill">только .img .raw .qcow2</span>
         </div>
         <form id="disk-upload-form" method="post" action="/disk-images/upload" enctype="multipart/form-data" class="form-grid">
           <label class="upload-box">
-            <span>Выбери файл образа</span>
-            <input id="disk-file-input" type="file" name="image_file" accept=".img,.raw,.qcow2,application/octet-stream" required>
+            <span>Выбери файл готового диска</span>
+            <input id="disk-file-input" type="file" name="image_file" accept=".img,.raw,.qcow2" required>
           </label>
-          <div id="disk-file-hint" class="muted small-note">Файл ещё не выбран.</div>
+          <div id="disk-file-hint" class="muted small-note">Файл ещё не выбран. В этом разделе разрешены только .img, .raw и .qcow2.</div>
           <div id="upload-progress-wrap" class="upload-progress-wrap" hidden>
             <div class="upload-progress-head">
               <strong id="upload-status">Подготовка…</strong>
@@ -51,7 +51,7 @@
           </div>
           <button id="disk-upload-button" type="submit" class="primary wide">Загрузить образ диска</button>
         </form>
-        <p class="muted small-note">После загрузки .img/.raw прогресс начнётся заново и покажет конвертацию в qcow2. Уже готовый .qcow2 сохраняется без конвертации.</p>
+        <p class="muted small-note">После загрузки .img/.raw прогресс начнётся заново и покажет конвертацию в qcow2. Установочные .iso загружаются отдельно в разделе <b>ISO</b>.</p>
       </article>
 
       <article class="card">
@@ -115,6 +115,7 @@
     const statusLine = document.getElementById('upload-status');
     const loadedLine = document.getElementById('upload-loaded');
     const speedLine = document.getElementById('upload-speed');
+    const allowedExtensions = ['.img', '.raw', '.qcow2'];
 
     function bytesText(bytes) {
       if (!bytes) return '0 MB';
@@ -123,6 +124,12 @@
       let i = 0;
       while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
       return value.toFixed(value >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
+    }
+
+    function validDiskFile(file) {
+      if (!file || !file.name) return false;
+      const lower = file.name.toLowerCase();
+      return allowedExtensions.some(ext => lower.endsWith(ext));
     }
 
     function resetProgress(title, detail) {
@@ -165,13 +172,25 @@
 
     fileInput.addEventListener('change', function () {
       const file = fileInput.files[0];
-      hint.textContent = file ? file.name + ' · ' + bytesText(file.size) : 'Файл ещё не выбран.';
+      if (!file) {
+        hint.textContent = 'Файл ещё не выбран. В этом разделе разрешены только .img, .raw и .qcow2.';
+        return;
+      }
+      if (!validDiskFile(file)) {
+        hint.textContent = 'Неверный тип файла. Здесь можно выбрать только .img, .raw или .qcow2.';
+        fileInput.value = '';
+        return;
+      }
+      hint.textContent = file.name + ' · ' + bytesText(file.size);
     });
 
     form.addEventListener('submit', function (event) {
       event.preventDefault();
       const file = fileInput.files[0];
-      if (!file) return;
+      if (!validDiskFile(file)) {
+        hint.textContent = 'Выбери образ установленной системы: .img, .raw или .qcow2.';
+        return;
+      }
 
       const xhr = new XMLHttpRequest();
       const data = new FormData(form);
