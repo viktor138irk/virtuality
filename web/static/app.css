@@ -143,6 +143,14 @@ pre { overflow: auto; margin: 14px 0 0; padding: 14px; border-radius: 14px; back
 .progress.big { height: 14px; }
 .progress span { display: block; height: 100%; width: 0; min-width: 3px; background: linear-gradient(90deg, rgba(55,214,255,.75), rgba(61,255,157,.9)); border-radius: inherit; transition: width .35s ease; }
 
+.upload-progress-wrap { display: grid; gap: 10px; padding: 13px; border-radius: 16px; border: 1px solid rgba(55,214,255,.22); background: rgba(55,214,255,.055); }
+.upload-progress-wrap[hidden] { display: none; }
+.upload-progress-head,
+.upload-progress-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.upload-progress-head strong { font-size: 13px; }
+.upload-progress-head span { color: var(--accent); font-weight: 900; }
+.upload-progress-meta { color: var(--muted); font-size: 12px; }
+
 .operation-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 16px; }
 .meta-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .meta-grid div { display: grid; gap: 5px; padding: 11px 12px; border-radius: 14px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); }
