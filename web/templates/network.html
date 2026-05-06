@@ -72,42 +72,6 @@
       </article>
     </section>
 
-    <section class="card">
-      <div class="card-head">
-        <h2>Быстрые шаблоны публичного доступа</h2>
-        <span class="pill">one click presets</span>
-      </div>
-      <div class="grid two">
-        {% for key, tpl in templates.items() %}
-        <article class="big-action static">
-          <strong>{{ tpl.title }}</strong>
-          <span>{{ tpl.description }}</span>
-          <form method="post" action="/network/template/apply" class="form-grid top-space">
-            <label>
-              <span>Виртуальная машина</span>
-              <select name="vm_name" required>
-                {% for vm in vms %}
-                  <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <input type="hidden" name="template_key" value="{{ key }}">
-            {% if key == 'ssh' %}
-            <label>
-              <span>Внешний SSH-порт</span>
-              <input type="number" name="external_base_port" min="1" max="65535" value="2222">
-            </label>
-            {% else %}
-              <input type="hidden" name="external_base_port" value="0">
-            {% endif %}
-            <button class="primary wide">Применить шаблон</button>
-          </form>
-        </article>
-        {% endfor %}
-      </div>
-      <div class="notice top-space">Шаблоны не затирают существующие правила: если внешний порт уже занят, правило будет пропущено.</div>
-    </section>
-
     <section class="grid two">
       <article class="card">
         <div class="card-head">
@@ -116,38 +80,74 @@
         </div>
         <form method="post" action="/network/forward/add" class="form-grid">
           <label>
-            <span>Виртуальная машина</span>
+            <span>Описание</span>
+            <input type="text" name="note" placeholder="Например: сайт, SSH, SIP, панель управления">
+          </label>
+
+          <label>
+            <span>Внешний порт</span>
+            <input type="number" name="external_port" min="1" max="65535" placeholder="Например: 80, 443, 2222" required>
+          </label>
+
+          <label>
+            <span>Машина</span>
             <select name="vm_name" required>
               {% for vm in vms %}
                 <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
               {% endfor %}
             </select>
           </label>
+
           <input type="hidden" name="guest_ip" value="auto">
-          <div class="notice">Внутренний IP VM будет подставлен автоматически. VM должна быть запущена и получить адрес в NAT-сети.</div>
-          <div class="form-row">
-            <label>
-              <span>Внешний порт сервера</span>
-              <input type="number" name="external_port" min="1" max="65535" placeholder="80" required>
-            </label>
-            <label>
-              <span>Порт внутри VM</span>
-              <input type="number" name="guest_port" min="1" max="65535" placeholder="80" required>
-            </label>
+
+          <label>
+            <span>Внутренний порт</span>
+            <input type="number" name="guest_port" list="standard-ports" min="1" max="65535" placeholder="Выбери стандартный или введи вручную" required>
+            <datalist id="standard-ports">
+              <option value="20" label="FTP data"></option>
+              <option value="21" label="FTP"></option>
+              <option value="22" label="SSH"></option>
+              <option value="25" label="SMTP"></option>
+              <option value="53" label="DNS"></option>
+              <option value="80" label="HTTP / web"></option>
+              <option value="110" label="POP3"></option>
+              <option value="123" label="NTP"></option>
+              <option value="143" label="IMAP"></option>
+              <option value="443" label="HTTPS / SSL web"></option>
+              <option value="465" label="SMTPS"></option>
+              <option value="587" label="SMTP submission"></option>
+              <option value="993" label="IMAPS"></option>
+              <option value="995" label="POP3S"></option>
+              <option value="1194" label="OpenVPN"></option>
+              <option value="1433" label="Microsoft SQL Server"></option>
+              <option value="1521" label="Oracle Database"></option>
+              <option value="2049" label="NFS"></option>
+              <option value="3306" label="MySQL / MariaDB"></option>
+              <option value="3389" label="RDP / Windows Remote Desktop"></option>
+              <option value="5060" label="SIP"></option>
+              <option value="5061" label="SIP TLS"></option>
+              <option value="5432" label="PostgreSQL"></option>
+              <option value="5900" label="VNC"></option>
+              <option value="6379" label="Redis"></option>
+              <option value="8000" label="HTTP dev"></option>
+              <option value="8080" label="HTTP alternative"></option>
+              <option value="8443" label="HTTPS alternative"></option>
+              <option value="10000" label="Webmin / RTP start"></option>
+            </datalist>
+          </label>
+
+          <label>
+            <span>Протокол</span>
+            <select name="protocol">
+              <option value="tcp">tcp</option>
+              <option value="udp">udp</option>
+            </select>
+          </label>
+
+          <div class="notice">
+            Внутренний IP VM подставится автоматически. Внутренний порт можно выбрать из списка или вписать любой вручную.
           </div>
-          <div class="form-row">
-            <label>
-              <span>Протокол</span>
-              <select name="protocol">
-                <option value="tcp">tcp</option>
-                <option value="udp">udp</option>
-              </select>
-            </label>
-            <label>
-              <span>Заметка</span>
-              <input type="text" name="note" placeholder="web / ssh / sip">
-            </label>
-          </div>
+
           <button class="primary wide">Добавить и применить</button>
         </form>
       </article>
@@ -232,7 +232,7 @@
       </div>
       <table>
         <thead>
-          <tr><th>Внешний порт</th><th>VM</th><th>Внутренний адрес</th><th>Протокол</th><th>Заметка</th><th></th></tr>
+          <tr><th>Внешний порт</th><th>VM</th><th>Внутренний адрес</th><th>Протокол</th><th>Описание</th><th></th></tr>
         </thead>
         <tbody>
         {% for item in ctx.forwards %}
