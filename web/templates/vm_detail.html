@@ -15,6 +15,7 @@
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
+        <a class="link-pill accent" href="/vm/{{ vm.name }}/console">Консоль</a>
         <a class="link-pill" href="/">← Дашборд</a>
         <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
       </div>
@@ -26,6 +27,7 @@
         <span class="pill">virsh actions</span>
       </div>
       <div class="actions big-actions">
+        <a class="link-pill accent" href="/vm/{{ vm.name }}/console">Открыть консоль</a>
         <form method="post" action="/vm/{{ vm.name }}/start"><button>Start</button></form>
         <form method="post" action="/vm/{{ vm.name }}/shutdown"><button>Shutdown</button></form>
         <form method="post" action="/vm/{{ vm.name }}/reboot"><button>Reboot</button></form>
@@ -47,13 +49,14 @@
       <article class="card">
         <div class="card-head">
           <h2>Консоль</h2>
-          <span class="pill">VNC</span>
+          <a class="link-pill accent" href="/vm/{{ vm.name }}/console">noVNC</a>
         </div>
         <div class="services">
           <div class="service-row"><span>VNC display</span><span class="status ok">{{ vm.vnc }}</span></div>
           <div class="service-row"><span>Host</span><span class="status ok">{{ host_ip }}</span></div>
+          <div class="service-row"><span>Web console</span><span class="status ok">/vm/{{ vm.name }}/console</span></div>
         </div>
-        <p class="muted small-note">Если VNC display показывает <b>:0</b>, порт обычно <b>5900</b>. Если <b>:1</b> — <b>5901</b>. Также можно открыть консоль через Cockpit.</p>
+        <p class="muted small-note">VNC наружу открывать не нужно: web-консоль работает через авторизованную Virtuality web-панель.</p>
       </article>
     </section>
 
