@@ -118,6 +118,8 @@
     const loadedLine = document.getElementById('upload-loaded');
     const speedLine = document.getElementById('upload-speed');
     const allowedExtensions = ['.img', '.raw', '.qcow2', '.img.xz', '.zip', '.tar.gz', '.tgz'];
+    let activeXhr = null;
+    let uploadActive = false;
 
     function bytesText(bytes) {
       if (!bytes) return '0 MB';
@@ -140,6 +142,26 @@
       errorBox.hidden = !message;
     }
 
+    function setUploadMode(active) {
+      uploadActive = active;
+      if (active) {
+        button.disabled = false;
+        button.type = 'button';
+        button.textContent = 'Отменить загрузку';
+        button.classList.remove('primary');
+        button.classList.add('danger');
+        fileInput.disabled = true;
+      } else {
+        activeXhr = null;
+        button.type = 'submit';
+        button.textContent = 'Загрузить образ диска';
+        button.classList.add('primary');
+        button.classList.remove('danger');
+        fileInput.disabled = false;
+        button.disabled = !validDiskFile(fileInput.files[0]);
+      }
+    }
+
     function resetProgress(title, detail) {
       bar.style.width = '0%';
       percent.textContent = '0%';
@@ -149,6 +171,10 @@
     }
 
     async function pollConvert(operationId) {
+      setUploadMode(false);
+      fileInput.disabled = true;
+      button.disabled = true;
+      button.textContent = 'Идёт конвертация…';
       resetProgress('Конвертация образа в qcow2…', '0%');
       while (true) {
         const response = await fetch('/api/operations/' + operationId, {cache: 'no-store'});
@@ -171,6 +197,10 @@
         if (op.status === 'error') {
           statusLine.textContent = 'Ошибка конвертации: ' + (op.message || 'см. журнал операций');
           button.disabled = false;
+          button.type = 'submit';
+          button.textContent = 'Загрузить образ диска';
+          button.classList.add('primary');
+          button.classList.remove('danger');
           fileInput.disabled = false;
           return;
         }
@@ -198,8 +228,14 @@
       hint.textContent = file.name + ' · ' + bytesText(file.size);
     });
 
+    button.addEventListener('click', function () {
+      if (!uploadActive) return;
+      if (activeXhr) activeXhr.abort();
+    });
+
     form.addEventListener('submit', function (event) {
       event.preventDefault();
+      if (uploadActive) return;
       const file = fileInput.files[0];
       setFileError('');
       if (!validDiskFile(file)) {
@@ -210,12 +246,12 @@
       }
 
       const xhr = new XMLHttpRequest();
+      activeXhr = xhr;
       const data = new FormData(form);
       const started = Date.now();
 
       box.hidden = false;
-      button.disabled = true;
-      fileInput.disabled = true;
+      setUploadMode(true);
       resetProgress('Передача файла на сервер…', '0 MB из ' + bytesText(file.size));
 
       xhr.upload.onprogress = function (event) {
@@ -247,15 +283,22 @@
           window.location.href = '/disk-images';
         } else {
           statusLine.textContent = 'Ошибка загрузки: HTTP ' + xhr.status;
-          button.disabled = false;
-          fileInput.disabled = false;
+          setUploadMode(false);
         }
+      };
+
+      xhr.onabort = function () {
+        statusLine.textContent = 'Загрузка отменена пользователем.';
+        bar.style.width = '0%';
+        percent.textContent = '0%';
+        loadedLine.textContent = '0 MB';
+        speedLine.textContent = 'отменено';
+        setUploadMode(false);
       };
 
       xhr.onerror = function () {
         statusLine.textContent = 'Ошибка сети во время загрузки.';
-        button.disabled = false;
-        fileInput.disabled = false;
+        setUploadMode(false);
       };
 
       xhr.open('POST', form.action);
