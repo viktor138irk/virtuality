@@ -4,7 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ app_name }} Login</title>
+  <script>
+    document.documentElement.dataset.theme = localStorage.getItem('virtualityTheme') || 'neon';
+  </script>
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/themes.css">
 </head>
 <body class="auth-body">
   <main class="auth-shell">
