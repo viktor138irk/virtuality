@@ -70,7 +70,7 @@
             <span class="pill">virsh net-dhcp-leases</span>
           </div>
           <pre>{{ ctx.nat.leases }}</pre>
-          <div class="notice top-space">IP для проброса определяется автоматически: сначала через qemu-guest-agent, затем по DHCP leases и MAC-адресу VM.</div>
+          <div class="notice top-space">IP для проброса можно оставить auto или ввести вручную, если DHCP leases пустые, у VM статический IP, bridge-сеть или нет qemu-guest-agent.</div>
         </article>
       </section>
 
@@ -78,7 +78,7 @@
         <article class="card">
           <div class="card-head">
             <h2>Добавить проброс порта</h2>
-            <span class="pill">DNAT auto IP · ranges</span>
+            <span class="pill">DNAT auto/manual IP · ranges</span>
           </div>
           <form method="post" action="/network/forward/add" class="form-grid">
             <label>
@@ -97,7 +97,11 @@
                 {% endfor %}
               </select>
             </label>
-            <input type="hidden" name="guest_ip" value="auto">
+            <label>
+              <span>IP VM</span>
+              <input type="text" name="guest_ip" value="auto" placeholder="auto или 192.168.100.55" required>
+              <small>Оставь auto для DHCP/qemu-guest-agent или впиши внутренний IP VM вручную.</small>
+            </label>
             <label>
               <span>Внутренний порт или диапазон</span>
               <input type="text" name="guest_port" list="standard-ports" pattern="[0-9]{1,5}([:-][0-9]{1,5})?" placeholder="Выбери стандартный или введи 10000-20000" required>
@@ -141,7 +145,7 @@
                 <option value="udp">udp</option>
               </select>
             </label>
-            <div class="notice">Можно указать одиночный порт или диапазон. Для VoIP/RTP обычно: внешний 10000-20000 → внутренний 10000-20000, протокол udp. Длины диапазонов должны совпадать.</div>
+            <div class="notice">Можно указать одиночный порт или диапазон. Если авто-IP не определяется, впиши IP VM вручную. Для VoIP/RTP обычно: внешний 10000-20000 → внутренний 10000-20000, протокол udp.</div>
             <button class="primary wide">Добавить и применить</button>
           </form>
         </article>
