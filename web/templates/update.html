@@ -7,152 +7,153 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div>
-        <div class="brand">Обновления</div>
-        <div class="muted">GitHub update center: changelog, проверка и установка</div>
+  <div class="v-layout">
+    <aside class="v-sidebar">
+      <div class="v-logo">
+        <strong>Virtuality</strong>
+        <span>control panel</span>
       </div>
-      <div class="top-meta">
-        <span>user: {{ user }}</span>
-        <a class="link-pill" href="/">← Дашборд</a>
-        <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-      </div>
-    </header>
-
-    {% if error %}
-      <div class="alert danger">{{ error }}</div>
-    {% endif %}
-
-    <section class="grid stats">
-      <article class="card stat">
-        <div class="label">Текущая версия</div>
-        <div class="value small">{{ info.current_version }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">Новая версия</div>
-        <div class="value small">{{ info.latest_version }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">Статус</div>
-        <div class="value small">{{ 'Есть обновление' if info.has_update else 'Актуально' }}</div>
-        <span class="status {{ 'warn' if info.has_update else 'ok' }}">{{ 'update' if info.has_update else 'ok' }}</span>
-      </article>
-      <article class="card stat">
-        <div class="label">Последняя проверка</div>
-        <div class="value small" id="last-check-value">{{ info.checked_at }}</div>
-      </article>
-    </section>
-
-    <section class="grid two">
-      <article class="card">
-        <div class="card-head">
-          <h2>Проверка GitHub</h2>
-          <span class="pill">{{ info.remote }}/{{ info.branch }}</span>
+      <nav class="v-nav">
+        <a href="/">Обзор</a>
+        <a href="/vm/create">Создать VM</a>
+        <div class="v-nav-group open">
+          <button class="v-nav-group-title" type="button">Образы</button>
+          <a href="/iso">ISO</a>
+          <a href="/disk-images">Диски</a>
         </div>
-        <div class="meta-grid">
-          <div><span>Source</span><strong>{{ info.source_dir }}</strong></div>
-          <div><span>Local commit</span><strong>{{ info.current_commit[:12] if info.current_commit else 'unknown' }}</strong></div>
-          <div><span>Remote commit</span><strong>{{ info.latest_commit[:12] if info.latest_commit else 'unknown' }}</strong></div>
-        </div>
-        {% if not info.fetch_ok %}
-          <div class="alert danger top-space">GitHub fetch вернул ошибку: {{ info.fetch_error }}</div>
-        {% endif %}
-        <div class="actions top-space update-actions">
-          <form method="post" action="/update/check" id="update-check-form">
-            <button class="primary" id="update-main-button" type="submit">{{ 'Установить обновления' if info.has_update else 'Проверить обновления' }}</button>
-          </form>
-          {% if info.has_update %}
-            <form method="post" action="/update/apply" id="update-apply-form" onsubmit="return confirm('Запустить обновление Virtuality из GitHub? Панель перезапустится.');">
-              <button class="primary" id="update-apply-button" type="submit">Установить обновления</button>
-            </form>
-          {% endif %}
-        </div>
-      </article>
+        <a href="/network">Сеть</a>
+        <a href="/operations">Операции</a>
+        <a href="/logs">Журналы</a>
+        <a class="active" href="/update">Обновления</a>
+        <a href="/host">Хост</a>
+      </nav>
+    </aside>
 
-      <article class="card">
-        <div class="card-head">
-          <h2>Состояние установки</h2>
-          <span id="update-status-badge" class="status {{ 'ok' if info.state.status == 'success' else 'err' if info.state.status == 'error' else 'warn' }}">{{ info.state.status }}</span>
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">Обновления</div>
+          <div class="v-subtitle">GitHub update center: changelog, проверка и установка</div>
         </div>
-        <div id="update-message" class="notice">{{ info.state.message }}</div>
-        <div class="meta-grid top-space">
-          <div><span>Started</span><strong id="update-started">{{ info.state.started_at or '—' }}</strong></div>
-          <div><span>Updated</span><strong id="update-updated">{{ info.state.updated_at or '—' }}</strong></div>
-          <div><span>Finished</span><strong id="update-finished">{{ info.state.finished_at or '—' }}</strong></div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
         </div>
-      </article>
-    </section>
+      </header>
 
-    <section class="card">
-      <div class="card-head">
-        <h2>Пропущенные версии и функции</h2>
-        <span class="pill">{{ info.missing_versions|length }} версий</span>
-      </div>
-      {% for release in info.missing_versions %}
-        <div class="release-note">
-          <div class="card-head compact">
-            <h2>{{ release.version }} · {{ release.title }}</h2>
-            <span class="pill">{{ release.date }}</span>
+      {% if error %}
+        <div class="alert danger">{{ error }}</div>
+      {% endif %}
+
+      <section class="grid stats">
+        <article class="card stat">
+          <div class="label">Текущая версия</div>
+          <div class="value small">{{ info.current_version }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Новая версия</div>
+          <div class="value small">{{ info.latest_version }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Статус</div>
+          <div class="value small">{{ 'Есть обновление' if info.has_update else 'Актуально' }}</div>
+          <span class="status {{ 'warn' if info.has_update else 'ok' }}">{{ 'update' if info.has_update else 'ok' }}</span>
+        </article>
+        <article class="card stat">
+          <div class="label">Последняя проверка</div>
+          <div class="value small" id="last-check-value">{{ info.checked_at }}</div>
+        </article>
+      </section>
+
+      <section class="grid two update-main-grid">
+        <article class="card">
+          <div class="card-head">
+            <h2>Проверка GitHub</h2>
+            <span class="pill">{{ info.remote }}/{{ info.branch }}</span>
           </div>
-          <p class="muted">{{ release.summary }}</p>
-          <ul>
-            {% for feature in release.features %}
-              <li>{{ feature }}</li>
+          <div class="meta-grid">
+            <div><span>Source</span><strong>{{ info.source_dir }}</strong></div>
+            <div><span>Local commit</span><strong>{{ info.current_commit[:12] if info.current_commit else 'unknown' }}</strong></div>
+            <div><span>Remote commit</span><strong>{{ info.latest_commit[:12] if info.latest_commit else 'unknown' }}</strong></div>
+          </div>
+          {% if not info.fetch_ok %}
+            <div class="alert danger top-space">GitHub fetch вернул ошибку: {{ info.fetch_error }}</div>
+          {% endif %}
+          <div class="actions top-space update-actions">
+            {% if info.has_update %}
+              <form method="post" action="/update/apply" id="update-apply-form" onsubmit="return confirm('Запустить обновление Virtuality из GitHub? Панель перезапустится.');">
+                <button class="primary" id="update-apply-button" type="submit">Установить обновления</button>
+              </form>
+            {% else %}
+              <form method="post" action="/update/check" id="update-check-form">
+                <button class="primary" id="update-main-button" type="submit">Проверить обновления</button>
+              </form>
+            {% endif %}
+          </div>
+        </article>
+
+        <article class="card missed-versions-card">
+          <div class="card-head">
+            <h2>Пропущенные версии и функции</h2>
+            <span class="pill">{{ info.missing_versions|length }} версий</span>
+          </div>
+          <div class="missed-versions-list">
+            {% for release in info.missing_versions %}
+              <div class="release-note">
+                <div class="card-head compact">
+                  <h2>{{ release.version }} · {{ release.title }}</h2>
+                  <span class="pill">{{ release.date }}</span>
+                </div>
+                <p class="muted">{{ release.summary }}</p>
+                <ul>
+                  {% for feature in release.features %}
+                    <li>{{ feature }}</li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% else %}
+              <div class="muted">Нет пропущенных версий. Система на свежем коде.</div>
             {% endfor %}
-          </ul>
-        </div>
-      {% else %}
-        <div class="muted">Нет пропущенных версий. Система на свежем коде.</div>
-      {% endfor %}
-    </section>
+          </div>
+        </article>
+      </section>
 
-    <section class="grid two">
-      <article class="card">
-        <div class="card-head">
-          <h2>Новые коммиты</h2>
-          <span class="pill">{{ info.commits|length }}</span>
-        </div>
-        <div class="services">
-          {% for commit in info.commits %}
-            <div class="service-row">
-              <span><strong>{{ commit.short }}</strong><small>{{ commit.subject }} · {{ commit.date }}</small></span>
-            </div>
-          {% else %}
-            <div class="muted">Новых коммитов нет.</div>
-          {% endfor %}
-        </div>
-      </article>
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Новые коммиты</h2>
+            <span class="pill">{{ info.commits|length }}</span>
+          </div>
+          <div class="services">
+            {% for commit in info.commits %}
+              <div class="service-row">
+                <span><strong>{{ commit.short }}</strong><small>{{ commit.subject }} · {{ commit.date }}</small></span>
+              </div>
+            {% else %}
+              <div class="muted">Новых коммитов нет.</div>
+            {% endfor %}
+          </div>
+        </article>
 
-      <article class="card">
-        <div class="card-head">
-          <h2>Лог обновления</h2>
-          <span id="update-log-state" class="pill">live</span>
-        </div>
-        <pre id="update-log">{{ info.log_tail or 'Лог пока пуст.' }}</pre>
-      </article>
-    </section>
+        <article class="card">
+          <div class="card-head">
+            <h2>Лог обновления</h2>
+            <span id="update-log-state" class="pill">live</span>
+          </div>
+          <pre id="update-log">{{ info.log_tail or 'Лог пока пуст.' }}</pre>
+        </article>
+      </section>
+    </main>
   </div>
 
   <script>
-    const statusBadge = document.getElementById('update-status-badge');
-    const messageBox = document.getElementById('update-message');
-    const startedBox = document.getElementById('update-started');
-    const updatedBox = document.getElementById('update-updated');
-    const finishedBox = document.getElementById('update-finished');
     const logBox = document.getElementById('update-log');
     const logState = document.getElementById('update-log-state');
-    const lastCheckBox = document.getElementById('last-check-value');
     const checkForm = document.getElementById('update-check-form');
     const applyForm = document.getElementById('update-apply-form');
     const mainButton = document.getElementById('update-main-button');
     const applyButton = document.getElementById('update-apply-button');
-
-    function statusClass(status) {
-      if (status === 'success') return 'status ok';
-      if (status === 'error') return 'status err';
-      return 'status warn';
-    }
 
     function stageText(state) {
       const status = state.status || 'idle';
@@ -169,12 +170,6 @@
         const payload = await response.json();
         if (!payload.ok) return;
         const state = payload.state || {};
-        statusBadge.textContent = state.status || 'idle';
-        statusBadge.className = statusClass(state.status || 'idle');
-        messageBox.textContent = state.message || 'Готово к проверке обновлений';
-        startedBox.textContent = state.started_at || '—';
-        updatedBox.textContent = state.updated_at || '—';
-        finishedBox.textContent = state.finished_at || '—';
         logBox.textContent = payload.log_tail || 'Лог пока пуст.';
         logState.textContent = 'live · ' + (payload.checked_at || 'now');
         if (applyButton && state.status === 'running') applyButton.textContent = stageText(state);
@@ -199,5 +194,6 @@
     refreshUpdateStatus();
     setInterval(refreshUpdateStatus, 2000);
   </script>
+  <script src="/static/panel.js" defer></script>
 </body>
 </html>
