@@ -12,27 +12,7 @@
     {% set is_autostart = vm.autostart_enabled|default(false) %}
     {% set autostart_label = 'enabled' if is_autostart else 'disabled' %}
     {% set rs = resource_settings|default({}) %}
-
-    <aside class="v-sidebar">
-      <div class="v-logo">
-        <strong>Virtuality</strong>
-        <span>control panel</span>
-      </div>
-      <nav class="v-nav">
-        <a href="/">Обзор</a>
-        <a href="/vm/create">Создать VM</a>
-        <div class="v-nav-group open">
-          <button class="v-nav-group-title" type="button">Образы</button>
-          <a href="/iso">ISO</a>
-          <a href="/disk-images">Диски</a>
-        </div>
-        <a href="/network">Сеть</a>
-        <a href="/operations">Операции</a>
-        <a href="/logs">Журналы</a>
-        <a href="/update">Обновления</a>
-        <a href="/host">Хост</a>
-      </nav>
-    </aside>
+    {% include "_sidebar.html" %}
 
     <main class="v-main">
       <header class="v-topbar">
