@@ -7,274 +7,261 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div>
-        <div class="brand">Сеть</div>
-        <div class="muted">NAT Router для VPS, проброс одиночных портов и диапазонов к VM</div>
-      </div>
-      <div class="top-meta">
-        <span>user: {{ user }}</span>
-        <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
-        <a class="link-pill" href="/">← Дашборд</a>
-        <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-      </div>
-    </header>
+  <div class="v-layout">
+    {% include "_sidebar.html" %}
 
-    {% if error %}
-      <div class="alert danger">{{ error }}</div>
-    {% endif %}
-
-    <section class="grid stats">
-      <article class="card stat">
-        <div class="label">NAT network</div>
-        <div class="value small">{{ ctx.nat.name }}</div>
-        <span class="status {{ 'ok' if ctx.nat.exists else 'warn' }}">{{ 'ready' if ctx.nat.exists else 'not created' }}</span>
-      </article>
-      <article class="card stat">
-        <div class="label">Subnet</div>
-        <div class="value small">{{ ctx.nat.subnet }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">External interface</div>
-        <div class="value small">{{ ctx.external_interface }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">IPv4 forward</div>
-        <div class="value small">{{ ctx.ip_forward }}</div>
-      </article>
-    </section>
-
-    <section class="grid two">
-      <article class="card">
-        <div class="card-head">
-          <h2>Virtuality NAT Router</h2>
-          <span class="pill">{{ ctx.nat.bridge }}</span>
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">Сеть</div>
+          <div class="v-subtitle">NAT Router для VPS, проброс одиночных портов и диапазонов к VM</div>
         </div>
-        <div class="meta-grid">
-          <div><span>Gateway</span><strong>{{ ctx.nat.gateway }}</strong></div>
-          <div><span>DHCP</span><strong>{{ ctx.nat.dhcp }}</strong></div>
-          <div><span>Bridge</span><strong>{{ ctx.nat.bridge }}</strong></div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
         </div>
-        <form method="post" action="/network/nat/setup" class="inline-form top-space">
-          <button class="primary">Создать / починить NAT-сеть</button>
-        </form>
-        <pre>{{ ctx.nat.info }}</pre>
-      </article>
+      </header>
 
-      <article class="card">
-        <div class="card-head">
-          <h2>DHCP leases</h2>
-          <span class="pill">virsh net-dhcp-leases</span>
-        </div>
-        <pre>{{ ctx.nat.leases }}</pre>
-        <div class="notice top-space">IP для проброса определяется автоматически: сначала через qemu-guest-agent, затем по DHCP leases и MAC-адресу VM.</div>
-      </article>
-    </section>
+      {% if error %}
+        <div class="alert danger">{{ error }}</div>
+      {% endif %}
 
-    <section class="grid two">
-      <article class="card">
-        <div class="card-head">
-          <h2>Добавить проброс порта</h2>
-          <span class="pill">DNAT auto IP · ranges</span>
-        </div>
-        <form method="post" action="/network/forward/add" class="form-grid">
-          <label>
-            <span>Описание</span>
-            <input type="text" name="note" placeholder="Например: сайт, SSH, SIP, RTP MikoPBX">
-          </label>
+      <section class="grid stats">
+        <article class="card stat">
+          <div class="label">NAT network</div>
+          <div class="value small">{{ ctx.nat.name }}</div>
+          <span class="status {{ 'ok' if ctx.nat.exists else 'warn' }}">{{ 'ready' if ctx.nat.exists else 'not created' }}</span>
+        </article>
+        <article class="card stat">
+          <div class="label">Subnet</div>
+          <div class="value small">{{ ctx.nat.subnet }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">External interface</div>
+          <div class="value small">{{ ctx.external_interface }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">IPv4 forward</div>
+          <div class="value small">{{ ctx.ip_forward }}</div>
+        </article>
+      </section>
 
-          <label>
-            <span>Внешний порт или диапазон</span>
-            <input type="text" name="external_port" pattern="[0-9]{1,5}([:-][0-9]{1,5})?" placeholder="80, 443, 2222 или 10000-20000" required>
-          </label>
-
-          <label>
-            <span>Машина</span>
-            <select name="vm_name" required>
-              {% for vm in vms %}
-                <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
-              {% endfor %}
-            </select>
-          </label>
-
-          <input type="hidden" name="guest_ip" value="auto">
-
-          <label>
-            <span>Внутренний порт или диапазон</span>
-            <input type="text" name="guest_port" list="standard-ports" pattern="[0-9]{1,5}([:-][0-9]{1,5})?" placeholder="Выбери стандартный или введи 10000-20000" required>
-            <datalist id="standard-ports">
-              <option value="20" label="FTP data"></option>
-              <option value="21" label="FTP"></option>
-              <option value="22" label="SSH"></option>
-              <option value="25" label="SMTP"></option>
-              <option value="53" label="DNS"></option>
-              <option value="80" label="HTTP / web"></option>
-              <option value="110" label="POP3"></option>
-              <option value="123" label="NTP"></option>
-              <option value="143" label="IMAP"></option>
-              <option value="443" label="HTTPS / SSL web"></option>
-              <option value="465" label="SMTPS"></option>
-              <option value="587" label="SMTP submission"></option>
-              <option value="993" label="IMAPS"></option>
-              <option value="995" label="POP3S"></option>
-              <option value="1194" label="OpenVPN"></option>
-              <option value="1433" label="Microsoft SQL Server"></option>
-              <option value="1521" label="Oracle Database"></option>
-              <option value="2049" label="NFS"></option>
-              <option value="3306" label="MySQL / MariaDB"></option>
-              <option value="3389" label="RDP / Windows Remote Desktop"></option>
-              <option value="5060" label="SIP"></option>
-              <option value="5061" label="SIP TLS"></option>
-              <option value="5432" label="PostgreSQL"></option>
-              <option value="5900" label="VNC"></option>
-              <option value="6379" label="Redis"></option>
-              <option value="8000" label="HTTP dev"></option>
-              <option value="8080" label="HTTP alternative"></option>
-              <option value="8443" label="HTTPS alternative"></option>
-              <option value="10000" label="Webmin / RTP start"></option>
-              <option value="10000-20000" label="RTP / VoIP media range"></option>
-            </datalist>
-          </label>
-
-          <label>
-            <span>Протокол</span>
-            <select name="protocol">
-              <option value="tcp">tcp</option>
-              <option value="udp">udp</option>
-            </select>
-          </label>
-
-          <div class="notice">
-            Можно указать одиночный порт или диапазон. Для VoIP/RTP обычно: внешний 10000-20000 → внутренний 10000-20000, протокол udp. Длины диапазонов должны совпадать.
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Virtuality NAT Router</h2>
+            <span class="pill">{{ ctx.nat.bridge }}</span>
           </div>
+          <div class="meta-grid">
+            <div><span>Gateway</span><strong>{{ ctx.nat.gateway }}</strong></div>
+            <div><span>DHCP</span><strong>{{ ctx.nat.dhcp }}</strong></div>
+            <div><span>Bridge</span><strong>{{ ctx.nat.bridge }}</strong></div>
+          </div>
+          <form method="post" action="/network/nat/setup" class="inline-form top-space">
+            <button class="primary">Создать / починить NAT-сеть</button>
+          </form>
+          <pre>{{ ctx.nat.info }}</pre>
+        </article>
 
-          <button class="primary wide">Добавить и применить</button>
-        </form>
-      </article>
+        <article class="card">
+          <div class="card-head">
+            <h2>DHCP leases</h2>
+            <span class="pill">virsh net-dhcp-leases</span>
+          </div>
+          <pre>{{ ctx.nat.leases }}</pre>
+          <div class="notice top-space">IP для проброса определяется автоматически: сначала через qemu-guest-agent, затем по DHCP leases и MAC-адресу VM.</div>
+        </article>
+      </section>
 
-      <article class="card">
-        <div class="card-head">
-          <h2>Диагностика публичного доступа</h2>
-          <span class="pill">VM → Internet</span>
-        </div>
-        <form method="post" action="/network/diagnose" class="form-grid">
-          <label>
-            <span>Виртуальная машина</span>
-            <select name="vm_name" required>
-              {% for vm in vms %}
-                <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <div class="form-row">
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Добавить проброс порта</h2>
+            <span class="pill">DNAT auto IP · ranges</span>
+          </div>
+          <form method="post" action="/network/forward/add" class="form-grid">
             <label>
-              <span>Внешний порт</span>
-              <input type="number" name="external_port" min="1" max="65535" value="80" required>
+              <span>Описание</span>
+              <input type="text" name="note" placeholder="Например: сайт, SSH, SIP, RTP MikoPBX">
             </label>
             <label>
-              <span>Порт внутри VM</span>
-              <input type="number" name="guest_port" min="1" max="65535" value="80" required>
+              <span>Внешний порт или диапазон</span>
+              <input type="text" name="external_port" pattern="[0-9]{1,5}([:-][0-9]{1,5})?" placeholder="80, 443, 2222 или 10000-20000" required>
             </label>
+            <label>
+              <span>Машина</span>
+              <select name="vm_name" required>
+                {% for vm in vms %}
+                  <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <input type="hidden" name="guest_ip" value="auto">
+            <label>
+              <span>Внутренний порт или диапазон</span>
+              <input type="text" name="guest_port" list="standard-ports" pattern="[0-9]{1,5}([:-][0-9]{1,5})?" placeholder="Выбери стандартный или введи 10000-20000" required>
+              <datalist id="standard-ports">
+                <option value="20" label="FTP data"></option>
+                <option value="21" label="FTP"></option>
+                <option value="22" label="SSH"></option>
+                <option value="25" label="SMTP"></option>
+                <option value="53" label="DNS"></option>
+                <option value="80" label="HTTP / web"></option>
+                <option value="110" label="POP3"></option>
+                <option value="123" label="NTP"></option>
+                <option value="143" label="IMAP"></option>
+                <option value="443" label="HTTPS / SSL web"></option>
+                <option value="465" label="SMTPS"></option>
+                <option value="587" label="SMTP submission"></option>
+                <option value="993" label="IMAPS"></option>
+                <option value="995" label="POP3S"></option>
+                <option value="1194" label="OpenVPN"></option>
+                <option value="1433" label="Microsoft SQL Server"></option>
+                <option value="1521" label="Oracle Database"></option>
+                <option value="2049" label="NFS"></option>
+                <option value="3306" label="MySQL / MariaDB"></option>
+                <option value="3389" label="RDP / Windows Remote Desktop"></option>
+                <option value="5060" label="SIP"></option>
+                <option value="5061" label="SIP TLS"></option>
+                <option value="5432" label="PostgreSQL"></option>
+                <option value="5900" label="VNC"></option>
+                <option value="6379" label="Redis"></option>
+                <option value="8000" label="HTTP dev"></option>
+                <option value="8080" label="HTTP alternative"></option>
+                <option value="8443" label="HTTPS alternative"></option>
+                <option value="10000" label="Webmin / RTP start"></option>
+                <option value="10000-20000" label="RTP / VoIP media range"></option>
+              </datalist>
+            </label>
+            <label>
+              <span>Протокол</span>
+              <select name="protocol">
+                <option value="tcp">tcp</option>
+                <option value="udp">udp</option>
+              </select>
+            </label>
+            <div class="notice">Можно указать одиночный порт или диапазон. Для VoIP/RTP обычно: внешний 10000-20000 → внутренний 10000-20000, протокол udp. Длины диапазонов должны совпадать.</div>
+            <button class="primary wide">Добавить и применить</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Диагностика публичного доступа</h2>
+            <span class="pill">VM → Internet</span>
           </div>
-          <label>
-            <span>Протокол</span>
-            <select name="protocol">
-              <option value="tcp">tcp</option>
-              <option value="udp">udp</option>
-            </select>
-          </label>
-          <button class="primary wide">Проверить доступ</button>
-        </form>
-      </article>
-    </section>
-
-    {% if diagnostics %}
-    <section class="card">
-      <div class="card-head">
-        <h2>Результат диагностики</h2>
-        <span class="pill">{{ diagnostics.vm_name }} · {{ diagnostics.protocol }} {{ diagnostics.external_port }} → {{ diagnostics.guest_port }}</span>
-      </div>
-      <div class="notice">{{ diagnostics.verdict }}</div>
-      <div class="meta-grid top-space">
-        <div><span>VM IP</span><strong>{{ diagnostics.vm_ip or 'not found' }}</strong></div>
-        <div><span>External interface</span><strong>{{ diagnostics.external_interface }}</strong></div>
-        <div><span>Mapping</span><strong>{{ diagnostics.external_port }} → {{ diagnostics.guest_port }}</strong></div>
-      </div>
-      <table class="top-space">
-        <thead><tr><th>Проверка</th><th>Статус</th><th>Детали</th></tr></thead>
-        <tbody>
-        {% for check in diagnostics.checks %}
-          <tr>
-            <td class="strong">{{ check.name }}</td>
-            <td><span class="status {{ 'ok' if check.ok else 'err' }}">{{ 'OK' if check.ok else 'FAIL' }}</span></td>
-            <td class="muted">{{ check.detail }}</td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      <div class="grid two top-space">
-        <article>
-          <div class="label">Проверить входящий трафик</div>
-          <pre>{{ diagnostics.commands.watch_external }}</pre>
+          <form method="post" action="/network/diagnose" class="form-grid">
+            <label>
+              <span>Виртуальная машина</span>
+              <select name="vm_name" required>
+                {% for vm in vms %}
+                  <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <div class="form-row">
+              <label>
+                <span>Внешний порт</span>
+                <input type="number" name="external_port" min="1" max="65535" value="80" required>
+              </label>
+              <label>
+                <span>Порт внутри VM</span>
+                <input type="number" name="guest_port" min="1" max="65535" value="80" required>
+              </label>
+            </div>
+            <label>
+              <span>Протокол</span>
+              <select name="protocol">
+                <option value="tcp">tcp</option>
+                <option value="udp">udp</option>
+              </select>
+            </label>
+            <button class="primary wide">Проверить доступ</button>
+          </form>
         </article>
-        <article>
-          <div class="label">Проверить трафик к VM</div>
-          <pre>{{ diagnostics.commands.watch_internal }}</pre>
-        </article>
-      </div>
-    </section>
-    {% endif %}
+      </section>
 
-    <section class="card">
-      <div class="card-head">
-        <h2>Пробросы портов</h2>
-        <form method="post" action="/network/apply"><button>Применить правила</button></form>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Проброс</th><th>VM</th><th>Внутренний адрес</th><th>Протокол</th><th>Описание</th><th>Действия</th></tr>
-        </thead>
-        <tbody>
-        {% for item in ctx.forwards %}
-          <tr>
-            <td class="strong">
-              {{ item.external_port_label|default(item.external_port) }} → {{ item.guest_port_label|default(item.guest_port) }}
-              {% if item.is_range %}<span class="status warn">range</span>{% endif %}
-            </td>
-            <td>{{ item.vm_name }}</td>
-            <td>{{ item.guest_ip }}</td>
-            <td><span class="status ok">{{ item.protocol }}</span></td>
-            <td>{{ item.note }}</td>
-            <td>
-              <div class="actions">
-                <form method="post" action="/network/diagnose">
-                  <input type="hidden" name="vm_name" value="{{ item.vm_name }}">
-                  <input type="hidden" name="external_port" value="{{ item.external_port }}">
-                  <input type="hidden" name="guest_port" value="{{ item.guest_port }}">
-                  <input type="hidden" name="protocol" value="{{ item.protocol }}">
-                  <button>Диагностика</button>
-                </form>
-                <form method="post" action="/network/forward/{{ item.id }}/delete">
-                  <button class="danger">Удалить</button>
-                </form>
-              </div>
-            </td>
-          </tr>
-        {% else %}
-          <tr><td colspan="6" class="muted">Пробросов пока нет</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </section>
+      {% if diagnostics %}
+      <section class="card">
+        <div class="card-head">
+          <h2>Результат диагностики</h2>
+          <span class="pill">{{ diagnostics.vm_name }} · {{ diagnostics.protocol }} {{ diagnostics.external_port }} → {{ diagnostics.guest_port }}</span>
+        </div>
+        <div class="notice">{{ diagnostics.verdict }}</div>
+        <div class="meta-grid top-space">
+          <div><span>VM IP</span><strong>{{ diagnostics.vm_ip or 'not found' }}</strong></div>
+          <div><span>External interface</span><strong>{{ diagnostics.external_interface }}</strong></div>
+          <div><span>Mapping</span><strong>{{ diagnostics.external_port }} → {{ diagnostics.guest_port }}</strong></div>
+        </div>
+        <table class="top-space">
+          <thead><tr><th>Проверка</th><th>Статус</th><th>Детали</th></tr></thead>
+          <tbody>
+          {% for check in diagnostics.checks %}
+            <tr>
+              <td class="strong">{{ check.name }}</td>
+              <td><span class="status {{ 'ok' if check.ok else 'err' }}">{{ 'OK' if check.ok else 'FAIL' }}</span></td>
+              <td class="muted">{{ check.detail }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <div class="grid two top-space">
+          <article><div class="label">Проверить входящий трафик</div><pre>{{ diagnostics.commands.watch_external }}</pre></article>
+          <article><div class="label">Проверить трафик к VM</div><pre>{{ diagnostics.commands.watch_internal }}</pre></article>
+        </div>
+      </section>
+      {% endif %}
 
-    <section class="card">
-      <div class="card-head">
-        <h2>nftables preview</h2>
-        <span class="pill">/etc/virtuality/nftables/virtuality.nft</span>
-      </div>
-      <pre>{{ ctx.nft_rules }}</pre>
-    </section>
+      <section class="card">
+        <div class="card-head">
+          <h2>Пробросы портов</h2>
+          <form method="post" action="/network/apply"><button>Применить правила</button></form>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Проброс</th><th>VM</th><th>Внутренний адрес</th><th>Протокол</th><th>Описание</th><th>Действия</th></tr>
+          </thead>
+          <tbody>
+          {% for item in ctx.forwards %}
+            <tr>
+              <td class="strong">
+                {{ item.external_port_label|default(item.external_port) }} → {{ item.guest_port_label|default(item.guest_port) }}
+                {% if item.is_range %}<span class="status warn">range</span>{% endif %}
+              </td>
+              <td>{{ item.vm_name }}</td>
+              <td>{{ item.guest_ip }}</td>
+              <td><span class="status ok">{{ item.protocol }}</span></td>
+              <td>{{ item.note }}</td>
+              <td>
+                <div class="actions">
+                  <form method="post" action="/network/diagnose">
+                    <input type="hidden" name="vm_name" value="{{ item.vm_name }}">
+                    <input type="hidden" name="external_port" value="{{ item.external_port }}">
+                    <input type="hidden" name="guest_port" value="{{ item.guest_port }}">
+                    <input type="hidden" name="protocol" value="{{ item.protocol }}">
+                    <button>Диагностика</button>
+                  </form>
+                  <form method="post" action="/network/forward/{{ item.id }}/delete"><button class="danger">Удалить</button></form>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="muted">Пробросов пока нет</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>nftables preview</h2>
+          <span class="pill">/etc/virtuality/nftables/virtuality.nft</span>
+        </div>
+        <pre>{{ ctx.nft_rules }}</pre>
+      </section>
+    </main>
   </div>
+  <script src="/static/panel.js" defer></script>
 </body>
 </html>
