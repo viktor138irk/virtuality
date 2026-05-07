@@ -39,6 +39,7 @@
               <input id="iso-file-input" type="file" name="iso_file" accept=".iso" required>
             </label>
             <div id="iso-file-hint" class="muted small-note">Файл ещё не выбран. В этом разделе разрешены только установочные образы .iso.</div>
+            <div id="iso-file-error" class="alert danger" hidden></div>
             <div id="upload-progress-wrap" class="upload-progress-wrap" hidden>
               <div class="upload-progress-head">
                 <strong id="upload-status">Подготовка…</strong>
@@ -104,6 +105,7 @@ ls -lh /var/lib/virtuality/iso</pre>
     const fileInput = document.getElementById('iso-file-input');
     const button = document.getElementById('iso-upload-button');
     const hint = document.getElementById('iso-file-hint');
+    const errorBox = document.getElementById('iso-file-error');
     const box = document.getElementById('upload-progress-wrap');
     const bar = document.getElementById('upload-progress-bar');
     const percent = document.getElementById('upload-percent');
@@ -126,8 +128,16 @@ ls -lh /var/lib/virtuality/iso</pre>
       return file && file.name && file.name.toLowerCase().endsWith('.iso');
     }
 
+    function setFileError(message) {
+      if (!errorBox) return;
+      errorBox.textContent = message || '';
+      errorBox.hidden = !message;
+    }
+
     function setUploadMode(active) {
       uploadActive = active;
+      window.VirtualityUploadActive = active;
+      document.body.classList.toggle('upload-active', active);
       if (active) {
         button.disabled = false;
         button.type = 'button';
@@ -146,15 +156,33 @@ ls -lh /var/lib/virtuality/iso</pre>
       }
     }
 
+    window.addEventListener('beforeunload', function (event) {
+      if (!uploadActive) return;
+      event.preventDefault();
+      event.returnValue = 'Идёт загрузка ISO. Если уйти со страницы, загрузка будет прервана.';
+    });
+
+    document.addEventListener('click', function (event) {
+      if (!uploadActive) return;
+      const navTarget = event.target.closest('a, form button[type="submit"], form button:not([type])');
+      if (!navTarget || navTarget === button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      statusLine.textContent = 'Сначала заверши или отмени текущую загрузку.';
+    }, true);
+
     fileInput.addEventListener('change', function () {
       const file = fileInput.files[0];
+      setFileError('');
       if (!file) {
         hint.textContent = 'Файл ещё не выбран. В этом разделе разрешены только установочные образы .iso.';
         button.disabled = false;
         return;
       }
       if (!validIsoFile(file)) {
-        hint.textContent = 'Неверный тип файла. Здесь можно выбрать только .iso.';
+        const message = 'Неверный тип файла: ' + file.name + '. Здесь можно выбрать только .iso.';
+        hint.textContent = message;
+        setFileError(message);
         fileInput.value = '';
         button.disabled = true;
         return;
@@ -172,8 +200,11 @@ ls -lh /var/lib/virtuality/iso</pre>
       event.preventDefault();
       if (uploadActive) return;
       const file = fileInput.files[0];
+      setFileError('');
       if (!validIsoFile(file)) {
-        hint.textContent = 'Выбери установочный образ .iso.';
+        const message = 'Выбери установочный образ .iso.';
+        hint.textContent = message;
+        setFileError(message);
         return;
       }
 
@@ -210,6 +241,7 @@ ls -lh /var/lib/virtuality/iso</pre>
           bar.style.width = '100%';
           percent.textContent = '100%';
           statusLine.textContent = 'Готово. Обновляем список ISO…';
+          setUploadMode(false);
           window.location.href = '/iso';
         } else {
           statusLine.textContent = 'Ошибка загрузки: HTTP ' + xhr.status;
