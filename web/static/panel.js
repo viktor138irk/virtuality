@@ -6,6 +6,45 @@
   function qs(selector, root = document) { return root.querySelector(selector); }
   function qsa(selector, root = document) { return Array.from(root.querySelectorAll(selector)); }
 
+  function ensureThemeStyles() {
+    if (qs('link[data-virtuality-themes="1"]')) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/static/themes.css';
+    link.dataset.virtualityThemes = '1';
+    document.head.appendChild(link);
+  }
+
+  function getTheme() {
+    return localStorage.getItem('virtualityTheme') || 'neon';
+  }
+
+  function applyTheme(theme) {
+    const selected = theme === 'macos' ? 'macos' : 'neon';
+    document.documentElement.dataset.theme = selected;
+    localStorage.setItem('virtualityTheme', selected);
+    qsa('[data-theme-select]').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.themeSelect === selected);
+    });
+  }
+
+  function wireThemeSwitcher() {
+    ensureThemeStyles();
+    const nav = qs('.v-nav');
+    if (!nav || qs('.theme-switcher')) {
+      applyTheme(getTheme());
+      return;
+    }
+    const switcher = document.createElement('div');
+    switcher.className = 'theme-switcher';
+    switcher.innerHTML = '<div class="theme-switcher-label">Тема</div><div class="theme-buttons"><button type="button" class="theme-button" data-theme-select="neon">Neon</button><button type="button" class="theme-button" data-theme-select="macos">MacOS</button></div>';
+    nav.appendChild(switcher);
+    qsa('[data-theme-select]', switcher).forEach((btn) => {
+      btn.addEventListener('click', () => applyTheme(btn.dataset.themeSelect));
+    });
+    applyTheme(getTheme());
+  }
+
   function activeSidebar(pathname = window.location.pathname) {
     qsa('.v-nav a').forEach((item) => {
       const url = new URL(item.href, window.location.href);
@@ -65,6 +104,7 @@
   }
 
   function initPanel() {
+    wireThemeSwitcher();
     wireNavGroups();
     wireMobileMenu();
     activeSidebar();
@@ -72,6 +112,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', initPanel);
+  applyTheme(getTheme());
 })();
 
 /* Virtuality live status + toast layer */
