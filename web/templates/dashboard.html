@@ -82,7 +82,7 @@
         </div>
         <table class="vm-table">
           <thead>
-            <tr><th>ID</th><th>Name</th><th>IP</th><th>State</th><th>Actions</th></tr>
+            <tr><th>ID</th><th>Name</th><th>IP</th><th>State</th><th>Autostart</th><th>Actions</th></tr>
           </thead>
           <tbody>
           {% for vm in vms %}
@@ -92,6 +92,14 @@
               <td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
               <td class="strong">{{ vm.ip|default('—') }}</td>
               <td><span class="status {{ 'ok' if is_running else 'err' if 'shut' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
+              <td class="autostart-cell">
+                <span class="status {{ vm.autostart_css|default('warn') }}">{{ vm.autostart_label|default('unknown') }}</span>
+                {% if vm.autostart_enabled %}
+                  <form method="post" action="/vm/{{ vm.name }}/autostart-disable" class="inline-form"><button class="mini-action" title="Отключить автозапуск">off</button></form>
+                {% else %}
+                  <form method="post" action="/vm/{{ vm.name }}/autostart" class="inline-form"><button class="mini-action success" title="Включить автозапуск">on</button></form>
+                {% endif %}
+              </td>
               <td class="vm-actions-cell">
                 <div class="vm-actions compact-actions">
                   <a class="icon-action" href="/vm/{{ vm.name }}" title="Подробнее"><span>ℹ</span><em>Детали</em></a>
@@ -108,7 +116,7 @@
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="5" class="muted">Виртуальных машин пока нет</td></tr>
+            <tr><td colspan="6" class="muted">Виртуальных машин пока нет</td></tr>
           {% endfor %}
           </tbody>
         </table>
