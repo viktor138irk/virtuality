@@ -7,86 +7,90 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div>
-        <div class="brand">Профиль хоста</div>
-        <div class="muted">Автоматически выбранная сборка Virtuality</div>
-      </div>
-      <div class="top-meta">
-        <span>user: {{ user }}</span>
-        <a class="link-pill" href="/network">Сеть</a>
-        <a class="link-pill" href="/vm/create">Создать VM</a>
-        <a class="link-pill" href="/">← Дашборд</a>
-      </div>
-    </header>
+  <div class="v-layout">
+    {% include "_sidebar.html" %}
 
-    {% if profile.virtualization_warning %}
-      <div class="notice">{{ profile.virtualization_warning }}</div>
-    {% endif %}
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">Профиль хоста</div>
+          <div class="v-subtitle">Автоматически выбранная сборка Virtuality</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
 
-    <section class="grid stats">
-      <article class="card stat">
-        <div class="label">Profile</div>
-        <div class="value small">{{ profile.label }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">Arch</div>
-        <div class="value small">{{ profile.arch }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">Virtualization</div>
-        <div class="value small">{{ profile.virtualization_mode|default('unknown') }}</div>
-      </article>
-      <article class="card stat">
-        <div class="label">Default network</div>
-        <div class="value small">{{ profile.recommended_network }}</div>
-      </article>
-    </section>
+      {% if profile.virtualization_warning %}
+        <div class="notice">{{ profile.virtualization_warning }}</div>
+      {% endif %}
 
-    <section class="grid two">
-      <article class="card">
+      <section class="grid stats">
+        <article class="card stat">
+          <div class="label">Profile</div>
+          <div class="value small">{{ profile.label }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Arch</div>
+          <div class="value small">{{ profile.arch }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Virtualization</div>
+          <div class="value small">{{ profile.virtualization_mode|default('unknown') }}</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Default network</div>
+          <div class="value small">{{ profile.recommended_network }}</div>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Модель устройства</h2>
+            <span class="pill">auto-detected</span>
+          </div>
+          <div class="meta-grid">
+            <div><span>Model</span><strong>{{ profile.model }}</strong></div>
+            <div><span>VM mode</span><strong>{{ profile.recommended_vm_mode }}</strong></div>
+            <div><span>Ready</span><strong>{{ 'yes' if profile.ready else 'needs check' }}</strong></div>
+          </div>
+          <div class="notice top-space">
+            На физическом сервере для нормальной скорости нужен KVM: включи Intel VT-x / AMD-V в BIOS/UEFI. Если KVM недоступен, Virtuality может использовать QEMU fallback, но VM будут работать медленно.
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Проверки</h2>
+            <form method="post" action="/host/refresh"><button>Переопределить профиль</button></form>
+          </div>
+          <div class="services">
+            {% for check in profile.checks %}
+              {% set level = check.level|default('ok' if check.ok else 'err') %}
+              <div class="service-row">
+                <span>
+                  <strong>{{ check.name }}</strong>
+                  <small>{{ check.hint }}</small>
+                </span>
+                <span class="status {{ 'ok' if level == 'ok' else 'warn' if level == 'warn' else 'err' }}">{{ 'OK' if level == 'ok' else 'WARN' if level == 'warn' else 'FAIL' }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </article>
+      </section>
+
+      <section class="card">
         <div class="card-head">
-          <h2>Модель устройства</h2>
-          <span class="pill">auto-detected</span>
+          <h2>Raw profile</h2>
+          <span class="pill">/var/lib/virtuality/config/host_profile.json</span>
         </div>
-        <div class="meta-grid">
-          <div><span>Model</span><strong>{{ profile.model }}</strong></div>
-          <div><span>VM mode</span><strong>{{ profile.recommended_vm_mode }}</strong></div>
-          <div><span>Ready</span><strong>{{ 'yes' if profile.ready else 'needs check' }}</strong></div>
-        </div>
-        <div class="notice top-space">
-          На физическом сервере для нормальной скорости нужен KVM: включи Intel VT-x / AMD-V в BIOS/UEFI. Если KVM недоступен, Virtuality может использовать QEMU fallback, но VM будут работать медленно.
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <h2>Проверки</h2>
-          <form method="post" action="/host/refresh"><button>Переопределить профиль</button></form>
-        </div>
-        <div class="services">
-          {% for check in profile.checks %}
-            {% set level = check.level|default('ok' if check.ok else 'err') %}
-            <div class="service-row">
-              <span>
-                <strong>{{ check.name }}</strong>
-                <small>{{ check.hint }}</small>
-              </span>
-              <span class="status {{ 'ok' if level == 'ok' else 'warn' if level == 'warn' else 'err' }}">{{ 'OK' if level == 'ok' else 'WARN' if level == 'warn' else 'FAIL' }}</span>
-            </div>
-          {% endfor %}
-        </div>
-      </article>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>Raw profile</h2>
-        <span class="pill">/var/lib/virtuality/config/host_profile.json</span>
-      </div>
-      <pre>{{ profile_json }}</pre>
-    </section>
+        <pre>{{ profile_json }}</pre>
+      </section>
+    </main>
   </div>
+  <script src="/static/panel.js" defer></script>
 </body>
 </html>
