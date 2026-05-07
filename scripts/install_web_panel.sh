@@ -238,6 +238,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_network_ranges.py" ]]; then
 else
   warn "patch_network_ranges.py не найден, поддержка диапазонов портов пропущена"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_network_bridge_forwards.py" ]]; then
+  run_logged "network bridge forward patch применён" python3 "${REPO_DIR}/scripts/patch_network_bridge_forwards.py" "${APP_DIR}/app.py"
+else
+  warn "patch_network_bridge_forwards.py не найден, проброс bridge/static VM пропущен"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_network_nat_errors.py" ]]; then
   run_logged "network NAT error patch применён" python3 "${REPO_DIR}/scripts/patch_network_nat_errors.py" "${APP_DIR}/app.py"
 else
