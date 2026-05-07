@@ -75,6 +75,16 @@ run_logged() {
   fi
 }
 
+restore_canonical_templates() {
+  local templates=("_sidebar.html" "dashboard.html" "vm_create.html" "vm_detail.html" "iso.html" "disk_images.html" "operations.html" "operation_detail.html" "host.html" "network.html" "logs.html" "update.html")
+  local name=""
+  for name in "${templates[@]}"; do
+    if [[ -f "${WEB_DIR}/templates/${name}" ]]; then
+      cp "${WEB_DIR}/templates/${name}" "${APP_DIR}/templates/${name}"
+    fi
+  done
+}
+
 service_state() { systemctl is-active "$1" 2>/dev/null || echo "inactive"; }
 require_root() { [[ "$EUID" -eq 0 ]] || fail "Запусти через sudo: sudo bash scripts/install_web_panel.sh"; }
 json_value() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$PROFILE_FILE" "$1" 2>/dev/null || true; }
@@ -207,11 +217,7 @@ if [[ -f "${REPO_DIR}/scripts/patch_remove_legacy_boot_order_card.py" ]]; then
 else
   warn "patch_remove_legacy_boot_order_card.py не найден, удаление старого блока порядка загрузки пропущено"
 fi
-if [[ -f "${WEB_DIR}/templates/vm_detail.html" ]]; then
-  run_logged "Канонический шаблон карточки VM восстановлен после патчей" cp "${WEB_DIR}/templates/vm_detail.html" "${APP_DIR}/templates/vm_detail.html"
-else
-  warn "Канонический vm_detail.html не найден, финальное восстановление карточки VM пропущено"
-fi
+run_logged "Канонические шаблоны панели восстановлены после VM-патчей" restore_canonical_templates
 if [[ -f "${REPO_DIR}/scripts/patch_disk_archives.py" ]]; then
   run_logged "disk archive import patch применён" python3 "${REPO_DIR}/scripts/patch_disk_archives.py" "${APP_DIR}/app.py"
 else
@@ -262,9 +268,7 @@ if [[ -f "${REPO_DIR}/scripts/patch_vm_autostart.py" ]]; then
 else
   warn "patch_vm_autostart.py не найден, нормализация автозапуска VM пропущена"
 fi
-if [[ -f "${WEB_DIR}/templates/vm_detail.html" ]]; then
-  run_logged "Канонический шаблон карточки VM финально восстановлен" cp "${WEB_DIR}/templates/vm_detail.html" "${APP_DIR}/templates/vm_detail.html"
-fi
+run_logged "Канонические шаблоны панели финально восстановлены" restore_canonical_templates
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
   ok "Профиль уже сохранён: $PROFILE_FILE"
