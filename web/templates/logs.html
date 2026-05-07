@@ -16,8 +16,11 @@
       <nav class="v-nav">
         <a href="/">Обзор</a>
         <a href="/vm/create">Создать VM</a>
-        <a href="/iso">ISO</a>
-        <a href="/disk-images">Диски</a>
+        <div class="v-nav-group open">
+          <button class="v-nav-group-title" type="button">Образы</button>
+          <a href="/iso">ISO</a>
+          <a href="/disk-images">Диски</a>
+        </div>
         <a href="/network">Сеть</a>
         <a href="/operations">Операции</a>
         <a class="active" href="/logs">Журналы</a>
@@ -84,5 +87,6 @@
     }
     setInterval(refreshLog, 5000);
   </script>
+  <script src="/static/panel.js" defer></script>
 </body>
 </html>
