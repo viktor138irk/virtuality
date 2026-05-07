@@ -85,6 +85,8 @@ h2 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
 .status.ok { color: var(--green); background: rgba(22,163,74,.08); }
 .status.warn { color: var(--yellow); background: rgba(217,119,6,.08); }
 .status.err { color: var(--red); background: rgba(220,38,38,.08); }
+.status-button { cursor: pointer; min-height: 26px; line-height: 1; }
+.status-button:hover { filter: brightness(.96); box-shadow: 0 0 0 3px rgba(25,118,210,.10); }
 
 table { width: 100%; border-collapse: collapse; background: var(--panel); }
 th, td { text-align: left; padding: 9px 9px; border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -93,6 +95,7 @@ tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: #f8fbff; }
 .vm-table th:last-child, .vm-table td:last-child { text-align: right; }
 .vm-actions-cell { min-width: 285px; }
+.autostart-cell { min-width: 100px; }
 
 .actions { display: flex; gap: 7px; flex-wrap: wrap; }
 .actions form, .logout-form, .compact-actions form { margin: 0; }
@@ -120,6 +123,14 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .vm-control-panel > div { min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .vm-control-panel .label { margin-bottom: 8px; }
 .danger-zone-inline { border-color: rgba(220,38,38,.18) !important; background: rgba(220,38,38,.035) !important; }
+.autostart-form { width: 100%; margin: 0; }
+.autostart-indicator { width: 100%; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 3px 9px; text-align: left; padding: 11px 12px; border-radius: 9px; border: 1px solid currentColor; background: #fff; }
+.autostart-indicator span { grid-row: 1 / span 2; font-size: 16px; }
+.autostart-indicator strong { font-size: 15px; line-height: 1; }
+.autostart-indicator small { font-size: 12px; opacity: .78; }
+.autostart-indicator.on { color: var(--green); background: rgba(22,163,74,.08); }
+.autostart-indicator.off { color: var(--red); background: rgba(220,38,38,.08); }
+.autostart-indicator:hover { filter: brightness(.98); box-shadow: 0 0 0 3px rgba(25,118,210,.10); }
 
 pre { overflow: auto; margin: 12px 0 0; padding: 12px; border-radius: 7px; background: #0b1220; border: 1px solid #1f2937; color: #d9e5f6; line-height: 1.55; }
 
