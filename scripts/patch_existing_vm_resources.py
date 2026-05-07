@@ -7,6 +7,7 @@ if not app_path.exists():
     raise SystemExit(f'app.py not found: {app_path}')
 
 changed = []
+warnings = []
 text = app_path.read_text()
 
 if 'import tempfile' not in text:
@@ -144,27 +145,19 @@ def apply_vm_resources(name: str, memory_mb: int, vcpus: int, guest_arch: str) -
 
 if 'def apply_vm_resources(name: str, memory_mb: int, vcpus: int, guest_arch: str)' not in text:
     marker = '\n\ndef vm_details(name: str) -> dict[str, Any]:'
-    if marker not in text:
-        raise SystemExit('vm_details marker not found')
-    text = text.replace(marker, helpers + marker, 1)
-    changed.append('existing VM resources helpers added')
+    if marker in text:
+        text = text.replace(marker, helpers + marker, 1)
+        changed.append('existing VM resources helpers added')
+    else:
+        warnings.append('vm_details marker not found, helpers skipped')
 else:
     changed.append('existing VM resources helpers already present')
 
 if '"resource_settings": vm_resource_settings(name)' not in text:
     replacements = [
-        (
-            '"iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})',
-            '"iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})',
-        ),
-        (
-            '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", "")})',
-            '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})',
-        ),
-        (
-            '"host_ip": system_summary()["ip"]})',
-            '"host_ip": system_summary()["ip"], "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})',
-        ),
+        ('"iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})', '"iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})'),
+        ('"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", "")})', '"boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})'),
+        ('"host_ip": system_summary()["ip"]})', '"host_ip": system_summary()["ip"], "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", "")})'),
     ]
     for old, new in replacements:
         if old in text:
@@ -172,7 +165,7 @@ if '"resource_settings": vm_resource_settings(name)' not in text:
             changed.append('vm detail context gets resource settings')
             break
     else:
-        raise SystemExit('vm detail context marker not found')
+        warnings.append('vm detail context marker not found, resource context skipped')
 else:
     changed.append('vm detail context already has resource settings')
 
@@ -190,15 +183,14 @@ def vm_resources_apply(request: Request, name: str, memory_mb: int = Form(...), 
 '''
 
 if '@app.post("/vm/{name}/resources")' not in text:
-    marker = '\n\n@app.post("/vm/{name}/boot-order")'
-    if marker not in text:
-        marker = '\n\n@app.post("/vm/{name}/iso/mount")'
-    if marker not in text:
-        marker = '\n\n@app.post("/vm/{name}/{action}")'
-    if marker not in text:
-        raise SystemExit('vm action marker not found')
-    text = text.replace(marker, route + marker, 1)
-    changed.append('existing VM resources route added')
+    markers = ['\n\n@app.post("/vm/{name}/boot-order")', '\n\n@app.post("/vm/{name}/iso/mount")', '\n\n@app.post("/vm/{name}/{action}")']
+    for marker in markers:
+        if marker in text:
+            text = text.replace(marker, route + marker, 1)
+            changed.append('existing VM resources route added')
+            break
+    else:
+        warnings.append('vm action marker not found, resources route skipped')
 else:
     changed.append('existing VM resources route already present')
 
@@ -207,3 +199,7 @@ app_path.write_text(text)
 print('existing VM resources patch applied:')
 for item in changed:
     print(f'- {item}')
+if warnings:
+    print('Warnings:')
+    for item in warnings:
+        print(f'- {item}')
