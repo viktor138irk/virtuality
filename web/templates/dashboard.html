@@ -93,11 +93,14 @@
               <td class="strong">{{ vm.ip|default('—') }}</td>
               <td><span class="status {{ 'ok' if is_running else 'err' if 'shut' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
               <td class="autostart-cell">
-                <span class="status {{ vm.autostart_css|default('warn') }}">{{ vm.autostart_label|default('unknown') }}</span>
                 {% if vm.autostart_enabled %}
-                  <form method="post" action="/vm/{{ vm.name }}/autostart-disable" class="inline-form"><button class="mini-action" title="Отключить автозапуск">off</button></form>
+                  <form method="post" action="/vm/{{ vm.name }}/autostart-disable" class="inline-form">
+                    <button class="status status-button ok" title="Отключить автозапуск">{{ vm.autostart_label|default('enabled') }}</button>
+                  </form>
                 {% else %}
-                  <form method="post" action="/vm/{{ vm.name }}/autostart" class="inline-form"><button class="mini-action success" title="Включить автозапуск">on</button></form>
+                  <form method="post" action="/vm/{{ vm.name }}/autostart" class="inline-form">
+                    <button class="status status-button err" title="Включить автозапуск">{{ vm.autostart_label|default('disabled') }}</button>
+                  </form>
                 {% endif %}
               </td>
               <td class="vm-actions-cell">
