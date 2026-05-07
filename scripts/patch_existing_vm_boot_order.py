@@ -9,6 +9,7 @@ if not app_path.exists():
 app_dir = app_path.resolve().parent
 template_path = app_dir / 'templates' / 'vm_detail.html'
 changed = []
+warnings = []
 
 text = app_path.read_text()
 
@@ -94,7 +95,6 @@ def apply_vm_boot_order(name: str, boot_order: str) -> tuple[bool, str]:
     if os_node is None:
         os_node = ET.SubElement(root, "os")
 
-    # Remove only boot-order entries. Keep loader, nvram, type and firmware-related nodes intact.
     for boot in list(os_node.findall("boot")):
         os_node.remove(boot)
 
@@ -122,20 +122,22 @@ def apply_vm_boot_order(name: str, boot_order: str) -> tuple[bool, str]:
 
 if 'def apply_vm_boot_order(name: str, boot_order: str)' not in text:
     marker = '\n\ndef vm_details(name: str) -> dict[str, Any]:'
-    if marker not in text:
-        raise SystemExit('vm_details marker not found')
-    text = text.replace(marker, helpers + marker, 1)
-    changed.append('existing VM boot order helpers added')
+    if marker in text:
+        text = text.replace(marker, helpers + marker, 1)
+        changed.append('existing VM boot order helpers added')
+    else:
+        warnings.append('vm_details marker not found, helpers skipped')
 else:
     changed.append('existing VM boot order helpers already present')
 
 old = '"host_ip": system_summary()["ip"]})'
 new = '"host_ip": system_summary()["ip"], "boot_options": vm_boot_order_options(), "current_boot_order": current_vm_boot_order(name), "boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", "")})'
 if '"current_boot_order": current_vm_boot_order(name)' not in text:
-    if old not in text:
-        raise SystemExit('vm_detail context marker not found')
-    text = text.replace(old, new, 1)
-    changed.append('vm detail context gets boot order')
+    if old in text:
+        text = text.replace(old, new, 1)
+        changed.append('vm detail context gets boot order')
+    else:
+        warnings.append('vm_detail context marker not found, skipped')
 else:
     changed.append('vm detail context already has boot order')
 
@@ -154,10 +156,11 @@ def vm_boot_order_apply(request: Request, name: str, boot_order: str = Form("aut
 
 if '@app.post("/vm/{name}/boot-order")' not in text:
     marker = '\n\n@app.post("/vm/{name}/{action}")'
-    if marker not in text:
-        raise SystemExit('generic vm action marker not found')
-    text = text.replace(marker, route + marker, 1)
-    changed.append('existing VM boot order route added')
+    if marker in text:
+        text = text.replace(marker, route + marker, 1)
+        changed.append('existing VM boot order route added')
+    else:
+        warnings.append('generic vm action marker not found, route skipped')
 else:
     changed.append('existing VM boot order route already present')
 
@@ -169,40 +172,53 @@ if template_path.exists():
     if 'action="/vm/{{ vm.name }}/boot-order"' not in tpl:
         block = r'''
 
-    {% if boot_message %}
-      <div class="alert success">{{ boot_message }}</div>
-    {% endif %}
-    {% if boot_error %}
-      <div class="alert danger">{{ boot_error }}</div>
-    {% endif %}
+      {% if boot_message %}
+        <div class="alert success">{{ boot_message }}</div>
+      {% endif %}
+      {% if boot_error %}
+        <div class="alert danger">{{ boot_error }}</div>
+      {% endif %}
 
-    <section class="card">
-      <div class="card-head">
-        <h2>Порядок загрузки</h2>
-        <span class="pill">boot order</span>
-      </div>
-      <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid">
-        <label>
-          <span>Порядок загрузки VM</span>
-          <select name="boot_order" required>
-            {% for boot in boot_options %}
-              <option value="{{ boot.value }}" {% if current_boot_order == boot.value %}selected{% endif %}>{{ boot.label }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button class="primary wide" type="submit">Применить порядок загрузки</button>
-      </form>
-      <p class="muted small-note">Настройка меняет XML-конфигурацию VM через virsh define. Если машина сейчас запущена, новый порядок загрузки сработает после перезапуска.</p>
-    </section>
+      <section class="card">
+        <div class="card-head">
+          <h2>Порядок загрузки</h2>
+          <span class="pill">boot order</span>
+        </div>
+        <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid">
+          <label>
+            <span>Порядок загрузки VM</span>
+            <select name="boot_order" required>
+              {% for boot in boot_options %}
+                <option value="{{ boot.value }}" {% if current_boot_order == boot.value %}selected{% endif %}>{{ boot.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="primary wide" type="submit">Применить порядок загрузки</button>
+        </form>
+        <p class="muted small-note">Настройка меняет XML-конфигурацию VM через virsh define. Если машина сейчас запущена, новый порядок загрузки сработает после перезапуска.</p>
+      </section>
 '''
-        marker = '\n\n    <section class="grid two">'
-        if marker not in tpl:
-            raise SystemExit('vm detail grid marker not found')
-        tpl = tpl.replace(marker, block + marker, 1)
-        changed.append('boot order card added to vm_detail.html')
+        markers = ['\n\n      <section class="grid two">', '\n\n    <section class="grid two">', '\n\n      <section class="card">']
+        inserted = False
+        for marker in markers:
+            if marker in tpl:
+                tpl = tpl.replace(marker, block + marker, 1)
+                inserted = True
+                changed.append('boot order card added to vm_detail.html')
+                break
+        if not inserted:
+            warnings.append('vm detail insertion marker not found, boot order card skipped')
+    else:
+        changed.append('boot order card already present in vm_detail.html')
     if tpl != original:
         template_path.write_text(tpl)
+else:
+    warnings.append(f'vm_detail.html not found: {template_path}')
 
 print('existing VM boot order patch applied:')
 for item in changed:
     print(f'- {item}')
+if warnings:
+    print('Warnings:')
+    for item in warnings:
+        print(f'- {item}')
