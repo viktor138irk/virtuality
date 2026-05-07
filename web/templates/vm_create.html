@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  {% set disk_images_available = disk_images is defined and disk_images %}
+  {% set disk_feature_available = disk_images is defined %}
   <div class="v-layout">
     {% include "_sidebar.html" %}
 
@@ -44,16 +46,23 @@
               <label>
                 <span>Источник VM</span>
                 <select id="source-type" name="source_type" required>
-                  <option value="iso" {% if form.source_type != 'disk_image' %}selected{% endif %}>ISO-установщик</option>
-                  <option value="disk_image" {% if form.source_type == 'disk_image' %}selected{% endif %}>Готовый диск .img / .raw / .qcow2</option>
+                  <option value="iso" {% if form.source_type|default('iso') != 'disk_image' %}selected{% endif %}>ISO-установщик</option>
+                  {% if disk_feature_available %}
+                    <option value="disk_image" {% if form.source_type|default('iso') == 'disk_image' %}selected{% endif %}>Готовый диск .img / .raw / .qcow2</option>
+                  {% endif %}
                 </select>
               </label>
               <label>
                 <span>Архитектура VM</span>
                 <select name="guest_arch" required>
-                  {% for arch in arch_options %}
-                    <option value="{{ arch.value }}" {% if form.guest_arch == arch.value %}selected{% endif %}>{{ arch.label }}</option>
-                  {% endfor %}
+                  {% if arch_options is defined and arch_options %}
+                    {% for arch in arch_options %}
+                      <option value="{{ arch.value }}" {% if form.guest_arch == arch.value %}selected{% endif %}>{{ arch.label }}</option>
+                    {% endfor %}
+                  {% else %}
+                    <option value="x86_64" {% if form.guest_arch|default('x86_64') == 'x86_64' %}selected{% endif %}>x86_64 / amd64</option>
+                    <option value="aarch64" {% if form.guest_arch|default('x86_64') == 'aarch64' %}selected{% endif %}>ARM64 / aarch64</option>
+                  {% endif %}
                 </select>
               </label>
             </div>
@@ -76,13 +85,14 @@
 
             <label id="iso-source-row">
               <span id="source-image-label">ISO образ</span>
-              <select name="iso_path">
+              <select name="iso_path" {% if isos %}required{% endif %}>
                 {% for iso in isos %}
                   <option value="{{ iso.path }}" {% if form.iso_path == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
                 {% endfor %}
               </select>
             </label>
 
+            {% if disk_feature_available %}
             <div id="disk-image-source-row" class="form-subcard">
               <label>
                 <span id="disk-image-label">Готовый образ диска</span>
@@ -98,6 +108,7 @@
               </label>
               <div class="muted small-note">Опция нужна, если предыдущая попытка создания VM оборвалась и оставила хвост в /var/lib/virtuality/images.</div>
             </div>
+            {% endif %}
 
             <label>
               <span>Режим сети</span>
@@ -113,14 +124,14 @@
             </label>
 
             <div id="source-mode-notice" class="notice">
-              Для обычных ISO выбирай x86_64 на ПК/VPS. Для Raspberry/Orange Pi образов обычно нужен ARM64/aarch64 и источник “Готовый диск”. Опция замены диска удаляет только /var/lib/virtuality/images/ИМЯ_VM.qcow2, если VM с таким именем ещё не существует.
+              Для обычных ISO выбирай x86_64 на ПК/VPS. Для Raspberry/Orange Pi образов обычно нужен ARM64/aarch64 и источник “Готовый диск”.
             </div>
 
             <button id="create-vm-button" type="submit" class="primary wide">Создать виртуальную машину</button>
             {% if not isos %}
               <div id="iso-missing-warning" class="alert danger">Для режима ISO сначала загрузи ISO-образ в ISO-менеджере.</div>
             {% endif %}
-            {% if not disk_images %}
+            {% if disk_feature_available and not disk_images %}
               <div id="disk-image-missing-warning" class="alert danger">Для режима готового диска сначала загрузи .img, .raw или .qcow2 в разделе «Диски».</div>
             {% endif %}
           </form>
@@ -142,7 +153,7 @@
             </div>
             <div class="big-action static">
               <strong>Готовый диск</strong>
-              <span>Virtuality импортирует .img/.raw/.qcow2 в отдельный qcow2-диск VM, не изменяя оригинал.</span>
+              <span>Опция показывается только если backend передал список готовых образов. Так форма не уходит в поломанное состояние.</span>
             </div>
           </div>
           <pre>ISO x86: virt-install --arch x86_64 --cdrom ubuntu.iso
@@ -165,18 +176,19 @@ IMG ARM: qemu-img convert -O qcow2 image.img VM.qcow2
     const diskWarning = document.getElementById('disk-image-missing-warning');
     const createButton = document.getElementById('create-vm-button');
     const hasIsos = {{ 'true' if isos else 'false' }};
-    const hasDiskImages = {{ 'true' if disk_images else 'false' }};
+    const diskFeatureAvailable = {{ 'true' if disk_feature_available else 'false' }};
+    const hasDiskImages = {{ 'true' if disk_images_available else 'false' }};
 
     function refreshSourceUI() {
-      const isDisk = sourceType.value === 'disk_image';
+      const isDisk = diskFeatureAvailable && sourceType.value === 'disk_image';
       isoRow.style.display = isDisk ? 'none' : 'grid';
-      diskImageRow.style.display = isDisk ? 'grid' : 'none';
+      if (diskImageRow) diskImageRow.style.display = isDisk ? 'grid' : 'none';
       sourceImageLabel.textContent = isDisk ? 'Готовый образ диска' : 'ISO образ';
-      diskImageLabel.textContent = isDisk ? 'Готовый образ диска' : 'ISO образ';
+      if (diskImageLabel) diskImageLabel.textContent = 'Готовый образ диска';
       diskSizeRow.style.opacity = isDisk ? '.45' : '1';
       diskSizeRow.querySelector('span').textContent = isDisk ? 'Диск, GB — не используется при импорте' : 'Диск, GB';
       sourceModeNotice.textContent = isDisk
-        ? 'Выбран источник “Готовый диск”: Virtuality импортирует .img/.raw/.qcow2 в новый qcow2-диск VM. Поле “Диск, GB” не используется. При необходимости можно заменить хвост от неудачной установки прямо в блоке готового диска.'
+        ? 'Выбран источник “Готовый диск”: Virtuality импортирует .img/.raw/.qcow2 в новый qcow2-диск VM. Поле “Диск, GB” не используется.'
         : 'Выбран источник “ISO-установщик”: Virtuality создаст новый диск указанного размера и запустит установку с ISO.';
       if (isoWarning) isoWarning.style.display = !isDisk && !hasIsos ? 'block' : 'none';
       if (diskWarning) diskWarning.style.display = isDisk && !hasDiskImages ? 'block' : 'none';
