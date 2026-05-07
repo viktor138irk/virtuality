@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>База знаний — {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="v-layout">
+    {% include "_sidebar.html" %}
+
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">База знаний</div>
+          <div class="v-subtitle">Документация Virtuality, боевые заметки, сетевые схемы и чек-листы</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
+
+      <section class="grid stats compact-stats">
+        <article class="card stat">
+          <div class="label">Фокус</div>
+          <div class="value small">VM / сеть / SSL</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Статус</div>
+          <div class="value small">Наполняется</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Правило</div>
+          <div class="value small">SSL-ready</div>
+        </article>
+        <article class="card stat">
+          <div class="label">Версия раздела</div>
+          <div class="value small">0.8.56</div>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Главное правило: SSL-ready by default</h2>
+          <span class="pill">Let’s Encrypt / HTTP-01</span>
+        </div>
+        <div class="notice">При настройке VM и пробросов Virtuality должна сразу учитывать выпуск SSL-сертификатов. Для Let’s Encrypt критичен внешний доступ к HTTP-01 challenge на TCP 80.</div>
+        <div class="knowledge-list top-space">
+          <div><strong>DNS</strong><span>A-запись домена должна указывать на реальный внешний IP сервера или роутера.</span></div>
+          <div><strong>WAN 80/443</strong><span>Порты не должны быть заняты веб-интерфейсом роутера, FastPanel на хосте или другой службой.</span></div>
+          <div><strong>Firewall</strong><span>Keenetic, внешний firewall и UFW/nftables должны пропускать TCP 80 и TCP 443.</span></div>
+          <div><strong>Проверка снаружи</strong><span>Перед certbot надо проверять curl с мобильной сети или внешнего хоста, а не только из локальной Wi-Fi сети.</span></div>
+        </div>
+        <pre>curl -I http://domain.ru
+
+# Хорошо: ответил nginx, допустимы 200 / 301 / 404
+# Плохо: timeout, connection refused или ответ админки роутера</pre>
+      </section>
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Bridge VM</h2>
+            <span class="pill">br0 / LAN node</span>
+          </div>
+          <p class="muted">Если VM подключена к bridge и имеет полноценный LAN IP, самый чистый путь — пробрасывать WAN-порты роутера напрямую на IP VM.</p>
+          <pre>WAN 80  → IP_VM:80
+WAN 443 → IP_VM:443</pre>
+          <div class="notice top-space">Для сайтов и FastPanel внутри bridge VM этот вариант проще и надёжнее: меньше NAT-слоёв, меньше магии, меньше боли.</div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>NAT VM</h2>
+            <span class="pill">Virtuality DNAT</span>
+          </div>
+          <p class="muted">Если VM находится во внутренней NAT-сети Virtuality, внешний роутер должен вести трафик на хост Virtuality, а дальше Virtuality DNAT отправит его в VM.</p>
+          <pre>WAN 80/443 → HOST:80/443
+HOST DNAT  → IP_VM:80/443</pre>
+          <div class="notice top-space">Для NAT-сценария правила Virtuality должны быть применены и проверены через /network и tcpdump.</div>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Ключевые директории</h2>
+          <span class="pill">filesystem</span>
+        </div>
+        <table>
+          <thead><tr><th>Путь</th><th>Назначение</th></tr></thead>
+          <tbody>
+            <tr><td class="strong">/opt/virtuality/source</td><td>Исходники GitHub-репозитория Virtuality.</td></tr>
+            <tr><td class="strong">/opt/virtuality/web</td><td>Установленная web-панель, которую запускает systemd.</td></tr>
+            <tr><td class="strong">/opt/virtuality/venv</td><td>Python virtualenv панели.</td></tr>
+            <tr><td class="strong">/var/lib/virtuality/iso</td><td>ISO-образы для установки VM.</td></tr>
+            <tr><td class="strong">/var/lib/virtuality/images</td><td>qcow2-диски виртуальных машин.</td></tr>
+            <tr><td class="strong">/var/lib/virtuality/disk-images</td><td>Загруженные готовые .img/.raw/.qcow2 образы и распакованные архивы.</td></tr>
+            <tr><td class="strong">/var/lib/virtuality/network</td><td>Правила пробросов портов и ручные IP VM.</td></tr>
+            <tr><td class="strong">/var/log/virtuality</td><td>Логи установки, операций и диагностики.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Обновление панели</h2>
+            <span class="pill">GitHub → install</span>
+          </div>
+          <pre>cd /opt/virtuality/source
+sudo git fetch --all
+sudo git reset --hard origin/main
+sudo git clean -fd
+sudo bash scripts/install_web_panel.sh
+sudo systemctl restart virtuality-web</pre>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Быстрая диагностика</h2>
+            <span class="pill">host / VM / network</span>
+          </div>
+          <pre>sudo vhealth
+sudo systemctl status virtuality-web --no-pager
+sudo journalctl -u virtuality-web -n 120 --no-pager
+virsh list --all
+virsh net-list --all
+ip route
+sudo nft list ruleset | grep -A120 virtuality</pre>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Проверка проброса к VM</h2>
+          <span class="pill">tcpdump</span>
+        </div>
+        <p class="muted">Если certbot или внешний сайт не открывается, сначала надо понять, где теряется пакет: на роутере, на хосте Virtuality или уже внутри VM.</p>
+        <pre># На хосте Virtuality
+sudo tcpdump -ni br0 'tcp port 80 or tcp port 443'
+
+# На VM
+sudo ss -tulpn | grep -E ':80|:443'
+sudo nginx -t</pre>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Правила версионирования</h2>
+          <span class="pill">release discipline</span>
+        </div>
+        <div class="knowledge-list">
+          <div><strong>+0.0.1</strong><span>Мелкий фикс, безопасное уточнение, диагностика, маленький UI-патч.</span></div>
+          <div><strong>+0.1.0</strong><span>Заметная функция или новый раздел панели.</span></div>
+          <div><strong>+1.0.0</strong><span>Архитектурный разрыв или несовместимое изменение.</span></div>
+          <div><strong>Коммиты</strong><span>Сообщения коммитов — на русском, в прошедшем времени, без инфинитива.</span></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/panel.js" defer></script>
+</body>
+</html>
