@@ -207,6 +207,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_remove_legacy_boot_order_card.py" ]]; then
 else
   warn "patch_remove_legacy_boot_order_card.py не найден, удаление старого блока порядка загрузки пропущено"
 fi
+if [[ -f "${WEB_DIR}/templates/vm_detail.html" ]]; then
+  run_logged "Канонический шаблон карточки VM восстановлен после патчей" cp "${WEB_DIR}/templates/vm_detail.html" "${APP_DIR}/templates/vm_detail.html"
+else
+  warn "Канонический vm_detail.html не найден, финальное восстановление карточки VM пропущено"
+fi
 if [[ -f "${REPO_DIR}/scripts/patch_disk_archives.py" ]]; then
   run_logged "disk archive import patch применён" python3 "${REPO_DIR}/scripts/patch_disk_archives.py" "${APP_DIR}/app.py"
 else
@@ -256,6 +261,9 @@ if [[ -f "${REPO_DIR}/scripts/patch_vm_autostart.py" ]]; then
   run_logged "VM autostart patch применён" python3 "${REPO_DIR}/scripts/patch_vm_autostart.py" "${APP_DIR}/app.py"
 else
   warn "patch_vm_autostart.py не найден, нормализация автозапуска VM пропущена"
+fi
+if [[ -f "${WEB_DIR}/templates/vm_detail.html" ]]; then
+  run_logged "Канонический шаблон карточки VM финально восстановлен" cp "${WEB_DIR}/templates/vm_detail.html" "${APP_DIR}/templates/vm_detail.html"
 fi
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
