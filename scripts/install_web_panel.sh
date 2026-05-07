@@ -252,6 +252,11 @@ if [[ -f "${REPO_DIR}/scripts/patch_live_status.py" ]]; then
 else
   warn "patch_live_status.py не найден, live-статусы пропущены"
 fi
+if [[ -f "${REPO_DIR}/scripts/patch_vm_autostart.py" ]]; then
+  run_logged "VM autostart patch применён" python3 "${REPO_DIR}/scripts/patch_vm_autostart.py" "${APP_DIR}/app.py"
+else
+  warn "patch_vm_autostart.py не найден, нормализация автозапуска VM пропущена"
+fi
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
   ok "Профиль уже сохранён: $PROFILE_FILE"
