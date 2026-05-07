@@ -8,26 +8,7 @@
 </head>
 <body>
   <div class="v-layout">
-    <aside class="v-sidebar">
-      <div class="v-logo">
-        <strong>Virtuality</strong>
-        <span>control panel</span>
-      </div>
-      <nav class="v-nav">
-        <a class="active" href="/">Обзор</a>
-        <a href="/vm/create">Создать VM</a>
-        <div class="v-nav-group open">
-          <div class="v-nav-group-title">Образы</div>
-          <a href="/iso">ISO</a>
-          <a href="/disk-images">Диски</a>
-        </div>
-        <a href="/network">Сеть</a>
-        <a href="/operations">Операции</a>
-        <a href="/logs">Журналы</a>
-        <a href="/update">Обновления</a>
-        <a href="/host">Хост</a>
-      </nav>
-    </aside>
+    {% include "_sidebar.html" %}
 
     <main class="v-main">
       <header class="v-topbar">
@@ -204,5 +185,6 @@
       </section>
     </main>
   </div>
+  <script src="/static/panel.js" defer></script>
 </body>
 </html>
