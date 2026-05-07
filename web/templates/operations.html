@@ -7,50 +7,50 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div>
-        <div class="brand">Операции</div>
-        <div class="muted">Журнал фоновых действий Virtuality</div>
-      </div>
-      <div class="top-meta">
-        <span>user: {{ user }}</span>
-        <a class="link-pill accent" href="/vm/create">+ Создать VM</a>
-        <a class="link-pill" href="/">← Дашборд</a>
-        <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-      </div>
-    </header>
+  <div class="v-layout">
+    {% include "_sidebar.html" %}
 
-    <section class="card">
-      <div class="card-head">
-        <h2>Последние операции</h2>
-        <span class="pill">/var/log/virtuality/operations</span>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Операция</th><th>Статус</th><th>Прогресс</th><th>Создана</th><th>Действие</th></tr>
-        </thead>
-        <tbody>
-        {% for operation in operations %}
-          <tr>
-            <td>
-              <div class="strong">{{ operation.title }}</div>
-              <div class="muted small-note">{{ operation.message }}</div>
-            </td>
-            <td><span class="status {{ operation_css(operation.status) }}">{{ operation.status }}</span></td>
-            <td>
-              <div class="progress"><span style="width: {{ operation.progress }}%"></span></div>
-              <div class="muted small-note">{{ operation.progress }}%</div>
-            </td>
-            <td>{{ operation.created_at }}</td>
-            <td><a class="link-pill" href="/operations/{{ operation.id }}">Открыть</a></td>
-          </tr>
-        {% else %}
-          <tr><td colspan="5" class="muted">Журнал операций пуст</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </section>
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">Операции</div>
+          <div class="v-subtitle">Журнал фоновых действий Virtuality</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Последние операции</h2>
+          <span class="pill">/var/log/virtuality/operations</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Операция</th><th>Статус</th><th>Создана</th><th>Действие</th></tr>
+          </thead>
+          <tbody>
+          {% for operation in operations %}
+            <tr>
+              <td>
+                <div class="strong">{{ operation.title }}</div>
+                <div class="muted small-note">{{ operation.message }}</div>
+              </td>
+              <td><span class="status {{ operation_css(operation.status) }}">{{ operation.status }}</span></td>
+              <td>{{ operation.created_at }}</td>
+              <td><a class="link-pill" href="/operations/{{ operation.id }}">Открыть</a></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="muted">Журнал операций пуст</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    </main>
   </div>
+  <script src="/static/panel.js" defer></script>
 </body>
 </html>
