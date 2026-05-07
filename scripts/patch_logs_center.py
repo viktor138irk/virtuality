@@ -21,7 +21,6 @@ LOG_SOURCES = {
     "auto-update": {"title": "Auto Update", "kind": "journal", "unit": "virtuality-auto-update.service"},
     "libvirtd": {"title": "libvirtd", "kind": "journal", "unit": "libvirtd.service"},
     "virtlogd": {"title": "virtlogd", "kind": "journal", "unit": "virtlogd.service"},
-    "telegram": {"title": "Telegram notifier", "kind": "file", "path": "/var/log/virtuality/telegram_version_bot.log"},
 }
 
 
@@ -76,7 +75,15 @@ if 'LOG_SOURCES = {' not in text:
         print('WARN: log helper marker not found, skip helper injection')
         changed.append('log center helpers skipped')
 else:
-    changed.append('log center helpers already present')
+    start = text.find('LOG_SOURCES = {')
+    end = text.find('\n}\n\n\ndef read_log_source', start)
+    if start != -1 and end != -1:
+        replacement = helpers.strip().split('\n\n\ndef read_log_source', 1)[0]
+        text = text[:start] + replacement + text[end + 3:]
+        changed.append('log sources refreshed without telegram')
+    else:
+        text = text.replace('    "telegram": {"title": "Telegram notifier", "kind": "file", "path": "/var/log/virtuality/telegram_version_bot.log"},\n', '')
+        changed.append('telegram log source removed')
 
 route = r'''
 
@@ -127,7 +134,7 @@ sidebar_html = '''{% set path = request.url.path %}
     <a class="{{ 'active' if path == '/' else '' }}" href="/">Обзор</a>
     <a class="{{ 'active' if path.startswith('/vm/create') else '' }}" href="/vm/create">Создать VM</a>
     <div class="v-nav-group {{ 'open' if path.startswith('/iso') or path.startswith('/disk-images') else '' }}">
-      <div class="v-nav-group-title">Образы</div>
+      <button class="v-nav-group-title" type="button">Образы</button>
       <a class="{{ 'active' if path.startswith('/iso') else '' }}" href="/iso">ISO</a>
       <a class="{{ 'active' if path.startswith('/disk-images') else '' }}" href="/disk-images">Диски</a>
     </div>
@@ -152,24 +159,7 @@ if templates_dir.exists():
         if '<script src="/static/panel.js" defer></script>' not in html:
             html = html.replace('</body>', '  <script src="/static/panel.js" defer></script>\n</body>', 1)
             changed.append(f'{path.name} panel.js attached')
-        if '{% include "_sidebar.html" %}' not in html and '<div class="v-layout">' not in html and '<div class="shell">' in html:
-            html = html.replace('<body>\n  <div class="shell">', '<body>\n  <div class="v-layout">\n    {% include "_sidebar.html" %}\n    <main class="v-main">\n      <div class="shell v-shell-embedded">', 1)
-            script_marker = '\n\n  <script>'
-            search_end = html.find(script_marker) if script_marker in html else html.find('\n</body>')
-            if search_end == -1:
-                search_end = len(html)
-            close_idx = html.rfind('\n  </div>', 0, search_end)
-            if close_idx != -1:
-                html = html[:close_idx] + '\n      </div>\n    </main>\n  </div>' + html[close_idx + len('\n  </div>'):]
-                changed.append(f'{path.name} wrapped with sidebar')
-            else:
-                print(f'WARN: sidebar close marker not found for {path.name}')
         path.write_text(html)
-
-if static_dir.exists() and (static_dir / 'panel.js').exists():
-    changed.append('panel.js found')
-else:
-    print('WARN: panel.js not found in installed static dir')
 
 print('logs center and UI dynamics patch applied:')
 for item in changed:
