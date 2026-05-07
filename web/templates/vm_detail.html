@@ -7,114 +7,139 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <div class="shell">
+  <div class="v-layout">
     {% set is_running = 'running' in vm.dominfo|lower %}
     {% set is_autostart = vm.autostart_enabled|default(false) %}
     {% set autostart_label = 'enabled' if is_autostart else 'disabled' %}
-    <header class="topbar">
-      <div>
-        <div class="brand">{{ vm.name }}</div>
-        <div class="muted">Детали виртуальной машины</div>
-      </div>
-      <div class="top-meta">
-        <span>user: {{ user }}</span>
-        <span class="status {{ 'ok' if is_running else 'err' }}">{{ 'running' if is_running else 'shut off' }}</span>
-        <span class="status {{ 'ok' if is_autostart else 'err' }}">autostart: {{ autostart_label }}</span>
-        <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Консоль ↗</a>
-        <a class="link-pill" href="/">← Дашборд</a>
-        <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-      </div>
-    </header>
 
-    <section class="card">
-      <div class="card-head">
-        <h2>Управление</h2>
-        <span class="pill">compact actions</span>
+    <aside class="v-sidebar">
+      <div class="v-logo">
+        <strong>Virtuality</strong>
+        <span>control panel</span>
       </div>
-      <div class="vm-control-panel">
+      <nav class="v-nav">
+        <a href="/">Обзор</a>
+        <a href="/vm/create">Создать VM</a>
+        <div class="v-nav-group open">
+          <button class="v-nav-group-title" type="button">Образы</button>
+          <a href="/iso">ISO</a>
+          <a href="/disk-images">Диски</a>
+        </div>
+        <a href="/network">Сеть</a>
+        <a href="/operations">Операции</a>
+        <a href="/logs">Журналы</a>
+        <a href="/update">Обновления</a>
+        <a href="/host">Хост</a>
+      </nav>
+    </aside>
+
+    <main class="v-main">
+      <header class="v-topbar">
         <div>
-          <div class="label">Основные действия</div>
-          <div class="vm-actions compact-actions big-actions">
-            <a class="icon-action accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener" title="Открыть консоль"><span>▣</span><em>Консоль</em></a>
-            {% if is_running %}
-              <form method="post" action="/vm/{{ vm.name }}/reboot"><button class="icon-action" title="Перезагрузить"><span>↻</span><em>Reboot</em></button></form>
-              <form method="post" action="/vm/{{ vm.name }}/shutdown"><button class="icon-action" title="Мягко выключить"><span>⏻</span><em>Shutdown</em></button></form>
-            {% else %}
-              <form method="post" action="/vm/{{ vm.name }}/start"><button class="icon-action success" title="Запустить"><span>▶</span><em>Start</em></button></form>
-            {% endif %}
+          <div class="v-title">{{ vm.name }}</div>
+          <div class="v-subtitle">Детали виртуальной машины</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <span class="status {{ 'ok' if is_running else 'err' }}">{{ 'running' if is_running else 'shut off' }}</span>
+          <span class="status {{ 'ok' if is_autostart else 'err' }}">autostart: {{ autostart_label }}</span>
+          <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Консоль ↗</a>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Управление</h2>
+          <span class="pill">compact actions</span>
+        </div>
+        <div class="vm-control-panel">
+          <div>
+            <div class="label">Основные действия</div>
+            <div class="vm-actions compact-actions big-actions">
+              <a class="icon-action accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener" title="Открыть консоль"><span>▣</span><em>Консоль</em></a>
+              {% if is_running %}
+                <form method="post" action="/vm/{{ vm.name }}/reboot"><button class="icon-action" title="Перезагрузить"><span>↻</span><em>Reboot</em></button></form>
+                <form method="post" action="/vm/{{ vm.name }}/shutdown"><button class="icon-action" title="Мягко выключить"><span>⏻</span><em>Shutdown</em></button></form>
+              {% else %}
+                <form method="post" action="/vm/{{ vm.name }}/start"><button class="icon-action success" title="Запустить"><span>▶</span><em>Start</em></button></form>
+              {% endif %}
+            </div>
+          </div>
+          <div>
+            <div class="label">Автозапуск</div>
+            <div class="vm-actions compact-actions big-actions">
+              {% if is_autostart %}
+                <form method="post" action="/vm/{{ vm.name }}/autostart-disable" class="autostart-form">
+                  <button class="autostart-indicator on" title="Автозапуск включён. Нажми, чтобы отключить"><span>●</span><strong>Включён</strong><small>Нажми для отключения</small></button>
+                </form>
+              {% else %}
+                <form method="post" action="/vm/{{ vm.name }}/autostart" class="autostart-form">
+                  <button class="autostart-indicator off" title="Автозапуск выключен. Нажми, чтобы включить"><span>●</span><strong>Выключен</strong><small>Нажми для включения</small></button>
+                </form>
+              {% endif %}
+            </div>
+            <p class="muted small-note">Автозапуск поднимает VM вместе с libvirt после перезагрузки хоста.</p>
+          </div>
+          <div class="danger-zone-inline">
+            <div class="label">Опасные действия</div>
+            <div class="vm-actions compact-actions big-actions">
+              {% if is_running %}
+                <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="icon-action danger" title="Принудительно выключить"><span>⚡</span><em>Power off</em></button></form>
+              {% endif %}
+              {% if not is_running %}
+                <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');"><button class="icon-action danger" title="Удалить VM вместе с дисками"><span>🗑</span><em>Delete</em></button></form>
+              {% else %}
+                <span class="muted small-note">Удаление доступно после выключения VM.</span>
+              {% endif %}
+            </div>
           </div>
         </div>
-        <div>
-          <div class="label">Автозапуск</div>
-          <div class="vm-actions compact-actions big-actions">
-            {% if is_autostart %}
-              <form method="post" action="/vm/{{ vm.name }}/autostart-disable" class="autostart-form">
-                <button class="autostart-indicator on" title="Автозапуск включён. Нажми, чтобы отключить"><span>●</span><strong>Включён</strong><small>Нажми для отключения</small></button>
-              </form>
-            {% else %}
-              <form method="post" action="/vm/{{ vm.name }}/autostart" class="autostart-form">
-                <button class="autostart-indicator off" title="Автозапуск выключен. Нажми, чтобы включить"><span>●</span><strong>Выключен</strong><small>Нажми для включения</small></button>
-              </form>
-            {% endif %}
+      </section>
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Информация</h2>
+            <span class="pill">dominfo</span>
           </div>
-          <p class="muted small-note">Автозапуск поднимает VM вместе с libvirt после перезагрузки хоста.</p>
-        </div>
-        <div class="danger-zone-inline">
-          <div class="label">Опасные действия</div>
-          <div class="vm-actions compact-actions big-actions">
-            {% if is_running %}
-              <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="icon-action danger" title="Принудительно выключить"><span>⚡</span><em>Power off</em></button></form>
-            {% endif %}
-            {% if not is_running %}
-              <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');"><button class="icon-action danger" title="Удалить VM вместе с дисками"><span>🗑</span><em>Delete</em></button></form>
-            {% else %}
-              <span class="muted small-note">Удаление доступно после выключения VM.</span>
-            {% endif %}
+          <pre>{{ vm.dominfo }}</pre>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Консоль</h2>
+            <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">noVNC ↗</a>
           </div>
-        </div>
-      </div>
-    </section>
+          <div class="services">
+            <div class="service-row"><span>VNC display</span><span class="status ok">{{ vm.vnc }}</span></div>
+            <div class="service-row"><span>Host</span><span class="status ok">{{ host_ip }}</span></div>
+            <div class="service-row"><span>Web console</span><span class="status ok">/vm/{{ vm.name }}/console</span></div>
+          </div>
+          <p class="muted small-note">Консоль открывается в новой вкладке и занимает всё окно браузера. VNC наружу открывать не нужно.</p>
+        </article>
+      </section>
 
-    <section class="grid two">
-      <article class="card">
-        <div class="card-head">
-          <h2>Информация</h2>
-          <span class="pill">dominfo</span>
-        </div>
-        <pre>{{ vm.dominfo }}</pre>
-      </article>
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Диски</h2>
+            <span class="pill">domblklist</span>
+          </div>
+          <pre>{{ vm.disks }}</pre>
+        </article>
 
-      <article class="card">
-        <div class="card-head">
-          <h2>Консоль</h2>
-          <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">noVNC ↗</a>
-        </div>
-        <div class="services">
-          <div class="service-row"><span>VNC display</span><span class="status ok">{{ vm.vnc }}</span></div>
-          <div class="service-row"><span>Host</span><span class="status ok">{{ host_ip }}</span></div>
-          <div class="service-row"><span>Web console</span><span class="status ok">/vm/{{ vm.name }}/console</span></div>
-        </div>
-        <p class="muted small-note">Консоль открывается в новой вкладке и занимает всё окно браузера. VNC наружу открывать не нужно.</p>
-      </article>
-    </section>
-
-    <section class="grid two">
-      <article class="card">
-        <div class="card-head">
-          <h2>Диски</h2>
-          <span class="pill">domblklist</span>
-        </div>
-        <pre>{{ vm.disks }}</pre>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <h2>Сеть</h2>
-          <span class="pill">domiflist</span>
-        </div>
-        <pre>{{ vm.interfaces }}</pre>
-      </article>
-    </section>
+        <article class="card">
+          <div class="card-head">
+            <h2>Сеть</h2>
+            <span class="pill">domiflist</span>
+          </div>
+          <pre>{{ vm.interfaces }}</pre>
+        </article>
+      </section>
+    </main>
   </div>
+  <script src="/static/panel.js" defer></script>
 </body>
 </html>
