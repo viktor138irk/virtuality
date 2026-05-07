@@ -10,6 +10,7 @@
   <div class="shell">
     {% set is_running = 'running' in vm.dominfo|lower %}
     {% set is_autostart = vm.autostart_enabled|default(false) %}
+    {% set autostart_label = 'enabled' if is_autostart else 'disabled' %}
     <header class="topbar">
       <div>
         <div class="brand">{{ vm.name }}</div>
@@ -18,7 +19,7 @@
       <div class="top-meta">
         <span>user: {{ user }}</span>
         <span class="status {{ 'ok' if is_running else 'err' }}">{{ 'running' if is_running else 'shut off' }}</span>
-        <span class="status {{ 'ok' if is_autostart else 'err' }}">autostart: {{ vm.autostart_label|default('unknown') }}</span>
+        <span class="status {{ 'ok' if is_autostart else 'err' }}">autostart: {{ autostart_label }}</span>
         <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Консоль ↗</a>
         <a class="link-pill" href="/">← Дашборд</a>
         <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
