@@ -11,7 +11,7 @@
     <header class="topbar">
       <div>
         <div class="brand">Обновления</div>
-        <div class="muted">GitHub update center: автоматический мониторинг, changelog и установка</div>
+        <div class="muted">GitHub update center: changelog, проверка и установка</div>
       </div>
       <div class="top-meta">
         <span>user: {{ user }}</span>
@@ -58,16 +58,14 @@
         {% if not info.fetch_ok %}
           <div class="alert danger top-space">GitHub fetch вернул ошибку: {{ info.fetch_error }}</div>
         {% endif %}
-        <div class="notice top-space">
-          Проверка обновлений выполняется автоматически при открытии страницы и дальше каждые 5 минут. Ручная кнопка убрана — меньше лишних действий, больше порядка.
-        </div>
-        <div class="actions top-space">
+        <div class="actions top-space update-actions">
+          <form method="post" action="/update/check" id="update-check-form">
+            <button class="primary" id="update-main-button" type="submit">{{ 'Установить обновления' if info.has_update else 'Проверить обновления' }}</button>
+          </form>
           {% if info.has_update %}
-            <form method="post" action="/update/apply" onsubmit="return confirm('Запустить обновление Virtuality из GitHub? Панель перезапустится.');">
-              <button class="primary">Установить обновление</button>
+            <form method="post" action="/update/apply" id="update-apply-form" onsubmit="return confirm('Запустить обновление Virtuality из GitHub? Панель перезапустится.');">
+              <button class="primary" id="update-apply-button" type="submit">Установить обновления</button>
             </form>
-          {% else %}
-            <button disabled>Установить обновление</button>
           {% endif %}
         </div>
       </article>
@@ -105,7 +103,7 @@
           </ul>
         </div>
       {% else %}
-        <div class="muted">Нет пропущенных версий. Система на свежем коде, красота.</div>
+        <div class="muted">Нет пропущенных версий. Система на свежем коде.</div>
       {% endfor %}
     </section>
 
@@ -145,12 +143,24 @@
     const logBox = document.getElementById('update-log');
     const logState = document.getElementById('update-log-state');
     const lastCheckBox = document.getElementById('last-check-value');
-    let autoCheckRunning = false;
+    const checkForm = document.getElementById('update-check-form');
+    const applyForm = document.getElementById('update-apply-form');
+    const mainButton = document.getElementById('update-main-button');
+    const applyButton = document.getElementById('update-apply-button');
 
     function statusClass(status) {
       if (status === 'success') return 'status ok';
       if (status === 'error') return 'status err';
       return 'status warn';
+    }
+
+    function stageText(state) {
+      const status = state.status || 'idle';
+      const message = state.message || '';
+      if (status === 'running') return message || 'Установка выполняется';
+      if (status === 'success') return 'Обновление установлено';
+      if (status === 'error') return 'Ошибка обновления';
+      return message || 'Готово';
     }
 
     async function refreshUpdateStatus() {
@@ -167,29 +177,27 @@
         finishedBox.textContent = state.finished_at || '—';
         logBox.textContent = payload.log_tail || 'Лог пока пуст.';
         logState.textContent = 'live · ' + (payload.checked_at || 'now');
+        if (applyButton && state.status === 'running') applyButton.textContent = stageText(state);
       } catch (error) {
         logState.textContent = 'live error';
       }
     }
 
-    async function autoCheckUpdates() {
-      if (autoCheckRunning) return;
-      autoCheckRunning = true;
-      try {
-        await fetch('/update/check', {method: 'POST', cache: 'no-store', redirect: 'follow'});
-        const now = new Date().toLocaleString();
-        if (lastCheckBox) lastCheckBox.textContent = now;
-      } catch (error) {
-        if (logState) logState.textContent = 'check error';
-      } finally {
-        autoCheckRunning = false;
-      }
+    if (checkForm) {
+      checkForm.addEventListener('submit', () => {
+        if (mainButton) mainButton.textContent = 'Проверяем GitHub...';
+      });
+    }
+    if (applyForm) {
+      applyForm.addEventListener('submit', () => {
+        if (applyButton) applyButton.textContent = 'Запускаем обновление...';
+        setTimeout(refreshUpdateStatus, 1200);
+        setTimeout(refreshUpdateStatus, 2600);
+      });
     }
 
     refreshUpdateStatus();
-    autoCheckUpdates();
     setInterval(refreshUpdateStatus, 2000);
-    setInterval(autoCheckUpdates, 300000);
   </script>
 </body>
 </html>
