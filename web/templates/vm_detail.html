@@ -5,6 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ vm.name }} — {{ app_name }}</title>
   <link rel="stylesheet" href="/static/app.css">
+  <style>
+    .vm-four-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: stretch; margin-bottom: 14px; }
+    .vm-four-grid .card { min-width: 0; height: calc(100% - 14px); }
+    .vm-four-grid .card-head { align-items: flex-start; }
+    .vm-four-grid h2 { font-size: 16px; line-height: 1.2; }
+    .vm-four-grid .form-row { grid-template-columns: 1fr; }
+    .vm-four-grid .compact-actions { justify-content: flex-start; }
+    .vm-four-grid .vm-control-panel { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .vm-four-grid .autostart-indicator { width: 100%; }
+    @media (max-width: 1500px) { .vm-four-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 980px) { .vm-four-grid { grid-template-columns: 1fr; } }
+  </style>
 </head>
 <body>
   <div class="v-layout">
@@ -37,7 +49,7 @@
       {% if boot_message %}<div class="alert success">{{ boot_message }}</div>{% endif %}
       {% if boot_error %}<div class="alert danger">{{ boot_error }}</div>{% endif %}
 
-      <section class="grid two vm-main-control-grid">
+      <section class="grid vm-four-grid">
         <article class="card">
           <div class="card-head">
             <h2>Управление</h2>
@@ -119,9 +131,24 @@
             <p class="muted small-note">Изменения применяются через XML VM и virsh define.</p>
           {% endif %}
         </article>
-      </section>
 
-      <section class="grid two vm-boot-iso-grid">
+        <article class="card">
+          <div class="card-head">
+            <h2>Порядок загрузки</h2>
+            <span class="pill">boot</span>
+          </div>
+          <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid boot-order-form">
+            <input type="hidden" name="boot_order" id="boot-order-value" value="{{ current_boot_order|default('auto') }}">
+            <div class="boot-order-list" id="boot-order-list" data-current="{{ current_boot_order|default('auto') }}">
+              <div class="boot-order-item" draggable="true" data-device="cdrom"><span class="drag-handle">☰</span><div><b>ISO / CD-ROM</b><small>Установщик или rescue-образ</small></div></div>
+              <div class="boot-order-item" draggable="true" data-device="hd"><span class="drag-handle">☰</span><div><b>Диск</b><small>Основной диск VM</small></div></div>
+              <div class="boot-order-item" draggable="true" data-device="network"><span class="drag-handle">☰</span><div><b>Сеть / PXE</b><small>Загрузка по сети</small></div></div>
+            </div>
+            <button class="primary wide" type="submit">Применить порядок</button>
+          </form>
+          <p class="muted small-note">Изменение работает после перезапуска VM.</p>
+        </article>
+
         <article class="card">
           <div class="card-head">
             <h2>ISO-привод</h2>
@@ -149,23 +176,6 @@
           {% if not isos %}
             <div class="alert danger">ISO-образов пока нет. Сначала загрузи .iso в разделе ISO.</div>
           {% endif %}
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>Порядок загрузки</h2>
-            <span class="pill">drag-and-drop</span>
-          </div>
-          <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid boot-order-form">
-            <input type="hidden" name="boot_order" id="boot-order-value" value="{{ current_boot_order|default('auto') }}">
-            <div class="boot-order-list" id="boot-order-list" data-current="{{ current_boot_order|default('auto') }}">
-              <div class="boot-order-item" draggable="true" data-device="cdrom"><span class="drag-handle">☰</span><div><b>ISO / CD-ROM</b><small>Установщик или rescue-образ</small></div></div>
-              <div class="boot-order-item" draggable="true" data-device="hd"><span class="drag-handle">☰</span><div><b>Диск</b><small>Основной диск VM</small></div></div>
-              <div class="boot-order-item" draggable="true" data-device="network"><span class="drag-handle">☰</span><div><b>Сеть / PXE</b><small>Загрузка по сети</small></div></div>
-            </div>
-            <button class="primary wide" type="submit">Применить порядок загрузки</button>
-          </form>
-          <p class="muted small-note">Перетащи источник выше. Изменение работает после перезапуска VM.</p>
         </article>
       </section>
 
