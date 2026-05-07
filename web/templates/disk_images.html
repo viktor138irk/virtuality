@@ -146,6 +146,8 @@
 
     function setUploadMode(active) {
       uploadActive = active;
+      window.VirtualityUploadActive = active;
+      document.body.classList.toggle('upload-active', active);
       if (active) {
         button.disabled = false;
         button.type = 'button';
@@ -172,11 +174,27 @@
       speedLine.textContent = 'ожидание…';
     }
 
+    window.addEventListener('beforeunload', function (event) {
+      if (!uploadActive) return;
+      event.preventDefault();
+      event.returnValue = 'Идёт загрузка образа. Если уйти со страницы, загрузка будет прервана.';
+    });
+
+    document.addEventListener('click', function (event) {
+      if (!uploadActive) return;
+      const navTarget = event.target.closest('a, form button[type="submit"], form button:not([type])');
+      if (!navTarget || navTarget === button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      statusLine.textContent = 'Сначала заверши или отмени текущую загрузку.';
+    }, true);
+
     async function pollConvert(operationId) {
-      setUploadMode(false);
       fileInput.disabled = true;
       button.disabled = true;
       button.textContent = 'Идёт конвертация…';
+      button.classList.remove('danger');
+      button.classList.add('primary');
       resetProgress('Конвертация образа в qcow2…', '0%');
       while (true) {
         const response = await fetch('/api/operations/' + operationId, {cache: 'no-store'});
@@ -193,17 +211,13 @@
           bar.style.width = '100%';
           percent.textContent = '100%';
           statusLine.textContent = 'Конвертация завершена. Обновляем список образов…';
+          setUploadMode(false);
           setTimeout(() => { window.location.href = '/disk-images'; }, 650);
           return;
         }
         if (op.status === 'error') {
           statusLine.textContent = 'Ошибка конвертации: ' + (op.message || 'см. журнал операций');
-          button.disabled = false;
-          button.type = 'submit';
-          button.textContent = 'Загрузить образ диска';
-          button.classList.add('primary');
-          button.classList.remove('danger');
-          fileInput.disabled = false;
+          setUploadMode(false);
           return;
         }
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -282,6 +296,7 @@
           bar.style.width = '100%';
           percent.textContent = '100%';
           statusLine.textContent = 'Готово. Обновляем список образов…';
+          setUploadMode(false);
           window.location.href = '/disk-images';
         } else {
           statusLine.textContent = 'Ошибка загрузки: HTTP ' + xhr.status;
