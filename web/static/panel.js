@@ -1,48 +1,10 @@
 (() => {
   const app = {
-    loading: false,
     refreshTimers: [],
   };
 
-  const fullLoadPages = ['/iso', '/disk-images', '/vm/create', '/update'];
-
   function qs(selector, root = document) { return root.querySelector(selector); }
   function qsa(selector, root = document) { return Array.from(root.querySelectorAll(selector)); }
-
-  function sameOriginLink(link) {
-    if (!link || !link.href) return false;
-    const url = new URL(link.href, window.location.href);
-    return url.origin === window.location.origin;
-  }
-
-  function requiresFullLoad(pathname) {
-    return fullLoadPages.some((path) => pathname === path || pathname.startsWith(path + '/'));
-  }
-
-  function isAjaxSafeLink(link) {
-    if (!sameOriginLink(link)) return false;
-    const url = new URL(link.href, window.location.href);
-    if (requiresFullLoad(url.pathname)) return false;
-    if (url.pathname.startsWith('/vm/') && url.pathname.endsWith('/console')) return false;
-    if (url.pathname.startsWith('/static/')) return false;
-    if (url.pathname.startsWith('/api/')) return false;
-    if (link.target && link.target !== '_self') return false;
-    if (link.hasAttribute('download')) return false;
-    if (link.dataset.noAjax === '1') return false;
-    return true;
-  }
-
-  function setLoading(active) {
-    app.loading = active;
-    document.documentElement.classList.toggle('ajax-loading', active);
-    let bar = qs('#ajax-progress');
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = 'ajax-progress';
-      document.body.appendChild(bar);
-    }
-    bar.classList.toggle('active', active);
-  }
 
   function activeSidebar(pathname = window.location.pathname) {
     qsa('.v-nav a').forEach((item) => {
@@ -54,117 +16,6 @@
     qsa('.v-nav-group').forEach((group) => {
       const hasActive = qsa('a.active', group).length > 0;
       group.classList.toggle('open', hasActive);
-    });
-  }
-
-  function stopRefreshTimers() {
-    app.refreshTimers.forEach((timer) => clearInterval(timer));
-    app.refreshTimers = [];
-  }
-
-  function swapPage(html, url, push = true) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    const targetPath = new URL(url, window.location.href).pathname;
-    if (requiresFullLoad(targetPath)) {
-      window.location.href = url;
-      return;
-    }
-    const newMain = qs('.v-main', doc) || qs('.shell', doc);
-    const currentMain = qs('.v-main') || qs('.shell');
-
-    if (!newMain || !currentMain) {
-      window.location.href = url;
-      return;
-    }
-
-    stopRefreshTimers();
-    document.title = doc.title || document.title;
-    currentMain.classList.add('page-exit');
-    setTimeout(() => {
-      currentMain.replaceWith(newMain);
-      newMain.classList.add('page-enter');
-      setTimeout(() => newMain.classList.remove('page-enter'), 220);
-      activeSidebar(targetPath);
-      if (push) history.pushState({ ajax: true }, '', url);
-      initDynamicPage();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 80);
-  }
-
-  async function ajaxNavigate(url, push = true) {
-    const targetPath = new URL(url, window.location.href).pathname;
-    if (requiresFullLoad(targetPath)) {
-      window.location.href = url;
-      return;
-    }
-    if (app.loading) return;
-    setLoading(true);
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'text/html,application/xhtml+xml',
-        },
-        cache: 'no-store',
-      });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const html = await response.text();
-      swapPage(html, url, push);
-    } catch (error) {
-      window.location.href = url;
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function wireAjaxLinks(root = document) {
-    qsa('a', root).forEach((link) => {
-      if (link.dataset.ajaxWired === '1') return;
-      link.dataset.ajaxWired = '1';
-      link.addEventListener('click', (event) => {
-        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        if (!isAjaxSafeLink(link)) return;
-        event.preventDefault();
-        ajaxNavigate(link.href);
-      });
-    });
-  }
-
-  function wireAjaxForms(root = document) {
-    qsa('form', root).forEach((form) => {
-      if (form.dataset.ajaxWired === '1') return;
-      if (form.dataset.noAjax === '1') return;
-      const method = String(form.method || 'GET').toUpperCase();
-      if (method !== 'POST') return;
-      if (form.enctype && form.enctype.includes('multipart')) return;
-      form.dataset.ajaxWired = '1';
-      form.addEventListener('submit', async (event) => {
-        if (event.defaultPrevented) return;
-        const submitter = event.submitter;
-        if (submitter && submitter.classList.contains('danger') && !confirm('Выполнить действие?')) return;
-        event.preventDefault();
-        setLoading(true);
-        try {
-          const response = await fetch(form.action, {
-            method: 'POST',
-            body: new FormData(form),
-            headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            redirect: 'follow',
-          });
-          const finalUrl = response.url || window.location.href;
-          if (response.headers.get('content-type')?.includes('text/html')) {
-            const html = await response.text();
-            swapPage(html, finalUrl, true);
-          } else {
-            await ajaxNavigate(window.location.href, false);
-          }
-        } catch (error) {
-          form.submit();
-        } finally {
-          setLoading(false);
-        }
-      });
     });
   }
 
@@ -186,6 +37,8 @@
   function startAutoRefresh(root = document) {
     const interval = Number(qs('[data-auto-refresh]', root)?.dataset.autoRefresh || 0);
     if (interval > 0) {
+      app.refreshTimers.forEach((timer) => clearInterval(timer));
+      app.refreshTimers = [];
       const timer = setInterval(refreshFragments, interval * 1000);
       app.refreshTimers.push(timer);
       refreshFragments();
@@ -211,17 +64,14 @@
     document.body.appendChild(btn);
   }
 
-  function initDynamicPage() {
-    wireAjaxLinks();
-    wireAjaxForms();
+  function initPanel() {
     wireNavGroups();
     wireMobileMenu();
     activeSidebar();
     startAutoRefresh();
   }
 
-  window.addEventListener('popstate', () => ajaxNavigate(window.location.href, false));
-  document.addEventListener('DOMContentLoaded', initDynamicPage);
+  document.addEventListener('DOMContentLoaded', initPanel);
 })();
 
 /* Virtuality live status + toast layer */
@@ -273,7 +123,7 @@
     });
   }
   function updateDetailHeader(vms) {
-    const title = qs('.brand');
+    const title = qs('.v-title');
     if (!title || !Array.isArray(vms)) return;
     const vm = vms.find((item) => item.name === title.textContent.trim());
     if (!vm) return;
@@ -283,7 +133,7 @@
     badge.textContent = vm.state || 'unknown';
   }
   async function refreshLiveStatus() {
-    if (document.hidden || (!qs('.v-main') && !qs('.shell'))) return;
+    if (document.hidden || !qs('.v-main')) return;
     try {
       const r = await fetch('/live/status', { cache: 'no-store', headers: { 'Accept': 'application/json' }});
       if (!r.ok) return;
