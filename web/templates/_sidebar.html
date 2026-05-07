@@ -8,7 +8,7 @@
     <a class="{{ 'active' if path == '/' else '' }}" href="/">Обзор</a>
     <a class="{{ 'active' if path.startswith('/vm/create') else '' }}" href="/vm/create">Создать VM</a>
     <div class="v-nav-group {{ 'open' if path.startswith('/iso') or path.startswith('/disk-images') else '' }}">
-      <div class="v-nav-group-title">Образы</div>
+      <button class="v-nav-group-title" type="button">Образы</button>
       <a class="{{ 'active' if path.startswith('/iso') else '' }}" href="/iso">ISO</a>
       <a class="{{ 'active' if path.startswith('/disk-images') else '' }}" href="/disk-images">Диски</a>
     </div>
