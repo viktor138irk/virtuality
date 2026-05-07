@@ -115,6 +115,127 @@
   applyTheme(getTheme());
 })();
 
+/* VM visual cards from raw virsh output */
+(() => {
+  function qs(selector, root = document) { return root.querySelector(selector); }
+  function qsa(selector, root = document) { return Array.from(root.querySelectorAll(selector)); }
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  }
+  function rawPreBySummary(summaryText) {
+    const details = qsa('.raw-details').find((item) => (qs('summary', item)?.textContent || '').includes(summaryText));
+    return qs('pre', details)?.textContent.trim() || '';
+  }
+  function parseKeyValues(raw) {
+    const data = {};
+    raw.split('\n').forEach((line) => {
+      const idx = line.indexOf(':');
+      if (idx < 0) return;
+      const key = line.slice(0, idx).trim().toLowerCase();
+      const value = line.slice(idx + 1).trim();
+      if (key) data[key] = value;
+    });
+    return data;
+  }
+  function sizeToGiB(value) {
+    const raw = String(value || '').trim();
+    const n = Number(raw.replace(',', '.').replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    if (/kib|kb/i.test(raw)) return n / 1024 / 1024;
+    if (/mib|mb/i.test(raw)) return n / 1024;
+    if (/gib|gb/i.test(raw)) return n;
+    return n / 1024 / 1024;
+  }
+  function renderInfo() {
+    const box = qs('#vm-info-visual');
+    if (!box) return;
+    const raw = rawPreBySummary('dominfo');
+    const data = parseKeyValues(raw);
+    const cpu = data['cpu(s)'] || data['cpu'] || '—';
+    const state = data.state || 'unknown';
+    const osType = data['os type'] || data['os'] || '—';
+    const maxMem = sizeToGiB(data['max memory']);
+    const usedMem = sizeToGiB(data['used memory']);
+    const memPct = maxMem > 0 ? Math.max(0, Math.min(100, Math.round((usedMem / maxMem) * 100))) : 0;
+    const cpuPct = Math.max(8, Math.min(100, Number(cpu) ? Number(cpu) * 12 : 18));
+    const autostartText = (qsa('.top-meta .status').find((item) => item.textContent.toLowerCase().includes('autostart'))?.textContent || 'autostart: —').replace(/^autostart:\s*/i, '');
+    box.innerHTML = `
+      <div class="metric-strip">
+        <div class="metric-tile"><span>Состояние</span><strong>${escapeHtml(state)}</strong></div>
+        <div class="metric-tile"><span>CPU</span><strong>${escapeHtml(cpu)}</strong></div>
+        <div class="metric-tile"><span>Тип ОС</span><strong>${escapeHtml(osType)}</strong></div>
+      </div>
+      <div class="chart-row">
+        <div class="donut" style="--value:${memPct};--donut-color:var(--accent)"><div class="donut-value">${memPct}%</div></div>
+        <div class="bar-list">
+          <div class="bar-item"><div class="bar-head"><span>Память</span><b>${usedMem ? usedMem.toFixed(1) : '—'} / ${maxMem ? maxMem.toFixed(1) : '—'} GB</b></div><div class="mini-bar"><span style="--value:${memPct}%"></span></div></div>
+          <div class="bar-item"><div class="bar-head"><span>vCPU capacity</span><b>${escapeHtml(cpu)} vCPU</b></div><div class="mini-bar"><span style="--value:${cpuPct}%"></span></div></div>
+          <div class="bar-item"><div class="bar-head"><span>Автозапуск</span><b>${escapeHtml(autostartText)}</b></div><div class="mini-bar"><span style="--value:${/enable|включ/i.test(autostartText) ? 100 : 18}%"></span></div></div>
+        </div>
+      </div>`;
+  }
+  function parseDisks(raw) {
+    const rows = [];
+    raw.split('\n').map((line) => line.trim()).filter(Boolean).forEach((line) => {
+      if (/^(target|type|[-\s]+$)/i.test(line)) return;
+      const parts = line.split(/\s+/);
+      if (parts.length >= 4 && /^(file|block|dir|network|volume)$/i.test(parts[0])) {
+        rows.push({ type: parts[0], device: parts[1], target: parts[2], source: parts.slice(3).join(' ') });
+      } else if (parts.length >= 2) {
+        rows.push({ type: 'file', device: 'disk', target: parts[0], source: parts.slice(1).join(' ') });
+      }
+    });
+    return rows;
+  }
+  function renderDisks() {
+    const box = qs('#vm-disk-visual');
+    if (!box) return;
+    const rows = parseDisks(rawPreBySummary('domblklist'));
+    if (!rows.length) {
+      box.innerHTML = '<div class="visual-empty">Диски не найдены в выводе libvirt.</div>';
+      return;
+    }
+    box.innerHTML = `<div class="visual-list">${rows.map((row) => `
+      <div class="visual-item">
+        <div class="visual-icon">▣</div>
+        <div><b>${escapeHtml(row.target)}</b><small>${escapeHtml(row.device)} · ${escapeHtml(row.type)}<br>${escapeHtml(row.source)}</small></div>
+        <span class="status ok">disk</span>
+      </div>`).join('')}</div>`;
+  }
+  function parseInterfaces(raw) {
+    const rows = [];
+    raw.split('\n').map((line) => line.trim()).filter(Boolean).forEach((line) => {
+      if (/^(interface|[-\s]+$)/i.test(line)) return;
+      const parts = line.split(/\s+/);
+      if (parts.length >= 5) rows.push({ iface: parts[0], type: parts[1], source: parts[2], model: parts[3], mac: parts[4] });
+      else if (parts.length >= 2) rows.push({ iface: parts[0], type: parts[1] || '—', source: parts[2] || '—', model: parts[3] || '—', mac: parts[4] || '—' });
+    });
+    return rows;
+  }
+  function renderNetwork() {
+    const box = qs('#vm-network-visual');
+    if (!box) return;
+    const rows = parseInterfaces(rawPreBySummary('domiflist'));
+    if (!rows.length) {
+      box.innerHTML = '<div class="visual-empty">Сетевые интерфейсы не найдены в выводе libvirt.</div>';
+      return;
+    }
+    box.innerHTML = `<div class="visual-list">${rows.map((row) => `
+      <div class="visual-item">
+        <div class="visual-icon">⇄</div>
+        <div><b>${escapeHtml(row.iface)}</b><small>${escapeHtml(row.type)} · ${escapeHtml(row.source)} · ${escapeHtml(row.model)}<br>${escapeHtml(row.mac)}</small></div>
+        <span class="status ok">link</span>
+      </div>`).join('')}</div>`;
+  }
+  function renderVmVisuals() {
+    if (!qs('#vm-info-visual') && !qs('#vm-disk-visual') && !qs('#vm-network-visual')) return;
+    renderInfo();
+    renderDisks();
+    renderNetwork();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', renderVmVisuals); else renderVmVisuals();
+})();
+
 /* Virtuality live status + toast layer */
 (() => {
   if (window.VirtualityLiveStatus) return;
