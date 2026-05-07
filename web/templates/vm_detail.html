@@ -11,6 +11,7 @@
     {% set is_running = 'running' in vm.dominfo|lower %}
     {% set is_autostart = vm.autostart_enabled|default(false) %}
     {% set autostart_label = 'enabled' if is_autostart else 'disabled' %}
+    {% set rs = resource_settings|default({}) %}
 
     <aside class="v-sidebar">
       <div class="v-logo">
@@ -48,6 +49,13 @@
           <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
         </div>
       </header>
+
+      {% if resource_message %}<div class="alert success">{{ resource_message }}</div>{% endif %}
+      {% if resource_error %}<div class="alert danger">{{ resource_error }}</div>{% endif %}
+      {% if iso_message %}<div class="alert success">{{ iso_message }}</div>{% endif %}
+      {% if iso_error %}<div class="alert danger">{{ iso_error }}</div>{% endif %}
+      {% if boot_message %}<div class="alert success">{{ boot_message }}</div>{% endif %}
+      {% if boot_error %}<div class="alert danger">{{ boot_error }}</div>{% endif %}
 
       <section class="card">
         <div class="card-head">
@@ -98,6 +106,87 @@
         </div>
       </section>
 
+      <section class="grid three vm-resource-boot-iso-grid">
+        <article class="card">
+          <div class="card-head">
+            <h2>CPU / RAM / Архитектура</h2>
+            <span class="pill">resources</span>
+          </div>
+          <form method="post" action="/vm/{{ vm.name }}/resources" class="form-grid">
+            <div class="form-row">
+              <label>
+                <span>CPU</span>
+                <input type="number" name="vcpus" min="1" max="128" value="{{ rs.vcpus|default(1) }}" {% if is_running %}disabled{% endif %} required>
+              </label>
+              <label>
+                <span>RAM, MB</span>
+                <input type="number" name="memory_mb" min="512" max="262144" step="512" value="{{ rs.memory_mb|default(1024) }}" {% if is_running %}disabled{% endif %} required>
+              </label>
+            </div>
+            <label>
+              <span>Архитектура</span>
+              <select name="guest_arch" {% if is_running %}disabled{% endif %}>
+                <option value="keep">Не менять — {{ rs.arch|default('unknown') }}</option>
+                <option value="x86_64">x86_64 / amd64</option>
+                <option value="aarch64">ARM64 / aarch64</option>
+              </select>
+            </label>
+            <button class="primary wide" type="submit" {% if is_running %}disabled{% endif %}>Сохранить ресурсы VM</button>
+          </form>
+          {% if is_running %}
+            <p class="muted small-note">CPU/RAM/архитектуру можно менять только при выключенной VM.</p>
+          {% else %}
+            <p class="muted small-note">Изменения применяются через XML VM и virsh define.</p>
+          {% endif %}
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>ISO-привод</h2>
+            <span class="pill">cdrom</span>
+          </div>
+          {% if current_iso %}
+            <div class="notice">Сейчас подключен ISO: <b>{{ current_iso }}</b></div>
+          {% else %}
+            <div class="muted small-note">ISO сейчас не подключён.</div>
+          {% endif %}
+          <form method="post" action="/vm/{{ vm.name }}/iso/mount" class="form-grid">
+            <label>
+              <span>ISO образ</span>
+              <select name="iso_path" required>
+                {% for iso in isos|default([]) %}
+                  <option value="{{ iso.path }}" {% if current_iso == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button class="primary wide" type="submit" {% if not isos %}disabled{% endif %}>Смонтировать ISO</button>
+          </form>
+          <form method="post" action="/vm/{{ vm.name }}/iso/unmount" class="form-grid" onsubmit="return confirm('Отмонтировать ISO из VM {{ vm.name }}?');">
+            <button type="submit" class="ghost wide" {% if not current_iso %}disabled{% endif %}>Отмонтировать ISO</button>
+          </form>
+          {% if not isos %}
+            <div class="alert danger">ISO-образов пока нет. Сначала загрузи .iso в разделе ISO.</div>
+          {% endif %}
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Порядок загрузки</h2>
+            <span class="pill">drag-and-drop</span>
+          </div>
+          <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid boot-order-form">
+            <input type="hidden" name="boot_order" id="boot-order-value" value="{{ current_boot_order|default('auto') }}">
+            <div class="boot-order-list" id="boot-order-list" data-current="{{ current_boot_order|default('auto') }}">
+              <div class="boot-order-item" draggable="true" data-device="cdrom"><span class="drag-handle">☰</span><div><b>ISO / CD-ROM</b><small>Установщик или rescue-образ</small></div></div>
+              <div class="boot-order-item" draggable="true" data-device="hd"><span class="drag-handle">☰</span><div><b>Диск</b><small>Основной диск VM</small></div></div>
+              <div class="boot-order-item" draggable="true" data-device="network"><span class="drag-handle">☰</span><div><b>Сеть / PXE</b><small>Загрузка по сети</small></div></div>
+            </div>
+            <button class="primary wide" type="submit">Применить порядок загрузки</button>
+          </form>
+          <p class="muted small-note">Перетащи источник выше. Изменение работает после перезапуска VM.</p>
+        </article>
+      </section>
+
       <section class="grid two">
         <article class="card">
           <div class="card-head">
@@ -140,6 +229,46 @@
       </section>
     </main>
   </div>
+
+  <script>
+    (function(){
+      const list = document.getElementById('boot-order-list');
+      const input = document.getElementById('boot-order-value');
+      if (!list || !input) return;
+      const initialMap = {
+        cdrom_disk: ['cdrom','hd','network'],
+        disk_cdrom: ['hd','cdrom','network'],
+        network_disk: ['network','hd','cdrom'],
+        disk: ['hd','cdrom','network'],
+        auto: ['hd','cdrom','network']
+      };
+      const order = initialMap[list.dataset.current || 'auto'] || initialMap.auto;
+      const nodes = Array.from(list.querySelectorAll('.boot-order-item'));
+      order.forEach(device => { const node = nodes.find(item => item.dataset.device === device); if (node) list.appendChild(node); });
+      function updateValue(){
+        const devices = Array.from(list.querySelectorAll('.boot-order-item')).map(item => item.dataset.device);
+        const first = devices[0]; const second = devices[1];
+        if (first === 'cdrom' && second === 'hd') input.value = 'cdrom_disk';
+        else if (first === 'hd' && second === 'cdrom') input.value = 'disk_cdrom';
+        else if (first === 'network' && second === 'hd') input.value = 'network_disk';
+        else if (first === 'hd') input.value = 'disk';
+        else input.value = 'auto';
+      }
+      let dragged = null;
+      list.addEventListener('dragstart', event => { dragged = event.target.closest('.boot-order-item'); if (!dragged) return; dragged.classList.add('dragging'); event.dataTransfer.effectAllowed = 'move'; });
+      list.addEventListener('dragend', () => { if (dragged) dragged.classList.remove('dragging'); dragged = null; updateValue(); });
+      list.addEventListener('dragover', event => {
+        event.preventDefault();
+        const after = Array.from(list.querySelectorAll('.boot-order-item:not(.dragging)')).find(item => {
+          const box = item.getBoundingClientRect();
+          return event.clientY < box.top + box.height / 2;
+        });
+        if (!dragged) return;
+        if (after) list.insertBefore(dragged, after); else list.appendChild(dragged);
+      });
+      updateValue();
+    })();
+  </script>
   <script src="/static/panel.js" defer></script>
 </body>
 </html>
