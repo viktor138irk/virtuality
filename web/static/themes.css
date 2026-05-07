@@ -1,0 +1,205 @@
+/* Virtuality theme layer. Default theme is Neon from app.css. */
+html[data-theme="macos"] {
+  --bg: #f5f5f7;
+  --bg-soft: #ffffff;
+  --panel: rgba(255, 255, 255, .92);
+  --panel-solid: #ffffff;
+  --panel-2: #f2f2f7;
+  --line: rgba(60, 60, 67, .14);
+  --line-strong: rgba(60, 60, 67, .24);
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --muted-2: #8e8e93;
+  --accent: #007aff;
+  --accent-2: #0a84ff;
+  --accent-glow: rgba(0, 122, 255, .12);
+  --green: #34c759;
+  --yellow: #ff9f0a;
+  --red: #ff3b30;
+  --purple: #af52de;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --shadow: 0 20px 55px rgba(0, 0, 0, .08);
+  --shadow-soft: 0 8px 28px rgba(0, 0, 0, .06);
+}
+
+html[data-theme="macos"] body {
+  background: linear-gradient(180deg, #fbfbfd 0%, #f5f5f7 48%, #ededf2 100%);
+  color: var(--text);
+}
+html[data-theme="macos"] body::before { display: none; }
+
+html[data-theme="macos"] .v-sidebar {
+  background: rgba(246, 246, 248, .88);
+  color: var(--text);
+  border-right: 1px solid var(--line);
+  box-shadow: 10px 0 30px rgba(0, 0, 0, .035);
+  backdrop-filter: saturate(180%) blur(22px);
+}
+html[data-theme="macos"] .v-logo { border-bottom-color: var(--line); }
+html[data-theme="macos"] .v-logo::before {
+  color: #fff;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #007aff, #5e5ce6);
+  box-shadow: none;
+}
+html[data-theme="macos"] .v-logo span,
+html[data-theme="macos"] .v-nav-group-title,
+html[data-theme="macos"] .muted,
+html[data-theme="macos"] .small-note,
+html[data-theme="macos"] .v-subtitle,
+html[data-theme="macos"] .service-row small,
+html[data-theme="macos"] .big-action span,
+html[data-theme="macos"] .knowledge-list span,
+html[data-theme="macos"] .meta-grid span { color: var(--muted); }
+
+html[data-theme="macos"] .v-nav a,
+html[data-theme="macos"] .v-nav-group-title {
+  color: #3a3a3c;
+  border-radius: 10px;
+  font-weight: 700;
+}
+html[data-theme="macos"] .v-nav a:hover,
+html[data-theme="macos"] .v-nav-group-title:hover {
+  color: var(--text);
+  background: rgba(0, 0, 0, .045);
+  border-color: transparent;
+  transform: none;
+}
+html[data-theme="macos"] .v-nav a.active {
+  color: #fff;
+  background: #007aff;
+  border-color: transparent;
+  box-shadow: none;
+}
+html[data-theme="macos"] .v-nav a.active::before { display: none; }
+html[data-theme="macos"] .v-nav-group { background: transparent; border-color: transparent; }
+html[data-theme="macos"] .v-nav-group.open { background: rgba(0, 0, 0, .035); border-color: transparent; }
+html[data-theme="macos"] .v-nav-bottom { border-top-color: var(--line) !important; }
+
+html[data-theme="macos"] .v-topbar,
+html[data-theme="macos"] .topbar,
+html[data-theme="macos"] .card,
+html[data-theme="macos"] .auth-card {
+  background: rgba(255, 255, 255, .86);
+  border: 1px solid rgba(60, 60, 67, .12);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: saturate(180%) blur(18px);
+}
+html[data-theme="macos"] .card::before { display: none; }
+html[data-theme="macos"] .v-title,
+html[data-theme="macos"] .brand,
+html[data-theme="macos"] h2,
+html[data-theme="macos"] .value,
+html[data-theme="macos"] .strong { color: var(--text); }
+html[data-theme="macos"] .label,
+html[data-theme="macos"] th { color: #86868b; font-weight: 700; }
+html[data-theme="macos"] .top-meta span,
+html[data-theme="macos"] .pill,
+html[data-theme="macos"] .link-pill {
+  color: #3a3a3c;
+  background: #f2f2f7;
+  border-color: rgba(60, 60, 67, .12);
+  box-shadow: none;
+}
+html[data-theme="macos"] .link-pill:hover {
+  color: #007aff;
+  background: #e8f1ff;
+  border-color: rgba(0, 122, 255, .18);
+}
+html[data-theme="macos"] .link-pill.accent,
+html[data-theme="macos"] button.primary,
+html[data-theme="macos"] .icon-action.accent {
+  color: #fff;
+  background: #007aff;
+  border-color: #007aff;
+  box-shadow: none;
+}
+html[data-theme="macos"] .link-pill.accent:hover,
+html[data-theme="macos"] button.primary:hover,
+html[data-theme="macos"] .icon-action.accent:hover {
+  color: #fff;
+  filter: none;
+  transform: none;
+  background: #0a84ff;
+}
+
+html[data-theme="macos"] table { border-spacing: 0 7px; }
+html[data-theme="macos"] td { color: var(--text); background: #fff; border-color: rgba(60, 60, 67, .10); }
+html[data-theme="macos"] tbody tr:hover td { background: #f7f7fa; border-color: rgba(0, 122, 255, .18); }
+html[data-theme="macos"] .table-link { color: #007aff; }
+
+html[data-theme="macos"] button,
+html[data-theme="macos"] .icon-action {
+  color: #1d1d1f;
+  background: #f2f2f7;
+  border-color: rgba(60, 60, 67, .12);
+  border-radius: 10px;
+  box-shadow: none;
+  font-weight: 700;
+}
+html[data-theme="macos"] button:hover,
+html[data-theme="macos"] .icon-action:hover {
+  transform: none;
+  color: #007aff;
+  background: #e8f1ff;
+  border-color: rgba(0, 122, 255, .18);
+}
+html[data-theme="macos"] button.danger,
+html[data-theme="macos"] .icon-action.danger {
+  color: #ff3b30;
+  background: #fff1f0;
+  border-color: rgba(255, 59, 48, .18);
+}
+html[data-theme="macos"] .icon-action.success {
+  color: #248a3d;
+  background: #edf9f0;
+  border-color: rgba(52, 199, 89, .22);
+}
+
+html[data-theme="macos"] input,
+html[data-theme="macos"] select {
+  color: var(--text);
+  background: #fff;
+  border-color: rgba(60, 60, 67, .16);
+  border-radius: 10px;
+}
+html[data-theme="macos"] input:focus,
+html[data-theme="macos"] select:focus {
+  border-color: rgba(0, 122, 255, .55);
+  box-shadow: 0 0 0 4px rgba(0, 122, 255, .10);
+}
+html[data-theme="macos"] .form-subcard,
+html[data-theme="macos"] .upload-box {
+  background: #f5f5f7;
+  border-color: rgba(0, 122, 255, .22);
+}
+html[data-theme="macos"] .service-row,
+html[data-theme="macos"] .big-action,
+html[data-theme="macos"] .knowledge-list div,
+html[data-theme="macos"] .meta-grid div {
+  background: #f7f7fa;
+  border-color: rgba(60, 60, 67, .10);
+}
+html[data-theme="macos"] .service-link:hover,
+html[data-theme="macos"] .big-action:hover { background: #eef5ff; border-color: rgba(0, 122, 255, .18); }
+
+html[data-theme="macos"] .status::before { box-shadow: none; }
+html[data-theme="macos"] .status.ok { color: #248a3d; background: #edf9f0; }
+html[data-theme="macos"] .status.warn { color: #b26a00; background: #fff7e6; }
+html[data-theme="macos"] .status.err { color: #d70015; background: #fff1f0; }
+html[data-theme="macos"] .notice { color: #004b8d; background: #eef7ff; border-color: rgba(0, 122, 255, .18); }
+html[data-theme="macos"] .alert.danger { color: #d70015; background: #fff1f0; border-color: rgba(255, 59, 48, .20); }
+html[data-theme="macos"] .alert.success { color: #248a3d; background: #edf9f0; border-color: rgba(52, 199, 89, .20); }
+html[data-theme="macos"] pre { color: #1d1d1f; background: #f2f2f7; border-color: rgba(60, 60, 67, .12); }
+html[data-theme="macos"] .progress { background: #e5e5ea; border-color: rgba(60, 60, 67, .10); }
+html[data-theme="macos"] .progress span { background: #007aff; box-shadow: none; }
+html[data-theme="macos"] .upload-progress-wrap { background: #eef7ff; border-color: rgba(0, 122, 255, .18); }
+html[data-theme="macos"] .upload-progress-head span { color: #007aff; }
+
+.theme-switcher { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border-top: 1px solid var(--line); }
+.theme-switcher-label { color: var(--muted); font-size: 10px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
+.theme-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.theme-button { min-height: 34px; padding: 7px 9px; border-radius: 10px; font-size: 12px; }
+.theme-button.is-active { color: #00111f; background: linear-gradient(135deg, var(--accent), #60a5fa); border-color: transparent; }
+html[data-theme="macos"] .theme-button.is-active { color: #fff; background: #007aff; }
