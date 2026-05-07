@@ -7,150 +7,169 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div>
-        <div class="brand">Создать VM</div>
-        <div class="muted">Новая виртуальная машина через libvirt / virt-install</div>
+  <div class="v-layout">
+    <aside class="v-sidebar">
+      <div class="v-logo">
+        <strong>Virtuality</strong>
+        <span>control panel</span>
       </div>
-      <div class="top-meta">
-        <span>user: {{ user }}</span>
-        <a class="link-pill" href="/network">Сеть</a>
-        <a class="link-pill" href="/operations">Операции</a>
-        <a class="link-pill" href="/iso">ISO</a>
-        <a class="link-pill" href="/disk-images">Диски</a>
-        <a class="link-pill" href="/">← Дашборд</a>
-        <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-      </div>
-    </header>
-
-    {% if error %}
-      <div class="alert danger">{{ error }}</div>
-    {% endif %}
-
-    <section class="grid two">
-      <article class="card">
-        <div class="card-head">
-          <h2>Параметры</h2>
-          <span class="pill">VM wizard</span>
+      <nav class="v-nav">
+        <a href="/">Обзор</a>
+        <a class="active" href="/vm/create">Создать VM</a>
+        <div class="v-nav-group open">
+          <button class="v-nav-group-title" type="button">Образы</button>
+          <a href="/iso">ISO</a>
+          <a href="/disk-images">Диски</a>
         </div>
+        <a href="/network">Сеть</a>
+        <a href="/operations">Операции</a>
+        <a href="/logs">Журналы</a>
+        <a href="/update">Обновления</a>
+        <a href="/host">Хост</a>
+      </nav>
+    </aside>
 
-        <form method="post" action="/vm/create" class="form-grid">
-          <label>
-            <span>Имя VM</span>
-            <input type="text" name="name" value="{{ form.name or '' }}" placeholder="ubuntu-test" required>
-          </label>
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">Создать VM</div>
+          <div class="v-subtitle">Новая виртуальная машина через libvirt / virt-install</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
 
-          <div class="form-row">
+      {% if error %}
+        <div class="alert danger">{{ error }}</div>
+      {% endif %}
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Параметры</h2>
+            <span class="pill">VM wizard</span>
+          </div>
+
+          <form method="post" action="/vm/create" class="form-grid">
             <label>
-              <span>Источник VM</span>
-              <select id="source-type" name="source_type" required>
-                <option value="iso" {% if form.source_type != 'disk_image' %}selected{% endif %}>ISO-установщик</option>
-                <option value="disk_image" {% if form.source_type == 'disk_image' %}selected{% endif %}>Готовый диск .img / .raw / .qcow2</option>
-              </select>
+              <span>Имя VM</span>
+              <input type="text" name="name" value="{{ form.name or '' }}" placeholder="ubuntu-test" required>
             </label>
-            <label>
-              <span>Архитектура VM</span>
-              <select name="guest_arch" required>
-                {% for arch in arch_options %}
-                  <option value="{{ arch.value }}" {% if form.guest_arch == arch.value %}selected{% endif %}>{{ arch.label }}</option>
+
+            <div class="form-row">
+              <label>
+                <span>Источник VM</span>
+                <select id="source-type" name="source_type" required>
+                  <option value="iso" {% if form.source_type != 'disk_image' %}selected{% endif %}>ISO-установщик</option>
+                  <option value="disk_image" {% if form.source_type == 'disk_image' %}selected{% endif %}>Готовый диск .img / .raw / .qcow2</option>
+                </select>
+              </label>
+              <label>
+                <span>Архитектура VM</span>
+                <select name="guest_arch" required>
+                  {% for arch in arch_options %}
+                    <option value="{{ arch.value }}" {% if form.guest_arch == arch.value %}selected{% endif %}>{{ arch.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
+
+            <div class="form-row">
+              <label>
+                <span>RAM, MB</span>
+                <input type="number" name="memory" min="512" max="262144" step="512" value="{{ form.memory }}" required>
+              </label>
+              <label>
+                <span>CPU</span>
+                <input type="number" name="vcpus" min="1" max="128" value="{{ form.vcpus }}" required>
+              </label>
+            </div>
+
+            <label id="disk-size-row">
+              <span>Диск, GB</span>
+              <input type="number" name="disk_size" min="4" max="4096" value="{{ form.disk_size }}" required>
+            </label>
+
+            <label id="iso-source-row">
+              <span id="source-image-label">ISO образ</span>
+              <select name="iso_path">
+                {% for iso in isos %}
+                  <option value="{{ iso.path }}" {% if form.iso_path == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
                 {% endfor %}
               </select>
             </label>
-          </div>
 
-          <div class="form-row">
+            <div id="disk-image-source-row" class="form-subcard">
+              <label>
+                <span id="disk-image-label">Готовый образ диска</span>
+                <select name="disk_image_path">
+                  {% for image in disk_images %}
+                    <option value="{{ image.path }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.name }} — {{ image.size }} — {{ image.format }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" name="replace_existing_disk" value="1" {% if form.replace_existing_disk == '1' %}checked{% endif %}>
+                <span>Заменить существующий диск VM, если остался после неудачной установки</span>
+              </label>
+              <div class="muted small-note">Опция нужна, если предыдущая попытка создания VM оборвалась и оставила хвост в /var/lib/virtuality/images.</div>
+            </div>
+
             <label>
-              <span>RAM, MB</span>
-              <input type="number" name="memory" min="512" max="262144" step="512" value="{{ form.memory }}" required>
-            </label>
-            <label>
-              <span>CPU</span>
-              <input type="number" name="vcpus" min="1" max="128" value="{{ form.vcpus }}" required>
-            </label>
-          </div>
-
-          <label id="disk-size-row">
-            <span>Диск, GB</span>
-            <input type="number" name="disk_size" min="4" max="4096" value="{{ form.disk_size }}" required>
-          </label>
-
-          <label id="iso-source-row">
-            <span id="source-image-label">ISO образ</span>
-            <select name="iso_path">
-              {% for iso in isos %}
-                <option value="{{ iso.path }}" {% if form.iso_path == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
-              {% endfor %}
-            </select>
-          </label>
-
-          <div id="disk-image-source-row" class="form-subcard">
-            <label>
-              <span id="disk-image-label">Готовый образ диска</span>
-              <select name="disk_image_path">
-                {% for image in disk_images %}
-                  <option value="{{ image.path }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.name }} — {{ image.size }} — {{ image.format }}</option>
-                {% endfor %}
+              <span>Режим сети</span>
+              <select name="network_mode" required>
+                <option value="nat" {% if form.network_mode != 'bridge' %}selected{% endif %}>VPS NAT Router — virtuality-nat</option>
+                <option value="bridge" {% if form.network_mode == 'bridge' %}selected{% endif %}>Bridge — br0 / локальная сеть</option>
               </select>
             </label>
-            <label class="check-row">
-              <input type="checkbox" name="replace_existing_disk" value="1" {% if form.replace_existing_disk == '1' %}checked{% endif %}>
-              <span>Заменить существующий диск VM, если остался после неудачной установки</span>
+
+            <label>
+              <span>Bridge для режима Bridge</span>
+              <input type="text" name="bridge" value="{{ form.bridge }}" placeholder="br0">
             </label>
-            <div class="muted small-note">Опция нужна, если предыдущая попытка создания VM оборвалась и оставила хвост в /var/lib/virtuality/images.</div>
-          </div>
 
-          <label>
-            <span>Режим сети</span>
-            <select name="network_mode" required>
-              <option value="nat" {% if form.network_mode != 'bridge' %}selected{% endif %}>VPS NAT Router — virtuality-nat</option>
-              <option value="bridge" {% if form.network_mode == 'bridge' %}selected{% endif %}>Bridge — br0 / локальная сеть</option>
-            </select>
-          </label>
+            <div id="source-mode-notice" class="notice">
+              Для обычных ISO выбирай x86_64 на ПК/VPS. Для Raspberry/Orange Pi образов обычно нужен ARM64/aarch64 и источник “Готовый диск”. Опция замены диска удаляет только /var/lib/virtuality/images/ИМЯ_VM.qcow2, если VM с таким именем ещё не существует.
+            </div>
 
-          <label>
-            <span>Bridge для режима Bridge</span>
-            <input type="text" name="bridge" value="{{ form.bridge }}" placeholder="br0">
-          </label>
+            <button id="create-vm-button" type="submit" class="primary wide">Создать виртуальную машину</button>
+            {% if not isos %}
+              <div id="iso-missing-warning" class="alert danger">Для режима ISO сначала загрузи ISO-образ в ISO-менеджере.</div>
+            {% endif %}
+            {% if not disk_images %}
+              <div id="disk-image-missing-warning" class="alert danger">Для режима готового диска сначала загрузи .img, .raw или .qcow2 в разделе «Диски».</div>
+            {% endif %}
+          </form>
+        </article>
 
-          <div id="source-mode-notice" class="notice">
-            Для обычных ISO выбирай x86_64 на ПК/VPS. Для Raspberry/Orange Pi образов обычно нужен ARM64/aarch64 и источник “Готовый диск”. Опция замены диска удаляет только /var/lib/virtuality/images/ИМЯ_VM.qcow2, если VM с таким именем ещё не существует.
+        <article class="card">
+          <div class="card-head">
+            <h2>Архитектура и источник</h2>
+            <a class="link-pill" href="/disk-images">Открыть диски</a>
           </div>
-
-          <button id="create-vm-button" type="submit" class="primary wide">Создать виртуальную машину</button>
-          {% if not isos %}
-            <div id="iso-missing-warning" class="alert danger">Для режима ISO сначала загрузи ISO-образ в ISO-менеджере.</div>
-          {% endif %}
-          {% if not disk_images %}
-            <div id="disk-image-missing-warning" class="alert danger">Для режима готового диска сначала загрузи .img, .raw или .qcow2 в разделе «Диски».</div>
-          {% endif %}
-        </form>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <h2>Архитектура и источник</h2>
-          <a class="link-pill" href="/disk-images">Открыть диски</a>
-        </div>
-        <div class="quick-actions">
-          <div class="big-action static">
-            <strong>x86_64 / amd64</strong>
-            <span>Обычные ПК, серверы, большинство VPS и стандартные Ubuntu/Debian ISO.</span>
+          <div class="quick-actions">
+            <div class="big-action static">
+              <strong>x86_64 / amd64</strong>
+              <span>Обычные ПК, серверы, большинство VPS и стандартные Ubuntu/Debian ISO.</span>
+            </div>
+            <div class="big-action static">
+              <strong>ARM64 / aarch64</strong>
+              <span>На x86-хосте работает как QEMU-эмуляция из готового диска .img/.qcow2. Это медленно, но честно.</span>
+            </div>
+            <div class="big-action static">
+              <strong>Готовый диск</strong>
+              <span>Virtuality импортирует .img/.raw/.qcow2 в отдельный qcow2-диск VM, не изменяя оригинал.</span>
+            </div>
           </div>
-          <div class="big-action static">
-            <strong>ARM64 / aarch64</strong>
-            <span>На x86-хосте работает как QEMU-эмуляция из готового диска .img/.qcow2. Это медленно, но честно.</span>
-          </div>
-          <div class="big-action static">
-            <strong>Готовый диск</strong>
-            <span>Virtuality импортирует .img/.raw/.qcow2 в отдельный qcow2-диск VM, не изменяя оригинал.</span>
-          </div>
-        </div>
-        <pre>ISO x86: virt-install --arch x86_64 --cdrom ubuntu.iso
+          <pre>ISO x86: virt-install --arch x86_64 --cdrom ubuntu.iso
 IMG ARM: qemu-img convert -O qcow2 image.img VM.qcow2
          virsh define /tmp/virtuality-VM-arm64.xml && virsh start VM</pre>
-      </article>
-    </section>
+        </article>
+      </section>
+    </main>
   </div>
 
   <script>
@@ -186,5 +205,6 @@ IMG ARM: qemu-img convert -O qcow2 image.img VM.qcow2
     sourceType.addEventListener('change', refreshSourceUI);
     refreshSourceUI();
   </script>
+  <script src="/static/panel.js" defer></script>
 </body>
 </html>
