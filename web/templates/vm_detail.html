@@ -77,6 +77,8 @@
       {% if boot_error %}<div class="alert danger">{{ boot_error }}</div>{% endif %}
       {% if clone_message %}<div class="alert success">{{ clone_message }}</div>{% endif %}
       {% if clone_error %}<div class="alert danger">{{ clone_error }}</div>{% endif %}
+      {% if snap_message %}<div class="alert success">{{ snap_message }}</div>{% endif %}
+      {% if snap_error %}<div class="alert danger">{{ snap_error }}</div>{% endif %}
       {% if is_template %}<div class="alert warn">Эта VM помечена как шаблон: запуск заблокирован. Клонируй её для создания новых машин.</div>{% endif %}
 
       <section class="grid vm-four-grid">
@@ -245,6 +247,53 @@
             <pre>{{ vm.interfaces }}</pre>
           </details>
         </article>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Снапшоты</h2>
+          <span class="pill">{{ snapshots|length }} шт.</span>
+        </div>
+        <form method="post" action="/vm/{{ vm.name }}/snapshot/create" class="form-grid">
+          <div class="form-row">
+            <label>
+              <span>Имя снапшота</span>
+              <input type="text" name="snapshot_name" placeholder="before-update" required>
+            </label>
+            <label>
+              <span>Комментарий (необязательно)</span>
+              <input type="text" name="description" placeholder="перед обновлением nginx">
+            </label>
+          </div>
+          <button class="primary">Создать снапшот</button>
+        </form>
+        <table>
+          <thead>
+            <tr><th>Имя</th><th>Создан</th><th>Состояние VM</th><th>Действия</th></tr>
+          </thead>
+          <tbody>
+          {% for snap in snapshots %}
+            <tr>
+              <td class="strong">{{ snap.name }}</td>
+              <td>{{ snap.created }}</td>
+              <td><span class="status {{ snap.state_css }}">{{ snap.state }}</span></td>
+              <td class="actions">
+                <form method="post" action="/vm/{{ vm.name }}/snapshot/revert" onsubmit="return confirm('Откатить VM {{ vm.name }} к снапшоту {{ snap.name }}? Текущее состояние диска будет потеряно.');">
+                  <input type="hidden" name="snapshot_name" value="{{ snap.name }}">
+                  <button class="ghost">Откатиться</button>
+                </form>
+                <form method="post" action="/vm/{{ vm.name }}/snapshot/delete" onsubmit="return confirm('Удалить снапшот {{ snap.name }}?');">
+                  <input type="hidden" name="snapshot_name" value="{{ snap.name }}">
+                  <button class="danger">Удалить</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="muted">Снапшотов пока нет. Создай снапшот перед рискованными изменениями — к нему можно будет откатиться одной кнопкой.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted small-note">Снапшот работающей VM сохраняет и память — VM продолжит работу с того же места после отката. Снапшот выключенной VM сохраняет только диск.</p>
       </section>
 
       <section class="grid two">

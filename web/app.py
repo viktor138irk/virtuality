@@ -785,6 +785,44 @@ def valid_vm_name(name: str) -> bool:
     return bool(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}", name or ""))
 
 
+def valid_snapshot_name(name: str) -> bool:
+    return bool(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}", name or ""))
+
+
+def list_vm_snapshots(name: str) -> list[dict[str, str]]:
+    result = run_cmd(["virsh", "snapshot-list", name], timeout=20)
+    snapshots = []
+    if not result["ok"]:
+        return snapshots
+    for line in result["stdout"].splitlines()[2:]:
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        rest = parts[1].strip()
+        state = rest.split()[-1] if rest else ""
+        created = rest[: -len(state)].strip() if state else rest
+        snapshots.append({"name": parts[0], "created": created, "state": state, "state_css": "ok" if state == "running" else "warn"})
+    return snapshots
+
+
+def snapshot_action(vm_name: str, action: str, snapshot_name: str, description: str = "") -> tuple[bool, str]:
+    if not valid_snapshot_name(snapshot_name):
+        return False, "Имя снапшота: латиница, цифры, точка, дефис, подчёркивание, до 63 символов."
+    if action == "create":
+        cmd = ["virsh", "snapshot-create-as", vm_name, snapshot_name]
+        if description:
+            cmd += ["--description", description[:200]]
+        result = run_cmd(cmd, timeout=600)
+        return (True, f"Снапшот {snapshot_name} создан") if result["ok"] else (False, result["stderr"][:300] or "virsh snapshot-create-as завершился с ошибкой")
+    if action == "revert":
+        result = run_cmd(["virsh", "snapshot-revert", vm_name, snapshot_name], timeout=600)
+        return (True, f"VM откачена к снапшоту {snapshot_name}") if result["ok"] else (False, result["stderr"][:300] or "virsh snapshot-revert завершился с ошибкой")
+    if action == "delete":
+        result = run_cmd(["virsh", "snapshot-delete", vm_name, snapshot_name], timeout=300)
+        return (True, f"Снапшот {snapshot_name} удалён") if result["ok"] else (False, result["stderr"][:300] or "virsh snapshot-delete завершился с ошибкой")
+    return False, "Неизвестное действие со снапшотом."
+
+
 VM_TEMPLATES_FILE = Path("/var/lib/virtuality/config/vm_templates.json")
 VM_TEMPLATES_LOCK = threading.Lock()
 
@@ -1983,7 +2021,7 @@ def vm_detail_page(request: Request, name: str):
         return auth_redirect
     if not valid_vm_name(name) or not vm_exists(name):
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("vm_detail.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vm": vm_details(name), "host_ip": system_summary()["ip"], "boot_options": vm_boot_order_options(), "current_boot_order": current_vm_boot_order(name), "boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", ""), "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", ""), "is_template": is_vm_template(name), "clone_message": request.query_params.get("clone_message", ""), "clone_error": request.query_params.get("clone_error", "")})
+    return templates.TemplateResponse("vm_detail.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vm": vm_details(name), "host_ip": system_summary()["ip"], "boot_options": vm_boot_order_options(), "current_boot_order": current_vm_boot_order(name), "boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", ""), "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", ""), "is_template": is_vm_template(name), "clone_message": request.query_params.get("clone_message", ""), "clone_error": request.query_params.get("clone_error", ""), "snapshots": list_vm_snapshots(name), "snap_message": request.query_params.get("snap_message", ""), "snap_error": request.query_params.get("snap_error", "")})
 
 
 @app.post("/vm/{name}/resources")
@@ -2028,6 +2066,20 @@ def vm_iso_unmount_apply(request: Request, name: str):
     if ok:
         return RedirectResponse(url=f"/vm/{name}?iso_message={message}", status_code=303)
     return RedirectResponse(url=f"/vm/{name}?iso_error={message}", status_code=303)
+
+
+@app.post("/vm/{name}/snapshot/{snap_action}")
+def vm_snapshot_apply(request: Request, name: str, snap_action: str, snapshot_name: str = Form(...), description: str = Form("")):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    if not valid_vm_name(name) or not vm_exists(name):
+        return RedirectResponse(url="/", status_code=303)
+    if snap_action not in ("create", "revert", "delete"):
+        return JSONResponse({"ok": False, "error": "Unsupported snapshot action"}, status_code=400)
+    ok, message = snapshot_action(name, snap_action, snapshot_name.strip(), description.strip())
+    param = "snap_message" if ok else "snap_error"
+    return RedirectResponse(url=f"/vm/{name}?{param}={message}", status_code=303)
 
 
 @app.post("/vm/{name}/clone")
