@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Бэкапы — {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="v-layout">
+    {% include "_sidebar.html" %}
+
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">Бэкапы</div>
+          <div class="v-subtitle">Сжатые копии дисков VM в /var/lib/virtuality/backups с ротацией и ночным расписанием</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
+
+      {% if error %}<div class="alert danger">{{ error }}</div>{% endif %}
+      {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Сделать бэкап сейчас</h2>
+            <span class="pill">qemu-img convert -c</span>
+          </div>
+          <form method="post" action="/backups/create" class="form-grid">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>
+              <span>Виртуальная машина</span>
+              <select name="vm_name" {% if vms %}required{% endif %}>
+                {% for vm in vms %}
+                  <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button class="primary wide" {% if not vms %}disabled{% endif %}>Создать бэкап</button>
+            {% if not vms %}<div class="alert danger">VM пока нет.</div>{% endif %}
+          </form>
+          <p class="muted small-note">Работающая VM ставится на паузу на время копирования диска и продолжает работу автоматически. Бэкап сжимается — занимает заметно меньше исходного диска.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Ночное расписание</h2>
+            <span class="pill">{{ 'включено' if schedule.enabled else 'выключено' }}</span>
+          </div>
+          <form method="post" action="/backups/schedule" class="form-grid">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label class="check-row">
+              <input type="checkbox" name="enabled" value="1" {% if schedule.enabled %}checked{% endif %}>
+              <span>Делать бэкапы каждую ночь (04:30 по Москве)</span>
+            </label>
+            <label>
+              <span>Хранить копий на VM</span>
+              <input type="number" name="keep" min="1" max="30" value="{{ schedule.keep }}" required>
+            </label>
+            <div class="label">Какие VM бэкапить</div>
+            {% for vm in vms %}
+              <label class="check-row">
+                <input type="checkbox" name="vms" value="{{ vm.name }}" {% if vm.name in schedule.vms %}checked{% endif %}>
+                <span>{{ vm.name }}</span>
+              </label>
+            {% else %}
+              <div class="muted small-note">VM пока нет — расписание можно настроить после их создания.</div>
+            {% endfor %}
+            <button class="primary wide">Сохранить расписание</button>
+          </form>
+          <p class="muted small-note">Старые копии сверх лимита удаляются автоматически после каждого успешного бэкапа. Журнал ночных бэкапов: /var/log/virtuality/backup.log.</p>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Сохранённые бэкапы</h2>
+          <span class="pill">{{ backups|length }} файлов</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>VM</th><th>Файл</th><th>Размер</th><th>Создан</th><th>Действия</th></tr>
+          </thead>
+          <tbody>
+          {% for backup in backups %}
+            <tr>
+              <td class="strong">{{ backup.vm }}</td>
+              <td>{{ backup.name }}</td>
+              <td>{{ backup.size }}</td>
+              <td>{{ backup.created }}</td>
+              <td class="actions">
+                <form method="post" action="/backups/{{ backup.vm }}/{{ backup.name }}/restore" onsubmit="return confirm('Восстановить VM {{ backup.vm }} из бэкапа {{ backup.name }}? Текущий диск VM будет перезаписан.');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button class="ghost">Восстановить</button>
+                </form>
+                <form method="post" action="/backups/{{ backup.vm }}/{{ backup.name }}/delete" onsubmit="return confirm('Удалить бэкап {{ backup.name }}?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button class="danger">Удалить</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="muted">Бэкапов пока нет. Сделай первый бэкап кнопкой слева или включи ночное расписание.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted small-note">Восстановление перезаписывает первый диск VM содержимым бэкапа — VM должна быть выключена.</p>
+      </section>
+    </main>
+  </div>
+  <script src="/static/panel.js" defer></script>
+</body>
+</html>

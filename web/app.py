@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
+import backup_core
 import cloud_images
 import host_profile
 import metrics
@@ -309,7 +310,7 @@ def progress_from_line(current: int, line: str) -> int:
     return current
 
 
-def run_operation_worker(operation_id: str, cmd: list[str], progress_fn=None, start_message: str = "virt-install запущен", success_message: str = "VM создана успешно", refresh_pool: bool = True) -> None:
+def run_operation_worker(operation_id: str, cmd: list[str], progress_fn=None, start_message: str = "virt-install запущен", success_message: str = "VM создана успешно", refresh_pool: bool = True, on_success=None) -> None:
     operation = read_operation(operation_id)
     if not operation:
         return
@@ -333,6 +334,13 @@ def run_operation_worker(operation_id: str, cmd: list[str], progress_fn=None, st
             if refresh_pool:
                 run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
             cache_invalidate()
+            if on_success is not None:
+                try:
+                    result_note = on_success()
+                    if result_note:
+                        append_operation_log(operation_id, str(result_note))
+                except Exception as exc:
+                    append_operation_log(operation_id, f"Пост-обработка завершилась с ошибкой: {exc}")
             update_operation(fresh, status="success", progress=100, exit_code=exit_code, message=success_message, finished_at=utc_now())
         else:
             append_operation_log(operation_id, f"Команда завершилась с ошибкой. Exit code: {exit_code}")
@@ -969,6 +977,11 @@ def set_vm_template(name: str, enabled: bool) -> None:
 
 def is_vm_template(name: str) -> bool:
     return name in load_vm_templates()
+
+
+def qemu_convert_progress(current: int, line: str) -> int:
+    """Адаптер для run_operation_worker: qemu-img convert -p пишет '(42.00/100%)'."""
+    return disk_convert_progress(line, current)
 
 
 def wget_progress(current: int, line: str) -> int:
@@ -1758,6 +1771,95 @@ def vm_create_cloud_submit(request: Request, name: str = Form(...), image_name: 
     operation = {"id": operation_id, "type": "vm_create_cloud", "title": f"Создание VM {name} из cloud-образа", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": name, "disk_path": str(disk_path), "cloud_image": image_name, "guest_arch": guest_arch, "network_mode": network_mode, "bridge": bridge, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "cloud_user": username, "cmd": " ".join(cmd)}
     start_background_operation(operation, cmd, start_message="Подготовка диска из cloud-образа", success_message=f"VM {name} создана из cloud-образа")
     return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
+
+
+@app.get("/backups", response_class=HTMLResponse)
+def backups_page(request: Request, error: str | None = None):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    return templates.TemplateResponse("backups.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vms": parse_virsh_list(), "backups": backup_core.list_backups(), "schedule": backup_core.load_schedule(), "error": error or request.query_params.get("backup_error", ""), "message": request.query_params.get("backup_message", "")})
+
+
+@app.post("/backups/create")
+def backup_create(request: Request, vm_name: str = Form(...), csrf_token: str = Form("")):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
+    if not valid_vm_name(vm_name) or not vm_exists(vm_name):
+        return RedirectResponse(url="/backups?backup_error=VM не найдена", status_code=303)
+    disk_path = backup_core.first_disk_of(vm_name)
+    if not disk_path:
+        return RedirectResponse(url="/backups?backup_error=У VM не найден qcow2-диск для бэкапа", status_code=303)
+    target = backup_core.new_backup_path(vm_name)
+    if target is None:
+        return RedirectResponse(url="/backups?backup_error=Некорректное имя VM", status_code=303)
+    keep = backup_core.load_schedule()["keep"]
+    cmd = ["bash", "-c", backup_core.build_backup_script(vm_name, disk_path, target)]
+    operation_id = str(uuid.uuid4())
+    operation = {"id": operation_id, "type": "vm_backup", "title": f"Бэкап VM {vm_name}", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": vm_name, "disk_path": disk_path, "target": str(target), "cmd": " ".join(cmd)}
+
+    def rotate_after_backup():
+        removed = backup_core.rotate_backups(vm_name, keep)
+        return f"Ротация удалила старые бэкапы: {', '.join(removed)}" if removed else ""
+
+    start_background_operation(operation, cmd, progress_fn=qemu_convert_progress, start_message=f"Бэкап диска VM {vm_name}", success_message=f"Бэкап VM {vm_name} создан", refresh_pool=False, on_success=rotate_after_backup)
+    return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
+
+
+@app.post("/backups/{vm_name}/{filename}/restore")
+def backup_restore(request: Request, vm_name: str, filename: str, csrf_token: str = Form("")):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
+    backup_file = backup_core.backup_path(vm_name, filename)
+    if backup_file is None or not backup_file.exists():
+        return RedirectResponse(url="/backups?backup_error=Бэкап не найден", status_code=303)
+    if not vm_exists(vm_name):
+        return RedirectResponse(url="/backups?backup_error=VM не существует — восстановление возможно только в существующую VM", status_code=303)
+    if "running" in vm_runtime_state(vm_name):
+        return RedirectResponse(url="/backups?backup_error=Сначала выключи VM — восстановление перезаписывает её диск", status_code=303)
+    disk_path = backup_core.first_disk_of(vm_name)
+    if not disk_path:
+        return RedirectResponse(url="/backups?backup_error=У VM не найден qcow2-диск", status_code=303)
+    cmd = ["bash", "-c", backup_core.build_restore_script(disk_path, backup_file)]
+    operation_id = str(uuid.uuid4())
+    operation = {"id": operation_id, "type": "vm_restore", "title": f"Восстановление VM {vm_name} из {filename}", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": vm_name, "backup": filename, "disk_path": disk_path, "cmd": " ".join(cmd)}
+    start_background_operation(operation, cmd, progress_fn=qemu_convert_progress, start_message=f"Восстановление диска VM {vm_name}", success_message=f"VM {vm_name} восстановлена из бэкапа", refresh_pool=False)
+    return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
+
+
+@app.post("/backups/{vm_name}/{filename}/delete")
+def backup_delete(request: Request, vm_name: str, filename: str, csrf_token: str = Form("")):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
+    backup_file = backup_core.backup_path(vm_name, filename)
+    if backup_file and backup_file.exists():
+        backup_file.unlink()
+    return RedirectResponse(url="/backups?backup_message=Бэкап удалён", status_code=303)
+
+
+@app.post("/backups/schedule")
+def backup_schedule_save(request: Request, enabled: str = Form("0"), keep: int = Form(5), vms: list[str] = Form([]), csrf_token: str = Form("")):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
+    config = backup_core.save_schedule(enabled == "1", vms, keep)
+    state = "включено" if config["enabled"] else "выключено"
+    return RedirectResponse(url=f"/backups?backup_message=Расписание сохранено: {state}, VM: {len(config['vms'])}, хранить копий: {config['keep']}", status_code=303)
 
 
 def safe_network_template(request: Request, error: str | None = None, status_code: int = 200, diagnostics: dict[str, Any] | None = None):

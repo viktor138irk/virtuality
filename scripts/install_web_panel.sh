@@ -11,6 +11,8 @@ VENV_DIR="/opt/virtuality/venv"
 SERVICE_FILE="/etc/systemd/system/virtuality-web.service"
 AUTO_UPDATE_SERVICE_FILE="/etc/systemd/system/virtuality-auto-update.service"
 AUTO_UPDATE_TIMER_FILE="/etc/systemd/system/virtuality-auto-update.timer"
+BACKUP_SERVICE_FILE="/etc/systemd/system/virtuality-backup.service"
+BACKUP_TIMER_FILE="/etc/systemd/system/virtuality-backup.timer"
 PORT="${VIRTUALITY_WEB_PORT:-8088}"
 AUTH_USER="${VIRTUALITY_AUTH_USER:-${SUDO_USER:-viktor}}"
 LOG_DIR="/var/log/virtuality"
@@ -286,6 +288,33 @@ EOF
 else
   warn "auto_update_check.sh не найден, автообновление пропущено"
 fi
+cat > "$BACKUP_SERVICE_FILE" <<EOF
+[Unit]
+Description=Virtuality scheduled VM backups
+After=libvirtd.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=${VENV_DIR}/bin/python ${APP_DIR}/backup_core.py --scheduled
+EOF
+cat > "$BACKUP_TIMER_FILE" <<EOF
+[Unit]
+Description=Run Virtuality VM backups nightly at 04:30 Moscow time
+
+[Timer]
+OnCalendar=*-*-* 01:30:00 UTC
+AccuracySec=5min
+Persistent=true
+Unit=virtuality-backup.service
+
+[Install]
+WantedBy=timers.target
+EOF
+run_logged "systemd daemon-reload выполнен для бэкапов" systemctl daemon-reload
+run_logged "virtuality-backup.timer включён" systemctl enable --now virtuality-backup.timer
+ok "Ночные бэкапы VM: расписание настраивается на странице /backups"
 
 step "Запускаем Virtuality Web Panel"
 run_logged "virtuality-web.service включён и запущен" systemctl enable --now virtuality-web.service
