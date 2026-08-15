@@ -112,7 +112,16 @@ passwd root
 - создание VM из web-интерфейса;
 - выбор сетевого режима при создании VM: `virtuality-nat` или `br0`;
 - прогресс создания VM и live-лог `virt-install`;
-- страница деталей VM: `dominfo`, VNC display, IP, диски, сетевые интерфейсы.
+- страница деталей VM: `dominfo`, VNC display, IP, диски, сетевые интерфейсы;
+- web-консоль noVNC прямо в браузере;
+- cloud-образы Ubuntu/Debian (x86_64 и ARM64) и создание VM из образа с cloud-init за минуту;
+- клонирование VM и шаблоны (эталонные VM с блокировкой запуска);
+- снапшоты VM: создание, откат, удаление;
+- бэкапы дисков VM со сжатием, ротацией и ночным расписанием;
+- HTTPS из коробки (самоподписанный сертификат), CSRF-защита форм, PAM-аутентификация, защита от перебора пароля;
+- графики CPU/RAM хоста на дашборде;
+- быстрый libvirt-backend с fallback на virsh для слабого железа;
+- тесты pytest и CI на GitHub Actions.
 
 ---
 
@@ -156,10 +165,12 @@ Orange Pi 5 ARM64: желательно 8/16/32 GB RAM и NVMe
 
 ```text
 Cockpit:       https://SERVER_IP:9090
-Virtuality UI: http://SERVER_IP:8088
+Virtuality UI: https://SERVER_IP:8088
 VNC:           5900-5999/tcp
 SSH:           22/tcp
 ```
+
+Панель работает по HTTPS с самоподписанным сертификатом — браузер один раз попросит подтвердить исключение. Отключить TLS: `VIRTUALITY_TLS=0` при установке.
 
 Изменить порт web-панели:
 
@@ -224,12 +235,18 @@ http://SERVER_IP:8088
 Основные разделы:
 
 ```text
-/              # дашборд
-/host          # профиль хоста и проверки
-/iso           # ISO-менеджер
-/network       # NAT Router и проброс портов
-/operations    # журнал операций
-/vm/create     # создание VM
+/                # дашборд с графиками CPU/RAM
+/host            # профиль хоста и проверки
+/iso             # ISO-менеджер
+/disk-images     # готовые образы дисков
+/cloud-images    # cloud-образы Ubuntu/Debian
+/vm/create       # создание VM из ISO или готового диска
+/vm/create-cloud # создание VM из cloud-образа с cloud-init
+/backups         # бэкапы VM и ночное расписание
+/network         # NAT Router и проброс портов
+/operations      # журнал операций
+/logs            # центр журналов
+/update          # центр обновлений
 ```
 
 Переустановка web-панели:
@@ -414,19 +431,18 @@ journalctl -u virtuality-web -f
 
 ## Roadmap
 
-- ARM64 cloud-image templates;
-- cloud-init для быстрых VM;
-- web-console/noVNC;
 - управление storage pools;
-- backup/snapshot manager;
 - сетевой менеджер bridge/VLAN;
-- роли и права пользователей;
-- журнал событий;
-- автообновление;
-- кластеризация.
+- журнал событий.
+
+Сделано из прошлого roadmap: cloud-image шаблоны (x86_64 и ARM64), cloud-init,
+web-console/noVNC, снапшоты и бэкапы, автообновление.
+
+Сознательно не планируется: кластеризация, HA, Ceph/ZFS и роли пользователей —
+Virtuality остаётся лёгкой панелью для одиночных нод.
 
 ---
 
 ## Лицензия
 
-Рекомендуемая лицензия: **MIT License**.
+**MIT License** — см. [`LICENSE`](LICENSE).
