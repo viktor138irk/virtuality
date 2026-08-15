@@ -75,16 +75,6 @@ run_logged() {
   fi
 }
 
-restore_canonical_templates() {
-  local templates=("_sidebar.html" "dashboard.html" "vm_create.html" "vm_detail.html" "iso.html" "disk_images.html" "operations.html" "operation_detail.html" "host.html" "network.html" "logs.html" "update.html")
-  local name=""
-  for name in "${templates[@]}"; do
-    if [[ -f "${WEB_DIR}/templates/${name}" ]]; then
-      cp "${WEB_DIR}/templates/${name}" "${APP_DIR}/templates/${name}"
-    fi
-  done
-}
-
 service_state() { systemctl is-active "$1" 2>/dev/null || echo "inactive"; }
 require_root() { [[ "$EUID" -eq 0 ]] || fail "Запусти через sudo: sudo bash scripts/install_web_panel.sh"; }
 json_value() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$PROFILE_FILE" "$1" 2>/dev/null || true; }
@@ -167,113 +157,6 @@ fi
 step "Копируем web-панель в /opt/virtuality"
 run_logged "Создана директория /opt/virtuality" mkdir -p /opt/virtuality
 run_logged "Файлы панели синхронизированы в $APP_DIR" rsync -a --delete "$WEB_DIR/" "$APP_DIR/"
-if [[ -f "${REPO_DIR}/scripts/patch_web_console.py" ]]; then
-  run_logged "noVNC web-console patch применён" python3 "${REPO_DIR}/scripts/patch_web_console.py" "${APP_DIR}/app.py"
-else
-  warn "patch_web_console.py не найден, noVNC console patch пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_upload_compat.py" ]]; then
-  run_logged "upload compatibility patch применён" python3 "${REPO_DIR}/scripts/patch_upload_compat.py" "${APP_DIR}/app.py"
-else
-  warn "patch_upload_compat.py не найден, совместимость загрузки файлов пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_upload_navigation_guard.py" ]]; then
-  run_logged "upload navigation guard patch применён" python3 "${REPO_DIR}/scripts/patch_upload_navigation_guard.py" "${APP_DIR}/app.py"
-else
-  warn "patch_upload_navigation_guard.py не найден, защита загрузок от переходов пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_disk_images.py" ]]; then
-  run_logged "disk images patch применён" python3 "${REPO_DIR}/scripts/patch_disk_images.py" "${APP_DIR}/app.py"
-else
-  warn "patch_disk_images.py не найден, менеджер дисковых образов пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_vm_boot_order.py" ]]; then
-  run_logged "VM boot order patch применён" python3 "${REPO_DIR}/scripts/patch_vm_boot_order.py" "${APP_DIR}/app.py"
-else
-  warn "patch_vm_boot_order.py не найден, порядок загрузки VM пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_boot_order.py" ]]; then
-  run_logged "existing VM boot order patch применён" python3 "${REPO_DIR}/scripts/patch_existing_vm_boot_order.py" "${APP_DIR}/app.py"
-else
-  warn "patch_existing_vm_boot_order.py не найден, порядок загрузки существующих VM пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_resources.py" ]]; then
-  run_logged "existing VM resources patch применён" python3 "${REPO_DIR}/scripts/patch_existing_vm_resources.py" "${APP_DIR}/app.py"
-else
-  warn "patch_existing_vm_resources.py не найден, ресурсы существующих VM пропущены"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_iso_mount.py" ]]; then
-  run_logged "existing VM ISO mount patch применён" python3 "${REPO_DIR}/scripts/patch_existing_vm_iso_mount.py" "${APP_DIR}/app.py"
-else
-  warn "patch_existing_vm_iso_mount.py не найден, монтирование ISO в VM пропущено"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_vm_detail_resource_layout.py" ]]; then
-  run_logged "VM detail resource layout patch применён" python3 "${REPO_DIR}/scripts/patch_vm_detail_resource_layout.py" "${APP_DIR}/app.py"
-else
-  warn "patch_vm_detail_resource_layout.py не найден, раскладка ресурсов VM пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_remove_legacy_boot_order_card.py" ]]; then
-  run_logged "legacy boot order cleanup patch применён" python3 "${REPO_DIR}/scripts/patch_remove_legacy_boot_order_card.py" "${APP_DIR}/app.py"
-else
-  warn "patch_remove_legacy_boot_order_card.py не найден, удаление старого блока порядка загрузки пропущено"
-fi
-run_logged "Канонические шаблоны панели восстановлены после VM-патчей" restore_canonical_templates
-if [[ -f "${REPO_DIR}/scripts/patch_disk_archives.py" ]]; then
-  run_logged "disk archive import patch применён" python3 "${REPO_DIR}/scripts/patch_disk_archives.py" "${APP_DIR}/app.py"
-else
-  warn "patch_disk_archives.py не найден, импорт архивов дисков пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_dhcp_leases_empty.py" ]]; then
-  run_logged "DHCP leases empty-state patch применён" python3 "${REPO_DIR}/scripts/patch_dhcp_leases_empty.py" "${APP_DIR}/app.py"
-else
-  warn "patch_dhcp_leases_empty.py не найден, диагностика DHCP leases пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_network_diagnostics.py" ]]; then
-  run_logged "network diagnostics patch применён" python3 "${REPO_DIR}/scripts/patch_network_diagnostics.py" "${APP_DIR}/app.py"
-else
-  warn "patch_network_diagnostics.py не найден, диагностика сети пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_network_ranges.py" ]]; then
-  run_logged "network port ranges patch применён" python3 "${REPO_DIR}/scripts/patch_network_ranges.py" "${APP_DIR}/app.py"
-else
-  warn "patch_network_ranges.py не найден, поддержка диапазонов портов пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_network_bridge_forwards.py" ]]; then
-  run_logged "network bridge forward patch применён" python3 "${REPO_DIR}/scripts/patch_network_bridge_forwards.py" "${APP_DIR}/app.py"
-else
-  warn "patch_network_bridge_forwards.py не найден, проброс bridge/static VM пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_network_nat_errors.py" ]]; then
-  run_logged "network NAT error patch применён" python3 "${REPO_DIR}/scripts/patch_network_nat_errors.py" "${APP_DIR}/app.py"
-else
-  warn "patch_network_nat_errors.py не найден, безопасные ошибки NAT пропущены"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_logs_center.py" ]]; then
-  run_logged "logs center patch применён" python3 "${REPO_DIR}/scripts/patch_logs_center.py" "${APP_DIR}/app.py"
-else
-  warn "patch_logs_center.py не найден, центр журналов пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_vm_network_guard.py" ]]; then
-  run_logged "VM network guard patch применён" python3 "${REPO_DIR}/scripts/patch_vm_network_guard.py" "${APP_DIR}/app.py"
-else
-  warn "patch_vm_network_guard.py не найден, защита от отсутствующего bridge пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_update_center.py" ]]; then
-  run_logged "update center patch применён" python3 "${REPO_DIR}/scripts/patch_update_center.py" "${APP_DIR}/app.py"
-else
-  warn "patch_update_center.py не найден, центр обновлений пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_live_status.py" ]]; then
-  run_logged "live status patch применён" python3 "${REPO_DIR}/scripts/patch_live_status.py" "${APP_DIR}/app.py"
-else
-  warn "patch_live_status.py не найден, live-статусы пропущены"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_vm_autostart.py" ]]; then
-  run_logged "VM autostart patch применён" python3 "${REPO_DIR}/scripts/patch_vm_autostart.py" "${APP_DIR}/app.py"
-else
-  warn "patch_vm_autostart.py не найден, нормализация автозапуска VM пропущена"
-fi
-run_logged "Канонические шаблоны панели финально восстановлены" restore_canonical_templates
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
   ok "Профиль уже сохранён: $PROFILE_FILE"
