@@ -54,6 +54,29 @@
         </article>
       </section>
 
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>CPU хоста</h2>
+            <span class="pill" id="cpu-now">—</span>
+          </div>
+          <svg id="cpu-spark" class="sparkline" viewBox="0 0 300 60" preserveAspectRatio="none" aria-label="График CPU за час">
+            <polyline points="" fill="none"></polyline>
+          </svg>
+          <p class="muted small-note">Загрузка процессора за последний час, обновляется каждые 15 секунд.</p>
+        </article>
+        <article class="card">
+          <div class="card-head">
+            <h2>Память хоста</h2>
+            <span class="pill" id="mem-now">—</span>
+          </div>
+          <svg id="mem-spark" class="sparkline" viewBox="0 0 300 60" preserveAspectRatio="none" aria-label="График памяти за час">
+            <polyline points="" fill="none"></polyline>
+          </svg>
+          <p class="muted small-note">Использование RAM за последний час. Хвост графика заполняется по мере работы панели.</p>
+        </article>
+      </section>
+
       <section class="card">
         <div class="card-head">
           <h2>Виртуальные машины</h2>
@@ -185,6 +208,47 @@
       </section>
     </main>
   </div>
+  <script>
+    (function () {
+      function drawSpark(svgId, values, max) {
+        const svg = document.getElementById(svgId);
+        if (!svg) return;
+        const line = svg.querySelector('polyline');
+        if (!values.length) { line.setAttribute('points', ''); return; }
+        const width = 300, height = 60, pad = 3;
+        const step = values.length > 1 ? (width - pad * 2) / (values.length - 1) : 0;
+        const points = values.map((value, index) => {
+          const x = pad + index * step;
+          const y = height - pad - Math.max(0, Math.min(1, value / max)) * (height - pad * 2);
+          return x.toFixed(1) + ',' + y.toFixed(1);
+        });
+        line.setAttribute('points', points.join(' '));
+      }
+
+      async function refreshMetrics() {
+        try {
+          const response = await fetch('/live/metrics', { cache: 'no-store' });
+          if (!response.ok) return;
+          const payload = await response.json();
+          if (!payload.ok || !payload.series) return;
+          const cpu = payload.series.map(sample => sample.cpu);
+          const mem = payload.series.map(sample => sample.mem_percent);
+          drawSpark('cpu-spark', cpu, 100);
+          drawSpark('mem-spark', mem, 100);
+          const current = payload.current;
+          if (current) {
+            const cpuNow = document.getElementById('cpu-now');
+            const memNow = document.getElementById('mem-now');
+            if (cpuNow) cpuNow.textContent = current.cpu.toFixed(1) + '% · load ' + current.load1.toFixed(2);
+            if (memNow) memNow.textContent = current.mem_used_mb + ' / ' + current.mem_total_mb + ' MB · ' + current.mem_percent.toFixed(0) + '%';
+          }
+        } catch (error) { /* сеть моргнула — попробуем в следующий цикл */ }
+      }
+
+      refreshMetrics();
+      setInterval(refreshMetrics, 15000);
+    })();
+  </script>
   <script src="/static/panel.js" defer></script>
 </body>
 </html>

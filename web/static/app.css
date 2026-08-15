@@ -230,6 +230,8 @@ input[type="file"] { padding: 12px; }
 .alert.danger { color: #fecaca; background: rgba(239,68,68,.10); border: 1px solid rgba(239,68,68,.28); }
 .alert.success { color: #bbf7d0; background: rgba(34,197,94,.10); border: 1px solid rgba(34,197,94,.26); }
 .alert.warn { color: #fde68a; background: rgba(245,158,11,.10); border: 1px solid rgba(245,158,11,.28); }
+.sparkline { display: block; width: 100%; height: 60px; }
+.sparkline polyline { stroke: var(--accent, #38bdf8); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 
 .services, .quick-actions, .knowledge-list { display: grid; gap: 10px; }
 .service-row, .big-action, .knowledge-list div, .meta-grid div {

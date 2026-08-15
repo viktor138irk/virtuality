@@ -137,7 +137,7 @@ step "Обновляем apt cache"
 run_logged "apt update выполнен" apt update
 
 step "Устанавливаем системные зависимости под выбранную сборку"
-COMMON_PACKAGES=(python3 python3-venv python3-pip rsync openssl curl wget unzip nftables novnc python3-websockify)
+COMMON_PACKAGES=(python3 python3-venv python3-pip python3-dev rsync openssl curl wget unzip nftables novnc python3-websockify libvirt-dev pkg-config gcc)
 X86_PACKAGES=(qemu-system-x86 qemu-system-arm qemu-efi-aarch64 virtinst libvirt-daemon-system libvirt-clients bridge-utils cloud-image-utils)
 ARM_PACKAGES=(qemu-system-arm qemu-efi-aarch64 virtinst libvirt-daemon-system libvirt-clients bridge-utils cloud-image-utils)
 PACKAGES=("${COMMON_PACKAGES[@]}")
@@ -212,6 +212,11 @@ fi
 step "Устанавливаем Python-зависимости"
 run_logged "pip обновлён" "$VENV_DIR/bin/pip" install --upgrade pip
 run_logged "Python-зависимости установлены" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+if "$VENV_DIR/bin/pip" install libvirt-python >> "$LOG_FILE" 2>&1; then
+  ok "libvirt-python установлен — панель работает через быстрый libvirt-backend"
+else
+  warn "libvirt-python не установился — панель будет работать через virsh (медленнее, но полностью функционально)"
+fi
 
 step "Создаём systemd service"
 UVICORN_TLS_ARGS=""

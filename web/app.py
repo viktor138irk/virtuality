@@ -39,8 +39,10 @@ from itsdangerous import BadSignature, URLSafeSerializer
 
 import cloud_images
 import host_profile
+import metrics
 import network_core
 import update_core
+import virt_backend
 from network_core import NetworkError
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -180,6 +182,33 @@ def require_csrf(request: Request, csrf_token: str):
     return HTMLResponse("<h1>Сессия устарела</h1><p>Открой страницу заново и повтори действие.</p>", status_code=403)
 
 
+# TTL-кеш для дорогих обзорных запросов: на слабом железе (Raspberry Pi)
+# каждый рендер дашборда без кеша порождает десятки subprocess-вызовов.
+_TTL_CACHE: dict[str, tuple[float, Any]] = {}
+_TTL_CACHE_LOCK = threading.Lock()
+
+
+def cached(key: str, ttl_seconds: float, producer):
+    now = time.monotonic()
+    with _TTL_CACHE_LOCK:
+        entry = _TTL_CACHE.get(key)
+        if entry and now - entry[0] < ttl_seconds:
+            return entry[1]
+    value = producer()
+    with _TTL_CACHE_LOCK:
+        _TTL_CACHE[key] = (time.monotonic(), value)
+    return value
+
+
+def cache_invalidate(prefix: str = "") -> None:
+    with _TTL_CACHE_LOCK:
+        if not prefix:
+            _TTL_CACHE.clear()
+            return
+        for key in [k for k in _TTL_CACHE if k.startswith(prefix)]:
+            _TTL_CACHE.pop(key, None)
+
+
 def run_cmd(cmd: list[str], timeout: int = 12) -> dict[str, Any]:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
@@ -303,6 +332,7 @@ def run_operation_worker(operation_id: str, cmd: list[str], progress_fn=None, st
             append_operation_log(operation_id, "Команда завершилась успешно.")
             if refresh_pool:
                 run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
+            cache_invalidate()
             update_operation(fresh, status="success", progress=100, exit_code=exit_code, message=success_message, finished_at=utc_now())
         else:
             append_operation_log(operation_id, f"Команда завершилась с ошибкой. Exit code: {exit_code}")
@@ -377,7 +407,7 @@ def vm_autostart_status(name: str) -> dict[str, str | bool]:
     return {"enabled": enabled, "label": label, "css": css, "raw": raw}
 
 
-def parse_virsh_list() -> list[dict[str, str]]:
+def parse_virsh_list_uncached() -> list[dict[str, str]]:
     def clean_ip(ip: str) -> str:
         ip = (ip or "").split("/")[0].strip()
         if not ip or ip.startswith("127.") or ip.startswith("169.254.") or ip == "0.0.0.0":
@@ -482,25 +512,36 @@ def parse_virsh_list() -> list[dict[str, str]]:
                 pass
         return "—"
 
-    result = run_cmd(["virsh", "list", "--all"])
     rows = []
-    if not result["ok"]:
-        return rows
-    for line in result["stdout"].splitlines()[2:]:
-        parts = line.strip().split(None, 2)
-        if len(parts) == 3:
-            autostart = vm_autostart_status(parts[1])
-            rows.append({"id": parts[0], "name": parts[1], "state": parts[2], "autostart_enabled": autostart["enabled"], "autostart_label": autostart["label"], "autostart_css": autostart["css"]})
-        elif len(parts) == 2:
-            autostart = vm_autostart_status(parts[0])
-            rows.append({"id": "-", "name": parts[0], "state": parts[1], "autostart_enabled": autostart["enabled"], "autostart_label": autostart["label"], "autostart_css": autostart["css"]})
+    backend_rows = virt_backend.list_domains()
+    if backend_rows is not None:
+        # Быстрый путь: одно libvirt-соединение вместо virsh + dominfo на каждую VM.
+        for dom in backend_rows:
+            enabled = dom["autostart_enabled"]
+            rows.append({"id": dom["id"], "name": dom["name"], "state": dom["state"], "autostart_enabled": enabled, "autostart_label": "enabled" if enabled else "disabled", "autostart_css": "ok" if enabled else "warn"})
+    else:
+        result = run_cmd(["virsh", "list", "--all"])
+        if not result["ok"]:
+            return rows
+        for line in result["stdout"].splitlines()[2:]:
+            parts = line.strip().split(None, 2)
+            if len(parts) == 3:
+                autostart = vm_autostart_status(parts[1])
+                rows.append({"id": parts[0], "name": parts[1], "state": parts[2], "autostart_enabled": autostart["enabled"], "autostart_label": autostart["label"], "autostart_css": autostart["css"]})
+            elif len(parts) == 2:
+                autostart = vm_autostart_status(parts[0])
+                rows.append({"id": "-", "name": parts[0], "state": parts[1], "autostart_enabled": autostart["enabled"], "autostart_label": autostart["label"], "autostart_css": autostart["css"]})
     for row in rows:
         row["ip"] = resolve_ip(row.get("name", ""))
         row["manual_ip"] = manual_ips.get(row.get("name", ""), "")
     return rows
 
 
-def parse_pool_list() -> list[dict[str, str]]:
+def parse_virsh_list() -> list[dict[str, str]]:
+    return cached("vm_list", 5, parse_virsh_list_uncached)
+
+
+def parse_pool_list_uncached() -> list[dict[str, str]]:
     result = run_cmd(["virsh", "pool-list", "--all"])
     rows = []
     if not result["ok"]:
@@ -510,6 +551,10 @@ def parse_pool_list() -> list[dict[str, str]]:
         if len(parts) >= 3:
             rows.append({"name": parts[0], "state": parts[1], "autostart": parts[2]})
     return rows
+
+
+def parse_pool_list() -> list[dict[str, str]]:
+    return cached("pool_list", 15, parse_pool_list_uncached)
 
 
 def list_iso_files() -> list[dict[str, str]]:
@@ -1293,8 +1338,7 @@ def system_summary() -> dict[str, str]:
 
 
 def service_state(unit: str) -> str:
-    result = run_cmd(["systemctl", "is-active", unit])
-    return result["stdout"] or "inactive"
+    return cached(f"svc:{unit}", 10, lambda: run_cmd(["systemctl", "is-active", unit])["stdout"] or "inactive")
 
 
 def network_summary() -> dict[str, str]:
@@ -2230,6 +2274,8 @@ def vm_snapshot_apply(request: Request, name: str, snap_action: str, snapshot_na
     if snap_action not in ("create", "revert", "delete"):
         return JSONResponse({"ok": False, "error": "Unsupported snapshot action"}, status_code=400)
     ok, message = snapshot_action(name, snap_action, snapshot_name.strip(), description.strip())
+    if ok:
+        cache_invalidate("vm_list")
     param = "snap_message" if ok else "snap_error"
     return RedirectResponse(url=f"/vm/{name}?{param}={message}", status_code=303)
 
@@ -2285,12 +2331,14 @@ def vm_action(request: Request, name: str, action: str, csrf_token: str = Form("
         run_cmd(["virsh", "destroy", name], timeout=20)
         run_cmd(["virsh", "undefine", name, "--remove-all-storage"], timeout=60)
         set_vm_template(name, False)
+        cache_invalidate("vm_list")
         return RedirectResponse(url="/", status_code=303)
     if action not in allowed:
         return JSONResponse({"ok": False, "error": "Unsupported action"}, status_code=400)
     if action == "start" and is_vm_template(name):
         return RedirectResponse(url=f"/vm/{name}?clone_error=VM помечена как шаблон — запуск заблокирован. Склонируй её или сними флаг шаблона", status_code=303)
     run_cmd(allowed[action], timeout=30)
+    cache_invalidate("vm_list")
     return RedirectResponse(url=f"/vm/{name}", status_code=303)
 
 
@@ -2309,6 +2357,18 @@ def live_status(request: Request):
         css = "ok" if "running" in state else "err" if "shut" in state else "warn"
         vms.append({"id": vm.get("id", "-"), "name": name, "state": state, "state_css": css, "ip": ip if ip and ip != "not available" else "—", "autostart_enabled": vm.get("autostart_enabled", False), "autostart_label": vm.get("autostart_label", "unknown"), "autostart_css": vm.get("autostart_css", "warn")})
     return JSONResponse({"ok": True, "generated_at": utc_now(), "vms": vms, "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "web": service_state("virtuality-web.service")}, "operations": list_operations(5)})
+
+
+@app.on_event("startup")
+def start_metrics_collector():
+    metrics.start()
+
+
+@app.get("/live/metrics")
+def live_metrics(request: Request):
+    if not get_current_user(request):
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    return JSONResponse({"ok": True, **metrics.snapshot()})
 
 
 @app.get("/live/operations")
