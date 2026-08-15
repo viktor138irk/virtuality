@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cloud-образы — {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="v-layout">
+    {% include "_sidebar.html" %}
+
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">Cloud-образы</div>
+          <div class="v-subtitle">Официальные cloud-образы Ubuntu и Debian для быстрого создания VM без установки с ISO</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
+
+      {% if error %}
+        <div class="alert danger">{{ error }}</div>
+      {% endif %}
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Каталог образов</h2>
+            <span class="pill">официальные зеркала</span>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Система</th><th>Архитектура</th><th>Статус</th><th></th></tr>
+            </thead>
+            <tbody>
+            {% for entry in catalog %}
+              <tr>
+                <td class="strong">{{ entry.label }}</td>
+                <td><span class="status {{ 'ok' if entry.native else 'warn' }}">{{ entry.arch }}{% if entry.native %} · родная{% endif %}</span></td>
+                <td>{% if entry.downloaded %}<span class="status ok">скачан</span>{% else %}<span class="muted">не скачан</span>{% endif %}</td>
+                <td class="actions">
+                  <form method="post" action="/cloud-images/download">
+                    <input type="hidden" name="key" value="{{ entry.key }}">
+                    <button class="{{ 'ghost' if entry.downloaded else 'primary' }}">{{ 'Скачать заново' if entry.downloaded else 'Скачать' }}</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+          <p class="muted small-note">Образы качаются с cloud-images.ubuntu.com и cloud.debian.org в фоне — прогресс виден в разделе «Операции». Для Raspberry / Orange Pi выбирай aarch64.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Зачем это нужно</h2>
+            <span class="pill">VM за минуту</span>
+          </div>
+          <div class="quick-actions">
+            <div class="big-action static">
+              <strong>Быстрее, чем ISO</strong>
+              <span>Cloud-образ — уже установленная система. VM создаётся копированием диска и стартует сразу, без установщика.</span>
+            </div>
+            <div class="big-action static">
+              <strong>Логин и SSH-ключ сразу</strong>
+              <span>При создании VM задаёшь пользователя, пароль или SSH-ключ — cloud-init настроит их при первом старте.</span>
+            </div>
+            <div class="big-action static">
+              <strong>ARM64 без боли</strong>
+              <span>Для Raspberry Pi и Orange Pi это основной способ создавать гостевые VM.</span>
+            </div>
+          </div>
+          <a class="link-pill" href="/vm/create-cloud">→ Создать VM из cloud-образа</a>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Скачанные образы</h2>
+          <span class="pill">{{ images|length }} файлов</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Файл</th><th>Система</th><th>Архитектура</th><th>Размер</th><th>Обновлён</th><th>Действия</th></tr>
+          </thead>
+          <tbody>
+          {% for image in images %}
+            <tr>
+              <td class="strong">{{ image.name }}</td>
+              <td>{{ image.label }}</td>
+              <td><span class="status ok">{{ image.arch }}</span></td>
+              <td>{{ image.size }}</td>
+              <td>{{ image.updated }}</td>
+              <td class="actions">
+                <a class="link-pill" href="/vm/create-cloud">Создать VM</a>
+                <form method="post" action="/cloud-images/{{ image.name }}/delete" onsubmit="return confirm('Удалить образ {{ image.name }}?');">
+                  <button class="danger">Удалить</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="muted">Образов пока нет. Скачай Ubuntu или Debian из каталога выше.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+  <script src="/static/panel.js" defer></script>
+</body>
+</html>

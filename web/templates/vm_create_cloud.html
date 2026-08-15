@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VM из cloud-образа — {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="v-layout">
+    {% include "_sidebar.html" %}
+
+    <main class="v-main">
+      <header class="v-topbar">
+        <div>
+          <div class="v-title">VM из cloud-образа</div>
+          <div class="v-subtitle">Готовая система с пользователем и SSH за минуту — без установки с ISO</div>
+        </div>
+        <div class="top-meta">
+          <span>user: {{ user }}</span>
+          <a class="link-pill" href="/">← Дашборд</a>
+          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+        </div>
+      </header>
+
+      {% if error %}
+        <div class="alert danger">{{ error }}</div>
+      {% endif %}
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Параметры</h2>
+            <span class="pill">cloud-init</span>
+          </div>
+
+          <form method="post" action="/vm/create-cloud" class="form-grid">
+            <label>
+              <span>Имя VM</span>
+              <input type="text" name="name" value="{{ form.name or '' }}" placeholder="ubuntu-web" required>
+            </label>
+
+            <label>
+              <span>Cloud-образ</span>
+              <select name="image_name" {% if images %}required{% endif %}>
+                {% for image in images %}
+                  <option value="{{ image.name }}" {% if form.image_name == image.name %}selected{% endif %}>{{ image.label }} — {{ image.arch }} — {{ image.size }}</option>
+                {% endfor %}
+              </select>
+            </label>
+
+            <div class="form-row">
+              <label>
+                <span>RAM, MB</span>
+                <input type="number" name="memory" min="512" max="262144" step="512" value="{{ form.memory }}" required>
+              </label>
+              <label>
+                <span>CPU</span>
+                <input type="number" name="vcpus" min="1" max="128" value="{{ form.vcpus }}" required>
+              </label>
+            </div>
+
+            <label>
+              <span>Диск, GB</span>
+              <input type="number" name="disk_size" min="4" max="4096" value="{{ form.disk_size }}" required>
+            </label>
+
+            <div class="form-row">
+              <label>
+                <span>Пользователь в VM</span>
+                <input type="text" name="username" value="{{ form.username or 'admin' }}" placeholder="admin" required>
+              </label>
+              <label>
+                <span>Пароль (необязательно, если есть SSH-ключ)</span>
+                <input type="password" name="password" value="" placeholder="пароль для входа">
+              </label>
+            </div>
+
+            <label>
+              <span>Публичный SSH-ключ (необязательно)</span>
+              <input type="text" name="ssh_key" value="{{ form.ssh_key or '' }}" placeholder="ssh-ed25519 AAAA…">
+            </label>
+
+            <label>
+              <span>Режим сети</span>
+              <select name="network_mode" required>
+                <option value="nat" {% if form.network_mode != 'bridge' %}selected{% endif %}>VPS NAT Router — virtuality-nat</option>
+                <option value="bridge" {% if form.network_mode == 'bridge' %}selected{% endif %}>Bridge — br0 / локальная сеть</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Bridge для режима Bridge</span>
+              <input type="text" name="bridge" value="{{ form.bridge }}" placeholder="br0">
+            </label>
+
+            <div class="notice">
+              Пользователь и пароль/ключ будут настроены cloud-init при первом старте VM. Вход: <b>ssh пользователь@IP</b> или через консоль на странице VM.
+            </div>
+
+            <button type="submit" class="primary wide" {% if not images %}disabled{% endif %}>Создать VM из cloud-образа</button>
+            {% if not images %}
+              <div class="alert danger">Сначала скачай cloud-образ на странице <a href="/cloud-images">Cloud-образы</a>.</div>
+            {% endif %}
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Как это работает</h2>
+            <a class="link-pill" href="/cloud-images">Открыть cloud-образы</a>
+          </div>
+          <div class="quick-actions">
+            <div class="big-action static">
+              <strong>1. Копия образа</strong>
+              <span>Скачанный cloud-образ копируется в новый qcow2-диск VM и расширяется до выбранного размера.</span>
+            </div>
+            <div class="big-action static">
+              <strong>2. Seed-диск cloud-init</strong>
+              <span>Из имени, пользователя и пароля/ключа собирается маленький seed-ISO, который VM читает при первом старте.</span>
+            </div>
+            <div class="big-action static">
+              <strong>3. Импорт и запуск</strong>
+              <span>virt-install импортирует диск и запускает VM. Прогресс — в разделе «Операции».</span>
+            </div>
+          </div>
+          <pre>qemu-img convert -O qcow2 cloud.qcow2 vm.qcow2
+qemu-img resize vm.qcow2 20G
+cloud-localds seed.iso user-data meta-data
+virt-install --import --disk vm.qcow2 …</pre>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script src="/static/panel.js" defer></script>
+</body>
+</html>

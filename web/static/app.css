@@ -229,6 +229,7 @@ input[type="file"] { padding: 12px; }
 .notice { color: #bae6fd; background: rgba(56,189,248,.09); border: 1px solid rgba(56,189,248,.24); }
 .alert.danger { color: #fecaca; background: rgba(239,68,68,.10); border: 1px solid rgba(239,68,68,.28); }
 .alert.success { color: #bbf7d0; background: rgba(34,197,94,.10); border: 1px solid rgba(34,197,94,.26); }
+.alert.warn { color: #fde68a; background: rgba(245,158,11,.10); border: 1px solid rgba(245,158,11,.28); }
 
 .services, .quick-actions, .knowledge-list { display: grid; gap: 10px; }
 .service-row, .big-action, .knowledge-list div, .meta-grid div {

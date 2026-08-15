@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
+import cloud_images
 import host_profile
 import network_core
 import update_core
@@ -205,11 +206,12 @@ def progress_from_line(current: int, line: str) -> int:
     return current
 
 
-def run_operation_worker(operation_id: str, cmd: list[str]) -> None:
+def run_operation_worker(operation_id: str, cmd: list[str], progress_fn=None, start_message: str = "virt-install запущен", success_message: str = "VM создана успешно", refresh_pool: bool = True) -> None:
     operation = read_operation(operation_id)
     if not operation:
         return
-    update_operation(operation, status="running", progress=10, message="virt-install запущен", started_at=utc_now())
+    parse_progress = progress_fn or progress_from_line
+    update_operation(operation, status="running", progress=10, message=start_message, started_at=utc_now())
     append_operation_log(operation_id, "Запуск команды:")
     append_operation_log(operation_id, " ".join(cmd))
     try:
@@ -218,28 +220,29 @@ def run_operation_worker(operation_id: str, cmd: list[str]) -> None:
             for line in process.stdout:
                 append_operation_log(operation_id, line)
                 fresh = read_operation(operation_id) or operation
-                new_progress = progress_from_line(int(fresh.get("progress", 10)), line)
+                new_progress = parse_progress(int(fresh.get("progress", 10)), line)
                 if new_progress != fresh.get("progress"):
                     update_operation(fresh, progress=new_progress, message=line.strip()[:240] or fresh.get("message"))
         exit_code = process.wait()
         fresh = read_operation(operation_id) or operation
         if exit_code == 0:
-            append_operation_log(operation_id, "virt-install завершился успешно.")
-            run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
-            update_operation(fresh, status="success", progress=100, exit_code=exit_code, message="VM создана успешно", finished_at=utc_now())
+            append_operation_log(operation_id, "Команда завершилась успешно.")
+            if refresh_pool:
+                run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
+            update_operation(fresh, status="success", progress=100, exit_code=exit_code, message=success_message, finished_at=utc_now())
         else:
-            append_operation_log(operation_id, f"virt-install завершился с ошибкой. Exit code: {exit_code}")
-            update_operation(fresh, status="error", progress=100, exit_code=exit_code, message=f"virt-install завершился с ошибкой: {exit_code}", finished_at=utc_now())
+            append_operation_log(operation_id, f"Команда завершилась с ошибкой. Exit code: {exit_code}")
+            update_operation(fresh, status="error", progress=100, exit_code=exit_code, message=f"Операция завершилась с ошибкой: {exit_code}", finished_at=utc_now())
     except Exception as exc:
         fresh = read_operation(operation_id) or operation
         append_operation_log(operation_id, f"Ошибка запуска операции: {exc}")
         update_operation(fresh, status="error", progress=100, exit_code=-1, message=str(exc), finished_at=utc_now())
 
 
-def start_background_operation(operation: dict[str, Any], cmd: list[str]) -> None:
+def start_background_operation(operation: dict[str, Any], cmd: list[str], **worker_kwargs: Any) -> None:
     write_operation(operation)
     append_operation_log(operation["id"], "Операция поставлена в очередь.")
-    threading.Thread(target=run_operation_worker, args=(operation["id"], cmd), daemon=True).start()
+    threading.Thread(target=run_operation_worker, args=(operation["id"], cmd), kwargs=worker_kwargs, daemon=True).start()
 
 
 LOG_SOURCES = {
@@ -780,6 +783,43 @@ def disk_upload_response(request: Request, payload: dict[str, Any]):
 
 def valid_vm_name(name: str) -> bool:
     return bool(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}", name or ""))
+
+
+VM_TEMPLATES_FILE = Path("/var/lib/virtuality/config/vm_templates.json")
+VM_TEMPLATES_LOCK = threading.Lock()
+
+
+def load_vm_templates() -> list[str]:
+    try:
+        data = json.loads(VM_TEMPLATES_FILE.read_text())
+        return [name for name in data if isinstance(name, str)]
+    except Exception:
+        return []
+
+
+def set_vm_template(name: str, enabled: bool) -> None:
+    with VM_TEMPLATES_LOCK:
+        names = set(load_vm_templates())
+        if enabled:
+            names.add(name)
+        else:
+            names.discard(name)
+        VM_TEMPLATES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = VM_TEMPLATES_FILE.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(sorted(names), ensure_ascii=False, indent=2))
+        tmp_path.replace(VM_TEMPLATES_FILE)
+
+
+def is_vm_template(name: str) -> bool:
+    return name in load_vm_templates()
+
+
+def wget_progress(current: int, line: str) -> int:
+    # wget --progress=dot:giga пишет строки вида "  512000K .......... 42% 10.5M 2m30s"
+    match = re.search(r"(\d{1,3})%", line)
+    if match:
+        return max(current, min(99, int(match.group(1))))
+    return current
 
 
 def vm_exists(name: str) -> bool:
@@ -1394,6 +1434,140 @@ def disk_image_delete(request: Request, name: str):
     return RedirectResponse(url="/disk-images", status_code=303)
 
 
+@app.get("/cloud-images", response_class=HTMLResponse)
+def cloud_images_page(request: Request, error: str | None = None):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    profile = host_profile.load_host_profile()
+    host_arch = str(profile.get("arch") or platform.machine() or "x86_64")
+    return templates.TemplateResponse("cloud_images.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "catalog": cloud_images.catalog_for_arch(host_arch), "images": cloud_images.list_images(), "error": error})
+
+
+@app.post("/cloud-images/download")
+def cloud_image_download(request: Request, key: str = Form(...)):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    entry = cloud_images.catalog_entry(key)
+    if not entry:
+        return cloud_images_page(request, error="Неизвестный образ каталога.")
+    cloud_images.CLOUD_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    target = cloud_images.CLOUD_IMAGES_DIR / entry["filename"]
+    part = target.with_suffix(target.suffix + ".part")
+    cmd = ["bash", "-lc", f"set -euo pipefail; wget --progress=dot:giga -O {part} {entry['url']}; mv {part} {target}"]
+    operation_id = str(uuid.uuid4())
+    operation = {"id": operation_id, "type": "cloud_image_download", "title": f"Скачивание {entry['label']} ({entry['arch']})", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "url": entry["url"], "target": str(target), "cmd": " ".join(cmd)}
+    start_background_operation(operation, cmd, progress_fn=wget_progress, start_message="Скачивание cloud-образа запущено", success_message="Cloud-образ скачан", refresh_pool=False)
+    return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
+
+
+@app.post("/cloud-images/{name}/delete")
+def cloud_image_delete(request: Request, name: str):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    path = cloud_images.image_path_by_name(name)
+    if path and path.exists() and path.is_file():
+        path.unlink()
+    return RedirectResponse(url="/cloud-images", status_code=303)
+
+
+def cloud_vm_form_context(request: Request, error: str | None = None, form: dict[str, Any] | None = None, status_code: int = 200):
+    profile = host_profile.load_host_profile()
+    default_mode = profile.get("recommended_network", "nat")
+    return templates.TemplateResponse("vm_create_cloud.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "images": cloud_images.list_images(), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 10, "username": "admin", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
+
+
+@app.get("/vm/create-cloud", response_class=HTMLResponse)
+def vm_create_cloud_page(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    return cloud_vm_form_context(request)
+
+
+@app.post("/vm/create-cloud", response_class=HTMLResponse)
+def vm_create_cloud_submit(request: Request, name: str = Form(...), image_name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(...), username: str = Form("admin"), password: str = Form(""), ssh_key: str = Form(""), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE)):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    form = {"name": name, "image_name": image_name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "username": username, "ssh_key": ssh_key, "network_mode": network_mode, "bridge": bridge}
+    image_path = cloud_images.image_path_by_name(image_name)
+    error = None
+    if not valid_vm_name(name):
+        error = "Имя VM может содержать латиницу, цифры, точку, дефис и подчёркивание. Длина 2–63 символа."
+    elif vm_exists(name):
+        error = f"VM с именем {name} уже существует."
+    elif not image_path or not image_path.exists():
+        error = "Выбранный cloud-образ не найден. Сначала скачай его на странице Cloud-образы."
+    elif memory < 512 or memory > 262144:
+        error = "RAM должна быть от 512 MB до 262144 MB."
+    elif vcpus < 1 or vcpus > 128:
+        error = "CPU должен быть от 1 до 128 vCPU."
+    elif disk_size < 4 or disk_size > 4096:
+        error = "Диск должен быть от 4 GB до 4096 GB."
+    elif not cloud_images.valid_cloud_username(username):
+        error = "Имя пользователя VM: строчные латинские буквы, цифры, дефис и подчёркивание."
+    elif not password and not ssh_key.strip():
+        error = "Задай пароль или вставь публичный SSH-ключ — иначе в VM нельзя будет войти."
+    elif ssh_key.strip() and not cloud_images.valid_ssh_key(ssh_key):
+        error = "SSH-ключ не похож на публичный ключ OpenSSH (ssh-ed25519 / ssh-rsa …)."
+    elif network_mode not in ("nat", "bridge"):
+        error = "Некорректный режим сети."
+    elif network_mode == "bridge" and (not bridge or not re.fullmatch(r"[a-zA-Z0-9_.:-]+", bridge)):
+        error = "Некорректное имя bridge."
+    elif network_mode == "bridge" and not bridge_exists(bridge):
+        error = f"Bridge {bridge} не найден на сервере. Для VPS выбери режим NAT Router — virtuality-nat."
+    if error:
+        return cloud_vm_form_context(request, error=error, form=form, status_code=400)
+
+    if network_mode == "nat":
+        try:
+            network_core.create_nat_network()
+        except NetworkError as exc:
+            return cloud_vm_form_context(request, error=f"NAT-сеть не готова: {exc}", form=form, status_code=500)
+
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    disk_path = IMAGES_DIR / f"{name}.qcow2"
+    seed_path = IMAGES_DIR / f"{name}-seed.iso"
+    if disk_path.exists():
+        return cloud_vm_form_context(request, error=f"Диск уже существует: {disk_path}", form=form, status_code=400)
+
+    image_meta = next((img for img in cloud_images.list_images() if img["name"] == image_name), None)
+    guest_arch = image_meta["arch"] if image_meta else "x86_64"
+    profile = host_profile.load_host_profile()
+    host_arch = str(profile.get("arch") or platform.machine() or "")
+    is_arm = guest_arch == "aarch64"
+    virt_type = "qemu" if (is_arm and host_arch not in ("aarch64", "arm64")) else ("kvm" if profile.get("kvm_device") else "qemu")
+    network_arg = f"network={network_core.NETWORK_NAME},model=virtio" if network_mode == "nat" else f"bridge={bridge},model=virtio"
+
+    seed_dir = Path(tempfile.mkdtemp(prefix=f"cloudinit-{name}-"))
+    (seed_dir / "user-data").write_text(cloud_images.build_user_data(name, username, password, ssh_key.strip()))
+    (seed_dir / "meta-data").write_text(cloud_images.build_meta_data(name))
+
+    virt_cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--virt-type", virt_type]
+    if guest_arch == "x86_64":
+        virt_cmd += ["--arch", "x86_64"]
+    else:
+        virt_cmd += ["--arch", "aarch64", "--machine", "virt", "--cpu", "host" if virt_type == "kvm" else "cortex-a57"]
+    virt_cmd += ["--boot", virt_boot_arg("disk", is_arm), "--import", "--disk", f"path={disk_path},format=qcow2,bus=virtio", "--disk", f"path={seed_path},device=cdrom", "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"]
+    shell_script = (
+        "set -euo pipefail; "
+        f"qemu-img convert -p -O qcow2 {image_path} {disk_path}; "
+        f"qemu-img resize {disk_path} {disk_size}G; "
+        f"cloud-localds {seed_path} {seed_dir / 'user-data'} {seed_dir / 'meta-data'}; "
+        + " ".join(virt_cmd) + "; "
+        f"rm -rf {seed_dir}"
+    )
+    cmd = ["bash", "-lc", shell_script]
+
+    operation_id = str(uuid.uuid4())
+    operation = {"id": operation_id, "type": "vm_create_cloud", "title": f"Создание VM {name} из cloud-образа", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": name, "disk_path": str(disk_path), "cloud_image": image_name, "guest_arch": guest_arch, "network_mode": network_mode, "bridge": bridge, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "cloud_user": username, "cmd": " ".join(cmd)}
+    start_background_operation(operation, cmd, start_message="Подготовка диска из cloud-образа", success_message=f"VM {name} создана из cloud-образа")
+    return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
+
+
 def safe_network_template(request: Request, error: str | None = None, status_code: int = 200, diagnostics: dict[str, Any] | None = None):
     try:
         ctx = network_core.network_context()
@@ -1809,7 +1983,7 @@ def vm_detail_page(request: Request, name: str):
         return auth_redirect
     if not valid_vm_name(name) or not vm_exists(name):
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("vm_detail.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vm": vm_details(name), "host_ip": system_summary()["ip"], "boot_options": vm_boot_order_options(), "current_boot_order": current_vm_boot_order(name), "boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", ""), "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", "")})
+    return templates.TemplateResponse("vm_detail.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "vm": vm_details(name), "host_ip": system_summary()["ip"], "boot_options": vm_boot_order_options(), "current_boot_order": current_vm_boot_order(name), "boot_message": request.query_params.get("boot_message", ""), "boot_error": request.query_params.get("boot_error", ""), "resource_settings": vm_resource_settings(name), "resource_message": request.query_params.get("resource_message", ""), "resource_error": request.query_params.get("resource_error", ""), "isos": list_iso_files(), "current_iso": current_vm_iso(name), "iso_message": request.query_params.get("iso_message", ""), "iso_error": request.query_params.get("iso_error", ""), "is_template": is_vm_template(name), "clone_message": request.query_params.get("clone_message", ""), "clone_error": request.query_params.get("clone_error", "")})
 
 
 @app.post("/vm/{name}/resources")
@@ -1856,6 +2030,38 @@ def vm_iso_unmount_apply(request: Request, name: str):
     return RedirectResponse(url=f"/vm/{name}?iso_error={message}", status_code=303)
 
 
+@app.post("/vm/{name}/clone")
+def vm_clone(request: Request, name: str, new_name: str = Form(...)):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    if not valid_vm_name(name) or not vm_exists(name):
+        return RedirectResponse(url="/", status_code=303)
+    if not valid_vm_name(new_name):
+        return RedirectResponse(url=f"/vm/{name}?clone_error=Некорректное имя новой VM", status_code=303)
+    if vm_exists(new_name):
+        return RedirectResponse(url=f"/vm/{name}?clone_error=VM {new_name} уже существует", status_code=303)
+    if "running" in vm_runtime_state(name):
+        return RedirectResponse(url=f"/vm/{name}?clone_error=Сначала выключи VM: клонировать можно только остановленную машину", status_code=303)
+    cmd = ["virt-clone", "--original", name, "--name", new_name, "--auto-clone"]
+    operation_id = str(uuid.uuid4())
+    operation = {"id": operation_id, "type": "vm_clone", "title": f"Клонирование {name} → {new_name}", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": name, "clone_name": new_name, "cmd": " ".join(cmd)}
+    start_background_operation(operation, cmd, start_message=f"virt-clone {name} → {new_name}", success_message=f"VM {new_name} склонирована")
+    return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
+
+
+@app.post("/vm/{name}/template")
+def vm_template_toggle(request: Request, name: str, enabled: str = Form("0")):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    if not valid_vm_name(name) or not vm_exists(name):
+        return RedirectResponse(url="/", status_code=303)
+    set_vm_template(name, enabled == "1")
+    message = "VM помечена как шаблон: запуск заблокирован, используй клонирование" if enabled == "1" else "Флаг шаблона снят"
+    return RedirectResponse(url=f"/vm/{name}?clone_message={message}", status_code=303)
+
+
 @app.post("/vm/{name}/{action}")
 def vm_action(request: Request, name: str, action: str):
     auth_redirect = require_auth(request)
@@ -1865,9 +2071,12 @@ def vm_action(request: Request, name: str, action: str):
     if action == "delete":
         run_cmd(["virsh", "destroy", name], timeout=20)
         run_cmd(["virsh", "undefine", name, "--remove-all-storage"], timeout=60)
+        set_vm_template(name, False)
         return RedirectResponse(url="/", status_code=303)
     if action not in allowed:
         return JSONResponse({"ok": False, "error": "Unsupported action"}, status_code=400)
+    if action == "start" and is_vm_template(name):
+        return RedirectResponse(url=f"/vm/{name}?clone_error=VM помечена как шаблон — запуск заблокирован. Склонируй её или сними флаг шаблона", status_code=303)
     run_cmd(allowed[action], timeout=30)
     return RedirectResponse(url=f"/vm/{name}", status_code=303)
 

@@ -6,11 +6,13 @@
   </div>
   <nav class="v-nav">
     <a data-icon="⌂" class="{{ 'active' if path == '/' else '' }}" href="/">Обзор</a>
-    <a data-icon="＋" class="{{ 'active' if path.startswith('/vm/create') else '' }}" href="/vm/create">Создать VM</a>
-    <div class="v-nav-group {{ 'open' if path.startswith('/iso') or path.startswith('/disk-images') else '' }}">
+    <a data-icon="＋" class="{{ 'active' if path == '/vm/create' else '' }}" href="/vm/create">Создать VM</a>
+    <a data-icon="☁" class="{{ 'active' if path == '/vm/create-cloud' else '' }}" href="/vm/create-cloud">VM из облака</a>
+    <div class="v-nav-group {{ 'open' if path.startswith('/iso') or path.startswith('/disk-images') or path.startswith('/cloud-images') else '' }}">
       <button class="v-nav-group-title" type="button">Образы</button>
       <a data-icon="◎" class="{{ 'active' if path.startswith('/iso') else '' }}" href="/iso">ISO</a>
       <a data-icon="▣" class="{{ 'active' if path.startswith('/disk-images') else '' }}" href="/disk-images">Диски</a>
+      <a data-icon="☁" class="{{ 'active' if path.startswith('/cloud-images') else '' }}" href="/cloud-images">Cloud</a>
     </div>
     <a data-icon="⇄" class="{{ 'active' if path.startswith('/network') else '' }}" href="/network">Сеть</a>
     <a data-icon="⚙" class="{{ 'active' if path.startswith('/operations') else '' }}" href="/operations">Операции</a>

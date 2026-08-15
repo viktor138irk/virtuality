@@ -75,6 +75,9 @@
       {% if iso_error %}<div class="alert danger">{{ iso_error }}</div>{% endif %}
       {% if boot_message %}<div class="alert success">{{ boot_message }}</div>{% endif %}
       {% if boot_error %}<div class="alert danger">{{ boot_error }}</div>{% endif %}
+      {% if clone_message %}<div class="alert success">{{ clone_message }}</div>{% endif %}
+      {% if clone_error %}<div class="alert danger">{{ clone_error }}</div>{% endif %}
+      {% if is_template %}<div class="alert warn">Эта VM помечена как шаблон: запуск заблокирован. Клонируй её для создания новых машин.</div>{% endif %}
 
       <section class="grid vm-four-grid">
         <article class="card">
@@ -241,6 +244,39 @@
             <summary>Технический вывод domiflist</summary>
             <pre>{{ vm.interfaces }}</pre>
           </details>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="card">
+          <div class="card-head">
+            <h2>Клонирование</h2>
+            <span class="pill">virt-clone</span>
+          </div>
+          <form method="post" action="/vm/{{ vm.name }}/clone" class="form-grid">
+            <label>
+              <span>Имя новой VM</span>
+              <input type="text" name="new_name" placeholder="{{ vm.name }}-copy" required>
+            </label>
+            <button class="primary wide" {% if is_running %}disabled{% endif %}>Клонировать VM</button>
+            {% if is_running %}
+              <p class="muted small-note">Клонирование доступно только для выключенной VM — сначала выключи её.</p>
+            {% else %}
+              <p class="muted small-note">Диски копируются целиком, MAC-адрес нового клона генерируется автоматически. Прогресс — в «Операциях».</p>
+            {% endif %}
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Шаблон</h2>
+            <span class="pill">{{ 'template' if is_template else 'обычная VM' }}</span>
+          </div>
+          <form method="post" action="/vm/{{ vm.name }}/template" class="form-grid">
+            <input type="hidden" name="enabled" value="{{ '0' if is_template else '1' }}">
+            <button class="{{ 'ghost' if is_template else 'primary' }} wide">{{ 'Снять флаг шаблона' if is_template else 'Пометить как шаблон' }}</button>
+          </form>
+          <p class="muted small-note">Шаблон — эталонная VM для клонирования: запуск заблокирован, чтобы случайно не изменить эталонный диск. Подготовь VM, выключи её и пометь как шаблон.</p>
         </article>
       </section>
 
