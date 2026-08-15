@@ -38,7 +38,7 @@
         <div class="top-meta">
           <span>user: {{ user }}</span>
           <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+          <form method="post" action="/logout" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="ghost">Выйти</button></form>
         </div>
       </header>
 
@@ -82,11 +82,11 @@
           {% endif %}
           <div class="actions top-space update-actions">
             {% if info.has_update %}
-              <form method="post" action="/update/apply" id="update-apply-form" onsubmit="return confirm('Запустить обновление Virtuality из GitHub? Панель перезапустится.');">
+              <form method="post" action="/update/apply" id="update-apply-form" onsubmit="return confirm('Запустить обновление Virtuality из GitHub? Панель перезапустится.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="primary" id="update-apply-button" type="submit">Установить обновления</button>
               </form>
             {% else %}
-              <form method="post" action="/update/check" id="update-check-form">
+              <form method="post" action="/update/check" id="update-check-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="primary" id="update-main-button" type="submit">Проверить обновления</button>
               </form>
             {% endif %}

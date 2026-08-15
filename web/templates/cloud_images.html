@@ -19,7 +19,7 @@
         <div class="top-meta">
           <span>user: {{ user }}</span>
           <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+          <form method="post" action="/logout" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="ghost">Выйти</button></form>
         </div>
       </header>
 
@@ -44,7 +44,7 @@
                 <td><span class="status {{ 'ok' if entry.native else 'warn' }}">{{ entry.arch }}{% if entry.native %} · родная{% endif %}</span></td>
                 <td>{% if entry.downloaded %}<span class="status ok">скачан</span>{% else %}<span class="muted">не скачан</span>{% endif %}</td>
                 <td class="actions">
-                  <form method="post" action="/cloud-images/download">
+                  <form method="post" action="/cloud-images/download"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="key" value="{{ entry.key }}">
                     <button class="{{ 'ghost' if entry.downloaded else 'primary' }}">{{ 'Скачать заново' if entry.downloaded else 'Скачать' }}</button>
                   </form>
@@ -98,7 +98,7 @@
               <td>{{ image.updated }}</td>
               <td class="actions">
                 <a class="link-pill" href="/vm/create-cloud">Создать VM</a>
-                <form method="post" action="/cloud-images/{{ image.name }}/delete" onsubmit="return confirm('Удалить образ {{ image.name }}?');">
+                <form method="post" action="/cloud-images/{{ image.name }}/delete" onsubmit="return confirm('Удалить образ {{ image.name }}?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <button class="danger">Удалить</button>
                 </form>
               </td>

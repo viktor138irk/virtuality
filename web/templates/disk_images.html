@@ -19,7 +19,7 @@
         <div class="top-meta">
           <span>user: {{ user }}</span>
           <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+          <form method="post" action="/logout" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="ghost">Выйти</button></form>
         </div>
       </header>
 
@@ -33,7 +33,7 @@
             <h2>Загрузить образ установленной системы</h2>
             <span class="pill">.img .raw .qcow2 .img.xz .zip .tar.gz</span>
           </div>
-          <form id="disk-upload-form" method="post" action="/disk-images/upload" enctype="multipart/form-data" class="form-grid">
+          <form id="disk-upload-form" method="post" action="/disk-images/upload" enctype="multipart/form-data" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label class="upload-box">
               <span>Выбери файл готового диска или архив с диском</span>
               <input id="disk-file-input" type="file" name="image_file" accept=".img,.raw,.qcow2,.img.xz,.zip,.tar.gz,.tgz" required>
@@ -93,7 +93,7 @@
               <td>{{ image.updated }}</td>
               <td class="actions">
                 <a class="link-pill" href="/vm/create">Создать VM</a>
-                <form method="post" action="/disk-images/{{ image.name }}/delete" onsubmit="return confirm('Удалить образ {{ image.name }}?');">
+                <form method="post" action="/disk-images/{{ image.name }}/delete" onsubmit="return confirm('Удалить образ {{ image.name }}?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <button class="danger">Удалить</button>
                 </form>
               </td>

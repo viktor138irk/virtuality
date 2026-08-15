@@ -1,16 +1,28 @@
 #!/usr/bin/env python3
 import asyncio
-import crypt
 import json
 import os
 import re
 import secrets
 import shutil
-import spwd
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
+
+# PAM — основной способ проверки пароля; crypt/spwd удалены в Python 3.13
+# и остаются только как fallback для старых систем без python-pam.
+try:
+    import pam as pam_module
+except ImportError:
+    pam_module = None
+try:
+    import crypt
+    import spwd
+except ImportError:
+    crypt = None
+    spwd = None
 import lzma
 import tarfile
 import zipfile
@@ -42,7 +54,13 @@ DEFAULT_BRIDGE = "br0"
 NOVNC_DIR = next((p for p in [Path("/usr/share/novnc"), Path("/usr/share/novnc/app")] if p.exists()), None)
 
 app = FastAPI(title="Virtuality Panel")
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def template_globals(request: Request) -> dict[str, Any]:
+    return {"csrf_token": get_csrf_token(request)}
+
+
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"), context_processors=[template_globals])
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -76,6 +94,13 @@ def is_configured() -> bool:
 def verify_linux_password(username: str, password: str) -> bool:
     if not username or not password or username != AUTH_USER:
         return False
+    if pam_module is not None:
+        try:
+            return bool(pam_module.pam().authenticate(username, password, service="login"))
+        except Exception:
+            return False
+    if crypt is None or spwd is None:
+        return False
     try:
         shadow = spwd.getspnam(username)
     except (PermissionError, KeyError):
@@ -84,6 +109,36 @@ def verify_linux_password(username: str, password: str) -> bool:
     if stored_hash in ("!", "*", "!!", ""):
         return False
     return secrets.compare_digest(crypt.crypt(password, stored_hash), stored_hash)
+
+
+LOGIN_FAILURES: dict[str, dict[str, float]] = {}
+LOGIN_FAILURES_LOCK = threading.Lock()
+LOGIN_MAX_FAILURES = 5
+LOGIN_BLOCK_SECONDS = 60
+
+
+def login_block_remaining(client_ip: str) -> int:
+    with LOGIN_FAILURES_LOCK:
+        entry = LOGIN_FAILURES.get(client_ip)
+        if not entry or entry["count"] < LOGIN_MAX_FAILURES:
+            return 0
+        remaining = int(entry["last"] + LOGIN_BLOCK_SECONDS - time.time())
+        if remaining <= 0:
+            LOGIN_FAILURES.pop(client_ip, None)
+            return 0
+        return remaining
+
+
+def register_login_failure(client_ip: str) -> None:
+    with LOGIN_FAILURES_LOCK:
+        entry = LOGIN_FAILURES.setdefault(client_ip, {"count": 0, "last": 0.0})
+        entry["count"] += 1
+        entry["last"] = time.time()
+
+
+def reset_login_failures(client_ip: str) -> None:
+    with LOGIN_FAILURES_LOCK:
+        LOGIN_FAILURES.pop(client_ip, None)
 
 
 def user_from_session_token(token: str | None) -> str | None:
@@ -104,6 +159,25 @@ def require_auth(request: Request):
     if not get_current_user(request):
         return RedirectResponse(url="/login", status_code=303)
     return None
+
+
+def get_csrf_token(request: Request) -> str:
+    token = request.cookies.get("virtuality_session")
+    if not token:
+        return ""
+    try:
+        data = serializer.loads(token)
+    except BadSignature:
+        return ""
+    return str(data.get("csrf", ""))
+
+
+def require_csrf(request: Request, csrf_token: str):
+    """Проверка CSRF-токена для POST-форм. Возвращает 403-ответ или None."""
+    expected = get_csrf_token(request)
+    if expected and csrf_token and secrets.compare_digest(expected, csrf_token):
+        return None
+    return HTMLResponse("<h1>Сессия устарела</h1><p>Открой страницу заново и повтори действие.</p>", status_code=403)
 
 
 def run_cmd(cmd: list[str], timeout: int = 12) -> dict[str, Any]:
@@ -1310,16 +1384,25 @@ def login_page(request: Request):
 def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
     if not is_configured():
         return templates.TemplateResponse("login.html", {"request": request, "app_name": APP_NAME, "error": "Панель ещё не настроена. Запусти установщик веб-панели повторно.", "configured": False, "auth_user": AUTH_USER}, status_code=500)
+    client_ip = request.client.host if request.client else "unknown"
+    blocked_for = login_block_remaining(client_ip)
+    if blocked_for:
+        return templates.TemplateResponse("login.html", {"request": request, "app_name": APP_NAME, "error": f"Слишком много неудачных попыток входа. Подожди {blocked_for} сек.", "configured": True, "auth_user": AUTH_USER}, status_code=429)
     if not verify_linux_password(username, password):
+        register_login_failure(client_ip)
         return templates.TemplateResponse("login.html", {"request": request, "app_name": APP_NAME, "error": "Неверный логин или пароль Linux-пользователя", "configured": True, "auth_user": AUTH_USER}, status_code=401)
-    token = serializer.dumps({"user": AUTH_USER})
+    reset_login_failures(client_ip)
+    token = serializer.dumps({"user": AUTH_USER, "csrf": secrets.token_urlsafe(16)})
     response = RedirectResponse(url="/", status_code=303)
-    response.set_cookie("virtuality_session", token, httponly=True, samesite="lax", max_age=60 * 60 * 12)
+    response.set_cookie("virtuality_session", token, httponly=True, samesite="lax", max_age=60 * 60 * 12, secure=request.url.scheme == "https")
     return response
 
 
 @app.post("/logout")
-def logout():
+def logout(request: Request, csrf_token: str = Form("")):
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie("virtuality_session")
     return response
@@ -1344,10 +1427,13 @@ def host_page(request: Request):
 
 
 @app.post("/host/refresh")
-def host_refresh(request: Request):
+def host_refresh(request: Request, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     profile = host_profile.detect_host_profile()
     host_profile.save_host_profile(profile)
     return RedirectResponse(url="/host", status_code=303)
@@ -1362,10 +1448,13 @@ def iso_page(request: Request, error: str | None = None):
 
 
 @app.post("/iso/upload", response_class=HTMLResponse)
-def iso_upload(request: Request, iso_file: UploadFile = File(...)):
+def iso_upload(request: Request, iso_file: UploadFile = File(...), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     safe_name = safe_iso_filename(iso_file.filename or "")
     if not safe_name:
         return templates.TemplateResponse("iso.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "error": "Можно загружать только .iso файлы с безопасным именем."}, status_code=400)
@@ -1386,10 +1475,13 @@ def iso_upload(request: Request, iso_file: UploadFile = File(...)):
 
 
 @app.post("/iso/{name}/delete")
-def iso_delete(request: Request, name: str):
+def iso_delete(request: Request, name: str, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     path = iso_path_by_name(name)
     if path and path.exists() and path.is_file():
         path.unlink()
@@ -1398,10 +1490,13 @@ def iso_delete(request: Request, name: str):
 
 
 @app.post("/iso/refresh")
-def iso_refresh(request: Request):
+def iso_refresh(request: Request, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     refresh_iso_pool()
     return RedirectResponse(url="/iso", status_code=303)
 
@@ -1415,10 +1510,13 @@ def disk_images_page(request: Request, error: str | None = None):
 
 
 @app.post("/disk-images/upload", response_class=HTMLResponse)
-def disk_image_upload(request: Request, image_file: UploadFile = File(...)):
+def disk_image_upload(request: Request, image_file: UploadFile = File(...), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     safe_name = safe_disk_upload_filename(image_file.filename or "")
     if not safe_name:
         return templates.TemplateResponse("disk_images.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "images": list_disk_image_files(), "error": "Можно загружать только .img, .raw, .qcow2, .img.xz, .zip, .tar.gz или .tgz файлы."}, status_code=400)
@@ -1462,10 +1560,13 @@ def disk_image_upload(request: Request, image_file: UploadFile = File(...)):
 
 
 @app.post("/disk-images/{name}/delete")
-def disk_image_delete(request: Request, name: str):
+def disk_image_delete(request: Request, name: str, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     path = disk_image_path_by_name(name)
     if path and path.exists() and path.is_file():
         path.unlink()
@@ -1483,10 +1584,13 @@ def cloud_images_page(request: Request, error: str | None = None):
 
 
 @app.post("/cloud-images/download")
-def cloud_image_download(request: Request, key: str = Form(...)):
+def cloud_image_download(request: Request, key: str = Form(...), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     entry = cloud_images.catalog_entry(key)
     if not entry:
         return cloud_images_page(request, error="Неизвестный образ каталога.")
@@ -1501,10 +1605,13 @@ def cloud_image_download(request: Request, key: str = Form(...)):
 
 
 @app.post("/cloud-images/{name}/delete")
-def cloud_image_delete(request: Request, name: str):
+def cloud_image_delete(request: Request, name: str, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     path = cloud_images.image_path_by_name(name)
     if path and path.exists() and path.is_file():
         path.unlink()
@@ -1526,10 +1633,13 @@ def vm_create_cloud_page(request: Request):
 
 
 @app.post("/vm/create-cloud", response_class=HTMLResponse)
-def vm_create_cloud_submit(request: Request, name: str = Form(...), image_name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(...), username: str = Form("admin"), password: str = Form(""), ssh_key: str = Form(""), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE)):
+def vm_create_cloud_submit(request: Request, name: str = Form(...), image_name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(...), username: str = Form("admin"), password: str = Form(""), ssh_key: str = Form(""), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     form = {"name": name, "image_name": image_name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "username": username, "ssh_key": ssh_key, "network_mode": network_mode, "bridge": bridge}
     image_path = cloud_images.image_path_by_name(image_name)
     error = None
@@ -1648,10 +1758,13 @@ def network_page(request: Request, error: str | None = None):
 
 
 @app.post("/network/vm-ip/save")
-def network_vm_ip_save(request: Request, vm_name: str = Form(...), manual_ip: str = Form("")):
+def network_vm_ip_save(request: Request, vm_name: str = Form(...), manual_ip: str = Form(""), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     if not valid_vm_name(vm_name):
         return RedirectResponse(url="/network", status_code=303)
     manual_ip = (manual_ip or "").strip()
@@ -1676,10 +1789,13 @@ def network_vm_ip_save(request: Request, vm_name: str = Form(...), manual_ip: st
 
 
 @app.post("/network/nat/setup")
-def network_nat_setup(request: Request):
+def network_nat_setup(request: Request, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     try:
         network_core.create_nat_network()
         network_core.apply_port_forwards()
@@ -1691,10 +1807,13 @@ def network_nat_setup(request: Request):
 
 
 @app.post("/network/forward/add")
-def network_forward_add(request: Request, vm_name: str = Form(...), guest_ip: str = Form(...), external_port: str = Form(...), guest_port: str = Form(...), protocol: str = Form("tcp"), note: str = Form("")):
+def network_forward_add(request: Request, vm_name: str = Form(...), guest_ip: str = Form(...), external_port: str = Form(...), guest_port: str = Form(...), protocol: str = Form("tcp"), note: str = Form(""), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     try:
         network_core.add_port_forward(vm_name, guest_ip, external_port, guest_port, protocol, note)
     except NetworkError as exc:
@@ -1703,10 +1822,13 @@ def network_forward_add(request: Request, vm_name: str = Form(...), guest_ip: st
 
 
 @app.post("/network/forward/{forward_id}/delete")
-def network_forward_delete(request: Request, forward_id: str):
+def network_forward_delete(request: Request, forward_id: str, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     try:
         network_core.delete_port_forward(forward_id)
     except NetworkError:
@@ -1715,10 +1837,13 @@ def network_forward_delete(request: Request, forward_id: str):
 
 
 @app.post("/network/apply")
-def network_apply(request: Request):
+def network_apply(request: Request, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     try:
         network_core.apply_port_forwards()
     except NetworkError as exc:
@@ -1727,10 +1852,13 @@ def network_apply(request: Request):
 
 
 @app.post("/network/diagnose", response_class=HTMLResponse)
-def network_diagnose(request: Request, vm_name: str = Form(...), external_port: int = Form(...), guest_port: int = Form(...), protocol: str = Form("tcp")):
+def network_diagnose(request: Request, vm_name: str = Form(...), external_port: int = Form(...), guest_port: int = Form(...), protocol: str = Form("tcp"), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     diagnostics = None
     error = None
     try:
@@ -1793,10 +1921,13 @@ def update_status(request: Request):
 
 
 @app.post("/update/check")
-def update_check(request: Request):
+def update_check(request: Request, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     try:
         update_core.check_updates(fetch=True)
     except Exception:
@@ -1805,10 +1936,13 @@ def update_check(request: Request):
 
 
 @app.post("/update/apply")
-def update_apply(request: Request):
+def update_apply(request: Request, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     try:
         update_core.start_update()
     except Exception:
@@ -1883,10 +2017,13 @@ def vm_create_page(request: Request):
 
 
 @app.post("/vm/create", response_class=HTMLResponse)
-def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(...), iso_path: str = Form(""), disk_image_path: str = Form(""), source_type: str = Form("iso"), guest_arch: str = Form("auto"), boot_order: str = Form("auto"), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE)):
+def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(...), iso_path: str = Form(""), disk_image_path: str = Form(""), source_type: str = Form("iso"), guest_arch: str = Form("auto"), boot_order: str = Form("auto"), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     form = {"name": name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "iso_path": iso_path, "disk_image_path": disk_image_path, "source_type": source_type, "guest_arch": guest_arch, "boot_order": boot_order, "network_mode": network_mode, "bridge": bridge}
     error = None
     if not valid_vm_name(name):
@@ -2025,10 +2162,13 @@ def vm_detail_page(request: Request, name: str):
 
 
 @app.post("/vm/{name}/resources")
-def vm_resources_apply(request: Request, name: str, memory_mb: int = Form(...), vcpus: int = Form(...), guest_arch: str = Form("keep")):
+def vm_resources_apply(request: Request, name: str, memory_mb: int = Form(...), vcpus: int = Form(...), guest_arch: str = Form("keep"), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     ok, message = apply_vm_resources(name, memory_mb, vcpus, guest_arch)
     if ok:
         return RedirectResponse(url=f"/vm/{name}?resource_message={message}", status_code=303)
@@ -2036,10 +2176,13 @@ def vm_resources_apply(request: Request, name: str, memory_mb: int = Form(...), 
 
 
 @app.post("/vm/{name}/boot-order")
-def vm_boot_order_apply(request: Request, name: str, boot_order: str = Form("auto")):
+def vm_boot_order_apply(request: Request, name: str, boot_order: str = Form("auto"), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     ok, message = apply_vm_boot_order(name, boot_order)
     if ok:
         return RedirectResponse(url=f"/vm/{name}?boot_message={message}", status_code=303)
@@ -2047,10 +2190,13 @@ def vm_boot_order_apply(request: Request, name: str, boot_order: str = Form("aut
 
 
 @app.post("/vm/{name}/iso/mount")
-def vm_iso_mount_apply(request: Request, name: str, iso_path: str = Form(...)):
+def vm_iso_mount_apply(request: Request, name: str, iso_path: str = Form(...), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     ok, message = mount_vm_iso(name, iso_path)
     if ok:
         return RedirectResponse(url=f"/vm/{name}?iso_message={message}", status_code=303)
@@ -2058,10 +2204,13 @@ def vm_iso_mount_apply(request: Request, name: str, iso_path: str = Form(...)):
 
 
 @app.post("/vm/{name}/iso/unmount")
-def vm_iso_unmount_apply(request: Request, name: str):
+def vm_iso_unmount_apply(request: Request, name: str, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     ok, message = detach_vm_iso(name)
     if ok:
         return RedirectResponse(url=f"/vm/{name}?iso_message={message}", status_code=303)
@@ -2069,10 +2218,13 @@ def vm_iso_unmount_apply(request: Request, name: str):
 
 
 @app.post("/vm/{name}/snapshot/{snap_action}")
-def vm_snapshot_apply(request: Request, name: str, snap_action: str, snapshot_name: str = Form(...), description: str = Form("")):
+def vm_snapshot_apply(request: Request, name: str, snap_action: str, snapshot_name: str = Form(...), description: str = Form(""), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     if not valid_vm_name(name) or not vm_exists(name):
         return RedirectResponse(url="/", status_code=303)
     if snap_action not in ("create", "revert", "delete"):
@@ -2083,10 +2235,13 @@ def vm_snapshot_apply(request: Request, name: str, snap_action: str, snapshot_na
 
 
 @app.post("/vm/{name}/clone")
-def vm_clone(request: Request, name: str, new_name: str = Form(...)):
+def vm_clone(request: Request, name: str, new_name: str = Form(...), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     if not valid_vm_name(name) or not vm_exists(name):
         return RedirectResponse(url="/", status_code=303)
     if not valid_vm_name(new_name):
@@ -2103,10 +2258,13 @@ def vm_clone(request: Request, name: str, new_name: str = Form(...)):
 
 
 @app.post("/vm/{name}/template")
-def vm_template_toggle(request: Request, name: str, enabled: str = Form("0")):
+def vm_template_toggle(request: Request, name: str, enabled: str = Form("0"), csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     if not valid_vm_name(name) or not vm_exists(name):
         return RedirectResponse(url="/", status_code=303)
     set_vm_template(name, enabled == "1")
@@ -2115,10 +2273,13 @@ def vm_template_toggle(request: Request, name: str, enabled: str = Form("0")):
 
 
 @app.post("/vm/{name}/{action}")
-def vm_action(request: Request, name: str, action: str):
+def vm_action(request: Request, name: str, action: str, csrf_token: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    csrf_fail = require_csrf(request, csrf_token)
+    if csrf_fail:
+        return csrf_fail
     allowed = {"start": ["virsh", "start", name], "shutdown": ["virsh", "shutdown", name], "reboot": ["virsh", "reboot", name], "destroy": ["virsh", "destroy", name], "autostart": ["virsh", "autostart", name], "autostart-disable": ["virsh", "autostart", "--disable", name]}
     if action == "delete":
         run_cmd(["virsh", "destroy", name], timeout=20)

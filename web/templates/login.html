@@ -24,7 +24,7 @@
         <div class="alert danger">{{ error }}</div>
       {% endif %}
 
-      <form method="post" action="/login" class="auth-form">
+      <form method="post" action="/login" class="auth-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label>
           <span>Linux-пользователь</span>
           <input type="text" name="username" value="{{ auth_user }}" autocomplete="username" required>

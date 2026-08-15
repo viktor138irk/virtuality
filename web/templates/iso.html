@@ -19,7 +19,7 @@
         <div class="top-meta">
           <span>user: {{ user }}</span>
           <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+          <form method="post" action="/logout" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="ghost">Выйти</button></form>
         </div>
       </header>
 
@@ -33,7 +33,7 @@
             <h2>Загрузить установочный ISO</h2>
             <span class="pill">только .iso</span>
           </div>
-          <form id="iso-upload-form" method="post" action="/iso/upload" enctype="multipart/form-data" class="form-grid">
+          <form id="iso-upload-form" method="post" action="/iso/upload" enctype="multipart/form-data" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label class="upload-box">
               <span>Выбери ISO-файл установочного диска</span>
               <input id="iso-file-input" type="file" name="iso_file" accept=".iso" required>
@@ -62,7 +62,7 @@
             <span class="pill">pool</span>
           </div>
           <div class="actions big-actions">
-            <form method="post" action="/iso/refresh"><button>Обновить ISO pool</button></form>
+            <form method="post" action="/iso/refresh"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Обновить ISO pool</button></form>
             <a class="link-pill accent" href="/vm/create">Создать VM</a>
           </div>
           <pre>sudo virsh pool-refresh virtuality-iso
@@ -86,7 +86,7 @@ ls -lh /var/lib/virtuality/iso</pre>
               <td>{{ iso.size }}</td>
               <td>{{ iso.updated }}</td>
               <td class="actions">
-                <form method="post" action="/iso/{{ iso.name }}/delete" onsubmit="return confirm('Удалить ISO {{ iso.name }}?');">
+                <form method="post" action="/iso/{{ iso.name }}/delete" onsubmit="return confirm('Удалить ISO {{ iso.name }}?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <button class="danger">Удалить</button>
                 </form>
               </td>

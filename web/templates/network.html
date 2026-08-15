@@ -19,7 +19,7 @@
         <div class="top-meta">
           <span>user: {{ user }}</span>
           <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+          <form method="post" action="/logout" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="ghost">Выйти</button></form>
         </div>
       </header>
 
@@ -58,7 +58,7 @@
             <div><span>DHCP</span><strong>{{ ctx.nat.dhcp }}</strong></div>
             <div><span>Bridge</span><strong>{{ ctx.nat.bridge }}</strong></div>
           </div>
-          <form method="post" action="/network/nat/setup" class="inline-form top-space">
+          <form method="post" action="/network/nat/setup" class="inline-form top-space"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button class="primary">Создать / починить NAT-сеть</button>
           </form>
           <pre>{{ ctx.nat.info }}</pre>
@@ -80,7 +80,7 @@
             <h2>Добавить проброс порта</h2>
             <span class="pill">DNAT auto/manual IP · ranges</span>
           </div>
-          <form method="post" action="/network/forward/add" class="form-grid">
+          <form method="post" action="/network/forward/add" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label>
               <span>Описание</span>
               <input type="text" name="note" placeholder="Например: сайт, SSH, SIP, RTP MikoPBX">
@@ -155,7 +155,7 @@
             <h2>Диагностика публичного доступа</h2>
             <span class="pill">VM → Internet</span>
           </div>
-          <form method="post" action="/network/diagnose" class="form-grid">
+          <form method="post" action="/network/diagnose" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label>
               <span>Виртуальная машина</span>
               <select name="vm_name" required>
@@ -220,7 +220,7 @@
       <section class="card">
         <div class="card-head">
           <h2>Пробросы портов</h2>
-          <form method="post" action="/network/apply"><button>Применить правила</button></form>
+          <form method="post" action="/network/apply"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Применить правила</button></form>
         </div>
         <table>
           <thead>
@@ -239,14 +239,14 @@
               <td>{{ item.note }}</td>
               <td>
                 <div class="actions">
-                  <form method="post" action="/network/diagnose">
+                  <form method="post" action="/network/diagnose"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="vm_name" value="{{ item.vm_name }}">
                     <input type="hidden" name="external_port" value="{{ item.external_port }}">
                     <input type="hidden" name="guest_port" value="{{ item.guest_port }}">
                     <input type="hidden" name="protocol" value="{{ item.protocol }}">
                     <button>Диагностика</button>
                   </form>
-                  <form method="post" action="/network/forward/{{ item.id }}/delete"><button class="danger">Удалить</button></form>
+                  <form method="post" action="/network/forward/{{ item.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="danger">Удалить</button></form>
                 </div>
               </td>
             </tr>

@@ -21,7 +21,7 @@
         <div class="top-meta">
           <span>user: {{ user }}</span>
           <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+          <form method="post" action="/logout" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="ghost">Выйти</button></form>
         </div>
       </header>
 
@@ -36,7 +36,7 @@
             <span class="pill">VM wizard</span>
           </div>
 
-          <form method="post" action="/vm/create" class="form-grid">
+          <form method="post" action="/vm/create" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label>
               <span>Имя VM</span>
               <input type="text" name="name" value="{{ form.name or '' }}" placeholder="ubuntu-test" required>

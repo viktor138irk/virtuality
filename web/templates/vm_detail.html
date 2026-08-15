@@ -65,7 +65,7 @@
           <span class="status {{ 'ok' if is_autostart else 'err' }}">autostart: {{ autostart_label }}</span>
           <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Консоль ↗</a>
           <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+          <form method="post" action="/logout" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="ghost">Выйти</button></form>
         </div>
       </header>
 
@@ -93,10 +93,10 @@
               <div class="vm-actions compact-actions big-actions">
                 <a class="icon-action accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener" title="Открыть консоль"><span>▣</span><em>Консоль</em></a>
                 {% if is_running %}
-                  <form method="post" action="/vm/{{ vm.name }}/reboot"><button class="icon-action" title="Перезагрузить"><span>↻</span><em>Reboot</em></button></form>
-                  <form method="post" action="/vm/{{ vm.name }}/shutdown"><button class="icon-action" title="Мягко выключить"><span>⏻</span><em>Shutdown</em></button></form>
+                  <form method="post" action="/vm/{{ vm.name }}/reboot"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="icon-action" title="Перезагрузить"><span>↻</span><em>Reboot</em></button></form>
+                  <form method="post" action="/vm/{{ vm.name }}/shutdown"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="icon-action" title="Мягко выключить"><span>⏻</span><em>Shutdown</em></button></form>
                 {% else %}
-                  <form method="post" action="/vm/{{ vm.name }}/start"><button class="icon-action success" title="Запустить"><span>▶</span><em>Start</em></button></form>
+                  <form method="post" action="/vm/{{ vm.name }}/start"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="icon-action success" title="Запустить"><span>▶</span><em>Start</em></button></form>
                 {% endif %}
               </div>
             </div>
@@ -104,11 +104,11 @@
               <div class="label">Автозапуск</div>
               <div class="vm-actions compact-actions big-actions">
                 {% if is_autostart %}
-                  <form method="post" action="/vm/{{ vm.name }}/autostart-disable" class="autostart-form">
+                  <form method="post" action="/vm/{{ vm.name }}/autostart-disable" class="autostart-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <button class="autostart-indicator on" title="Автозапуск включён. Нажми, чтобы отключить"><span>●</span><strong>Включён</strong><small>Нажми для отключения</small></button>
                   </form>
                 {% else %}
-                  <form method="post" action="/vm/{{ vm.name }}/autostart" class="autostart-form">
+                  <form method="post" action="/vm/{{ vm.name }}/autostart" class="autostart-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <button class="autostart-indicator off" title="Автозапуск выключен. Нажми, чтобы включить"><span>●</span><strong>Выключен</strong><small>Нажми для включения</small></button>
                   </form>
                 {% endif %}
@@ -119,10 +119,10 @@
               <div class="label">Опасные действия</div>
               <div class="vm-actions compact-actions big-actions">
                 {% if is_running %}
-                  <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="icon-action danger" title="Принудительно выключить"><span>⚡</span><em>Power off</em></button></form>
+                  <form method="post" action="/vm/{{ vm.name }}/destroy"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="icon-action danger" title="Принудительно выключить"><span>⚡</span><em>Power off</em></button></form>
                 {% endif %}
                 {% if not is_running %}
-                  <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');"><button class="icon-action danger" title="Удалить VM вместе с дисками"><span>🗑</span><em>Delete</em></button></form>
+                  <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="icon-action danger" title="Удалить VM вместе с дисками"><span>🗑</span><em>Delete</em></button></form>
                 {% else %}
                   <span class="muted small-note">Удаление доступно после выключения VM.</span>
                 {% endif %}
@@ -136,7 +136,7 @@
             <h2>CPU / RAM / Архитектура</h2>
             <span class="pill">resources</span>
           </div>
-          <form method="post" action="/vm/{{ vm.name }}/resources" class="form-grid">
+          <form method="post" action="/vm/{{ vm.name }}/resources" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="form-row">
               <label>
                 <span>CPU</span>
@@ -169,7 +169,7 @@
             <h2>Порядок загрузки</h2>
             <span class="pill">boot</span>
           </div>
-          <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid boot-order-form">
+          <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid boot-order-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="boot_order" id="boot-order-value" value="{{ current_boot_order|default('auto') }}">
             <div class="boot-order-list" id="boot-order-list" data-current="{{ current_boot_order|default('auto') }}">
               <div class="boot-order-item" draggable="true" data-device="cdrom"><span class="drag-handle">☰</span><div><b>ISO / CD-ROM</b><small>Установщик или rescue-образ</small></div></div>
@@ -191,7 +191,7 @@
           {% else %}
             <div class="muted small-note">ISO сейчас не подключён.</div>
           {% endif %}
-          <form method="post" action="/vm/{{ vm.name }}/iso/mount" class="form-grid">
+          <form method="post" action="/vm/{{ vm.name }}/iso/mount" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label>
               <span>ISO образ</span>
               <select name="iso_path" required>
@@ -202,7 +202,7 @@
             </label>
             <button class="primary wide" type="submit" {% if not isos %}disabled{% endif %}>Смонтировать ISO</button>
           </form>
-          <form method="post" action="/vm/{{ vm.name }}/iso/unmount" class="form-grid" onsubmit="return confirm('Отмонтировать ISO из VM {{ vm.name }}?');">
+          <form method="post" action="/vm/{{ vm.name }}/iso/unmount" class="form-grid" onsubmit="return confirm('Отмонтировать ISO из VM {{ vm.name }}?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="ghost wide" {% if not current_iso %}disabled{% endif %}>Отмонтировать ISO</button>
           </form>
           {% if not isos %}
@@ -254,7 +254,7 @@
           <h2>Снапшоты</h2>
           <span class="pill">{{ snapshots|length }} шт.</span>
         </div>
-        <form method="post" action="/vm/{{ vm.name }}/snapshot/create" class="form-grid">
+        <form method="post" action="/vm/{{ vm.name }}/snapshot/create" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <div class="form-row">
             <label>
               <span>Имя снапшота</span>
@@ -278,11 +278,11 @@
               <td>{{ snap.created }}</td>
               <td><span class="status {{ snap.state_css }}">{{ snap.state }}</span></td>
               <td class="actions">
-                <form method="post" action="/vm/{{ vm.name }}/snapshot/revert" onsubmit="return confirm('Откатить VM {{ vm.name }} к снапшоту {{ snap.name }}? Текущее состояние диска будет потеряно.');">
+                <form method="post" action="/vm/{{ vm.name }}/snapshot/revert" onsubmit="return confirm('Откатить VM {{ vm.name }} к снапшоту {{ snap.name }}? Текущее состояние диска будет потеряно.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <input type="hidden" name="snapshot_name" value="{{ snap.name }}">
                   <button class="ghost">Откатиться</button>
                 </form>
-                <form method="post" action="/vm/{{ vm.name }}/snapshot/delete" onsubmit="return confirm('Удалить снапшот {{ snap.name }}?');">
+                <form method="post" action="/vm/{{ vm.name }}/snapshot/delete" onsubmit="return confirm('Удалить снапшот {{ snap.name }}?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <input type="hidden" name="snapshot_name" value="{{ snap.name }}">
                   <button class="danger">Удалить</button>
                 </form>
@@ -302,7 +302,7 @@
             <h2>Клонирование</h2>
             <span class="pill">virt-clone</span>
           </div>
-          <form method="post" action="/vm/{{ vm.name }}/clone" class="form-grid">
+          <form method="post" action="/vm/{{ vm.name }}/clone" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label>
               <span>Имя новой VM</span>
               <input type="text" name="new_name" placeholder="{{ vm.name }}-copy" required>
@@ -321,7 +321,7 @@
             <h2>Шаблон</h2>
             <span class="pill">{{ 'template' if is_template else 'обычная VM' }}</span>
           </div>
-          <form method="post" action="/vm/{{ vm.name }}/template" class="form-grid">
+          <form method="post" action="/vm/{{ vm.name }}/template" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="enabled" value="{{ '0' if is_template else '1' }}">
             <button class="{{ 'ghost' if is_template else 'primary' }} wide">{{ 'Снять флаг шаблона' if is_template else 'Пометить как шаблон' }}</button>
           </form>

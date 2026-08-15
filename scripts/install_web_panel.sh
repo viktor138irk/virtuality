@@ -18,6 +18,10 @@ LOG_FILE="${LOG_DIR}/install_web_panel_$(date +%Y%m%d_%H%M%S).log"
 PROFILE_DIR="/var/lib/virtuality/config"
 PROFILE_FILE="${PROFILE_DIR}/host_profile.json"
 SESSION_SECRET_FILE="${PROFILE_DIR}/session_secret"
+TLS_DIR="${PROFILE_DIR}/tls"
+TLS_CERT="${TLS_DIR}/virtuality.crt"
+TLS_KEY="${TLS_DIR}/virtuality.key"
+TLS_ENABLED="${VIRTUALITY_TLS:-1}"
 UPLOAD_TMP_DIR="/var/lib/virtuality/tmp"
 TOTAL_STEPS=13
 CURRENT_STEP=0
@@ -183,6 +187,18 @@ TMP=${UPLOAD_TMP_DIR}
 EOF
 chmod 600 "${APP_DIR}/.env"
 ok "Создан ${APP_DIR}/.env"
+if [[ "$TLS_ENABLED" == "1" ]]; then
+  if [[ -s "$TLS_CERT" && -s "$TLS_KEY" ]]; then
+    ok "Используем существующий TLS-сертификат: $TLS_CERT"
+  else
+    mkdir -p "$TLS_DIR"
+    run_logged "Самоподписанный TLS-сертификат создан на 10 лет" openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes -keyout "$TLS_KEY" -out "$TLS_CERT" -subj "/CN=virtuality" -addext "subjectAltName=DNS:virtuality,IP:127.0.0.1"
+    chmod 600 "$TLS_KEY"
+  fi
+  ok "Панель будет работать по HTTPS (отключить: VIRTUALITY_TLS=0)"
+else
+  warn "TLS отключён через VIRTUALITY_TLS=0 — панель будет работать по HTTP"
+fi
 ok "Временный каталог загрузок: ${UPLOAD_TMP_DIR}"
 ok "Вход будет по Linux-пользователю: ${AUTH_USER}"
 
@@ -198,6 +214,10 @@ run_logged "pip обновлён" "$VENV_DIR/bin/pip" install --upgrade pip
 run_logged "Python-зависимости установлены" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 
 step "Создаём systemd service"
+UVICORN_TLS_ARGS=""
+if [[ "$TLS_ENABLED" == "1" ]]; then
+  UVICORN_TLS_ARGS=" --ssl-certfile ${TLS_CERT} --ssl-keyfile ${TLS_KEY}"
+fi
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Virtuality Web Panel
@@ -207,7 +227,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${APP_DIR}
-ExecStart=${VENV_DIR}/bin/uvicorn app:app --host 0.0.0.0 --port ${PORT}
+ExecStart=${VENV_DIR}/bin/uvicorn app:app --host 0.0.0.0 --port ${PORT}${UVICORN_TLS_ARGS}
 Restart=always
 RestartSec=3
 User=root
@@ -287,13 +307,18 @@ else
 fi
 
 SERVER_IP="$(hostname -I | awk '{print $1}')"
+PANEL_SCHEME="http"
+[[ "$TLS_ENABLED" == "1" ]] && PANEL_SCHEME="https"
 
 echo
 echo -e "${GREEN}${BOLD}╭────────────────────────────────────────────────────────────╮${RESET}"
 echo -e "${GREEN}${BOLD}│${RESET} ${BOLD}Установка Virtuality Web Panel завершена${RESET}                 ${GREEN}${BOLD}│${RESET}"
 echo -e "${GREEN}${BOLD}╰────────────────────────────────────────────────────────────╯${RESET}"
 echo
-echo -e "${BOLD}URL:${RESET}        http://${SERVER_IP}:${PORT}"
+echo -e "${BOLD}URL:${RESET}        ${PANEL_SCHEME}://${SERVER_IP}:${PORT}"
+if [[ "$TLS_ENABLED" == "1" ]]; then
+  echo -e "${DIM}Сертификат самоподписанный — браузер один раз спросит подтверждение.${RESET}"
+fi
 echo -e "${BOLD}Login:${RESET}      ${AUTH_USER} / пароль Linux-пользователя"
 echo -e "${BOLD}Profile:${RESET}    ${LABEL:-$PROFILE}"
 echo -e "${BOLD}Arch:${RESET}       ${ARCH:-unknown}"
