@@ -429,6 +429,7 @@ VIRTUALITY_COOKIE_SECURE=0      # 1 — cookie только по HTTPS (за rev
 
 - для продакшена отключите автообновление (`VIRTUALITY_AUTO_UPDATE=0`) и обновляйтесь вручную через `/update` после проверки версии;
 - открывайте панель наружу только через HTTPS reverse proxy (nginx/Caddy) с `VIRTUALITY_WEB_HOST=127.0.0.1` и `VIRTUALITY_COOKIE_SECURE=1`;
+- reverse proxy должен передавать исходный `Host` (nginx: `proxy_set_header Host $host;`, для noVNC-консоли ещё `Upgrade`/`Connection`), иначе панель отклонит POST-запросы как cross-origin;
 - мониторинг: `GET /healthz` без авторизации возвращает `{"ok": true, "version": "..."}`;
 - после 5 неверных паролей вход с этого адреса блокируется на 5 минут; сессия живёт 12 часов;
 - правила проброса портов восстанавливаются после перезагрузки сервисом `virtuality-network.service`.
