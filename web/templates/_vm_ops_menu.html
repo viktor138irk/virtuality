@@ -1,0 +1,15 @@
+{#- Пункты меню машины: пауза, продолжение, спящий режим, клонирование.
+    Перед include задайте ops_name (имя), ops_state (состояние virsh),
+    ops_next (куда вернуться после действия) и ops_hints (подсказки под пунктами). -#}
+{% from "_ui.html" import icon %}
+{%- set ops = ops_state|vm_state -%}
+{%- macro item(label, hint, hints) -%}<span>{{ label }}{% if hints %}<small>{{ hint }}</small>{% endif %}</span>{%- endmacro -%}
+{% if ops.running %}
+  <form method="post" action="/vm/{{ ops_name }}/ops/pause" data-toast="Машина {{ ops_name }} приостановлена" data-toast-tone="warning"><input type="hidden" name="next" value="{{ ops_next }}"><button class="menu-item">{{ icon('pause') }}{{ item('Приостановить', 'Заморозить, оставив в памяти', ops_hints) }}</button></form>
+  <form method="post" action="/vm/{{ ops_name }}/ops/hibernate" data-confirm="Память машины сохранится на диск сервера, а сама машина выключится. При следующем запуске она продолжит работу с этого же места." data-confirm-title="Перевести {{ ops_name }} в спящий режим?" data-confirm-button="Усыпить" data-confirm-tone="brand" data-toast="Машина {{ ops_name }} засыпает"><input type="hidden" name="next" value="{{ ops_next }}"><button class="menu-item">{{ icon('moon') }}{{ item('Спящий режим', 'Сохранить на диск и выключить', ops_hints) }}</button></form>
+{% elif ops.raw == 'paused' %}
+  <form method="post" action="/vm/{{ ops_name }}/ops/resume" data-toast="Машина {{ ops_name }} продолжает работу"><input type="hidden" name="next" value="{{ ops_next }}"><button class="menu-item">{{ icon('play') }}{{ item('Продолжить', 'Снять с паузы', ops_hints) }}</button></form>
+  <form method="post" action="/vm/{{ ops_name }}/ops/hibernate" data-confirm="Память машины сохранится на диск сервера, а сама машина выключится. При следующем запуске она продолжит работу с этого же места." data-confirm-title="Перевести {{ ops_name }} в спящий режим?" data-confirm-button="Усыпить" data-confirm-tone="brand" data-toast="Машина {{ ops_name }} засыпает"><input type="hidden" name="next" value="{{ ops_next }}"><button class="menu-item">{{ icon('moon') }}{{ item('Спящий режим', 'Сохранить на диск и выключить', ops_hints) }}</button></form>
+{% endif %}
+<a class="menu-item" href="/vm/{{ ops_name }}/clone">{{ icon('copy') }}{{ item('Клонировать', 'Точная копия с новым именем', ops_hints) }}</a>
+<div class="menu-sep"></div>

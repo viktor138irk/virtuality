@@ -196,6 +196,41 @@
     setInterval(refreshLive, 5000);
   }
 
+  /* ---------------------------------------------------- live VM load (CPU / RAM meters) */
+  const levelTone = (pct) => (pct >= 90 ? 'danger' : pct >= 75 ? 'warning' : 'success');
+  const formatMb = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(mb >= 10240 ? 0 : 1)} ГБ` : `${Math.round(mb)} МБ`);
+  function applyStatMeter(root, key, pct, label) {
+    const bar = $(`[data-stat="${key}-bar"]`, root);
+    const meter = $(`[data-stat="${key}-meter"]`, root);
+    const text = $(`[data-stat="${key}"]`, root);
+    if (bar) bar.style.setProperty('--value', `${pct == null ? 0 : Math.round(pct)}%`);
+    if (meter) meter.className = `meter ${pct == null ? '' : levelTone(pct)}`;
+    if (text) text.textContent = label;
+  }
+  async function refreshStats() {
+    if (document.hidden) return;
+    try {
+      const response = await fetch('/live/stats', { cache: 'no-store', headers: { Accept: 'application/json' } });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!payload.ok) return;
+      $$('[data-live-stats]').forEach((root) => {
+        const stat = payload.stats[root.dataset.liveStats];
+        root.hidden = !stat;
+        if (!stat) return;
+        const cpu = stat.cpu_pct == null ? null : Math.round(stat.cpu_pct);
+        const memPct = stat.mem_total_mb ? Math.min(100, Math.round((stat.mem_used_mb / stat.mem_total_mb) * 100)) : null;
+        applyStatMeter(root, 'cpu', cpu, cpu == null ? '…' : `${cpu}%`);
+        applyStatMeter(root, 'mem', memPct, stat.mem_total_mb ? (root.classList.contains('vm-meters') ? `${memPct}%` : `${formatMb(stat.mem_used_mb)} из ${formatMb(stat.mem_total_mb)}`) : '—');
+      });
+    } catch (_) {}
+  }
+  function wireStats() {
+    if (!$('[data-live-stats]')) return;
+    refreshStats();
+    setInterval(refreshStats, 5000);
+  }
+
   /* ---------------------------------------------------- uploads */
   function wireUploader(form) {
     const input = $('input[type=file]', form);
@@ -466,6 +501,7 @@
     wireTabs();
     wireCopy();
     wireLive();
+    wireStats();
     $$('form[data-uploader]').forEach(wireUploader);
     wireOperation();
     wireLogs();

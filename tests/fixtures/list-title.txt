@@ -1,0 +1,6 @@
+ Id   Name    State      Title
+--------------------------------------------
+ 1    web01   running    Сайт компании
+ -    db01    shut off
+ -    win11   shut off   Бухгалтерия 1С
+

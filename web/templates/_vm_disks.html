@@ -1,0 +1,27 @@
+{#- Карточка «Диски» на вкладке «Диски и загрузка»: размеры и форма увеличения. Ожидает vm из vm_detail.html. -#}
+{% from "_ui.html" import icon %}
+{% set dk = vmops_disks(vm.name) %}
+<article class="card">
+  <div class="card-header"><div><h2>Диски</h2><p>Диск можно увеличить, уменьшить — нельзя</p></div></div>
+  <div class="list">
+    {% for disk in dk.disks %}
+      <div class="list-item disk-item">
+        <span class="list-icon">{{ icon('disc-3' if disk.is_cdrom else 'hard-drive') }}</span>
+        <div class="grow">
+          <div class="title truncate">{{ disk.name }}</div>
+          <div class="meta">{{ disk.label }} {{ disk.target }}{% if disk.size_text %} · {{ disk.size_text }}{% if disk.used_text %}, занято {{ disk.used_text }}{% endif %}{% endif %}</div>
+        </div>
+        {% if disk.resizable %}
+          <form method="post" action="/vm/{{ vm.name }}/disks/{{ disk.target }}/resize" class="disk-resize" data-confirm="Диск {{ disk.name }} станет больше. Уменьшить его обратно уже не получится." data-confirm-title="Увеличить диск?" data-confirm-button="Увеличить" data-confirm-tone="brand" data-busy="Увеличиваем…">
+            <label class="subtle small" for="disk-size-{{ disk.target }}">до</label>
+            <div class="input-group"><input class="input" id="disk-size-{{ disk.target }}" type="number" name="size_gb" min="{{ disk.min_gb }}" max="{{ dk.max_gb }}" step="1" value="{{ disk.min_gb }}" required aria-label="Новый размер диска {{ disk.name }} в гигабайтах"><span class="addon">ГБ</span></div>
+            <button class="btn btn-sm" type="submit">{{ icon('expand', 'icon-sm') }}Увеличить</button>
+          </form>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="list-item subtle">Дисков не найдено</div>
+    {% endfor %}
+  </div>
+  <div class="card-footer disk-footer"><p class="subtle small">Свободно на сервере: <strong>{{ dk.free_text }}</strong>. {{ dk.hint }}</p></div>
+</article>

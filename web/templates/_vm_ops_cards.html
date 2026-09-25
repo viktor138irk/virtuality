@@ -1,0 +1,43 @@
+{#- Карточки на обзоре машины: нагрузка сейчас, спящий режим, заметки. Ожидает vm из vm_detail.html. -#}
+{% from "_ui.html" import icon %}
+{% set notes = vmops_notes(vm.name) %}
+{% set ops_s = (vm.info.state or 'shut off')|vm_state %}
+{% if ops_s.tone != 'neutral' %}
+<article class="card" data-live-stats="{{ vm.name }}">
+  <div class="card-header"><div><h2>Нагрузка сейчас</h2><p>Обновляется каждые 5 секунд</p></div><span class="stat-icon">{{ icon('activity', 'icon-sm') }}</span></div>
+  <div class="card-body load-grid">
+    <div class="load-row">
+      <div class="row-between"><span class="subtle">{{ icon('cpu', 'icon-sm') }}Процессор</span><strong data-stat="cpu">—</strong></div>
+      <div class="meter" data-stat="cpu-meter"><span data-stat="cpu-bar" style="--value:0%"></span></div>
+    </div>
+    <div class="load-row">
+      <div class="row-between"><span class="subtle">{{ icon('memory-stick', 'icon-sm') }}Память</span><strong data-stat="mem">—</strong></div>
+      <div class="meter" data-stat="mem-meter"><span data-stat="mem-bar" style="--value:0%"></span></div>
+    </div>
+  </div>
+</article>
+{% endif %}
+{% if vmops_saved(vm.dominfo) %}
+<article class="card">
+  <div class="card-body stack-sm">
+    <div class="row" style="flex-wrap:nowrap;align-items:flex-start"><span class="list-icon brand">{{ icon('moon') }}</span><div class="grow"><strong>Машина в спящем режиме</strong><div class="subtle small">При запуске она продолжит работу с того же места: открытые программы и окна останутся.</div></div></div>
+    <form method="post" action="/vm/{{ vm.name }}/ops/forget-save" data-confirm="Сохранённое состояние будет удалено: всё, что было открыто внутри машины и не сохранено, пропадёт. При запуске система загрузится заново." data-confirm-title="Забыть сохранённое состояние?" data-confirm-button="Забыть" data-toast="Сохранённое состояние удалено" data-toast-tone="warning"><button class="btn btn-sm btn-danger-soft">{{ icon('x', 'icon-sm') }}Забыть сохранённое состояние</button></form>
+  </div>
+</article>
+{% endif %}
+<article class="card">
+  <div class="card-header"><div><h2>Заметки</h2><p>Название видно в списке машин</p></div><span class="stat-icon">{{ icon('notebook-pen', 'icon-sm') }}</span></div>
+  <form method="post" action="/vm/{{ vm.name }}/notes/save" data-toast="Заметки сохранены" data-busy="Сохраняем…">
+    <div class="card-body stack-sm">
+      <div class="field">
+        <label for="vm-title">Название</label>
+        <input class="input" id="vm-title" name="title" maxlength="80" value="{{ notes.title }}" placeholder="Например: Сайт компании" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="vm-description">Описание</label>
+        <textarea class="input" id="vm-description" name="description" rows="4" maxlength="2000" placeholder="Что стоит внутри, кто отвечает, когда делать резервные копии…">{{ notes.description }}</textarea>
+      </div>
+    </div>
+    <div class="card-footer"><button class="btn btn-sm btn-primary" type="submit">Сохранить заметки</button></div>
+  </form>
+</article>
