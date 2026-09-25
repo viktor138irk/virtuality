@@ -9,7 +9,8 @@ LOG_FILE="/var/log/virtuality/update.log"
 REMOTE="${VIRTUALITY_UPDATE_REMOTE:-origin}"
 BRANCH="${VIRTUALITY_UPDATE_BRANCH:-main}"
 APPLY_SCRIPT="${SOURCE_DIR}/scripts/apply_github_update.sh"
-ZIP_URL="${VIRTUALITY_UPDATE_ZIP_URL:-https://github.com/viktor138irk/virtuality/archive/refs/heads/${BRANCH}.zip}"
+# shellcheck source=scripts/update_target.sh
+. "${SOURCE_DIR}/scripts/update_target.sh"
 
 mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
 
@@ -89,16 +90,18 @@ diag_network() {
   fi
 
   if [ -d "$SOURCE_DIR/.git" ]; then
-    if git fetch --quiet "$REMOTE" "$BRANCH" >> "$LOG_FILE" 2>&1; then
-      latest="$(git rev-parse "${REMOTE}/${BRANCH}" 2>/dev/null || true)"
+    if git fetch --quiet --tags --force "$REMOTE" "$BRANCH" >> "$LOG_FILE" 2>&1; then
+      resolve_update_target
+      log "channel: ${UPDATE_CHANNEL}, target: ${TARGET_LABEL}"
+      latest="$(git rev-parse "${TARGET_REF}^{commit}" 2>/dev/null || true)"
       if [ -n "$latest" ] && [ "$current" = "$latest" ]; then
         log "no updates: ${current:0:12} / version $current_version"
         write_state "idle" "Автообновление: новых обновлений нет"
         exit 0
       fi
       if [ -n "$latest" ] && [ "$current" != "unknown" ] && ! git merge-base --is-ancestor "$current" "$latest" 2>/dev/null; then
-        log "local build ${current:0:12} is not behind ${REMOTE}/${BRANCH} (${latest:0:12}); skip to avoid a downgrade"
-        write_state "idle" "Автообновление: установленная сборка новее или отличается от ${BRANCH}, обновление пропущено"
+        log "local build ${current:0:12} is not behind ${TARGET_LABEL} (${latest:0:12}); skip to avoid a downgrade"
+        write_state "idle" "Автообновление: установленная версия новее ${TARGET_LABEL}, обновление пропущено"
         exit 0
       fi
       log "update may be available or current commit unknown: ${current:0:12} -> ${latest:0:12}"
@@ -117,6 +120,6 @@ diag_network() {
     exit 0
   fi
 
-  write_state "running" "Автообновление: проверяем и устанавливаем обновление через устойчивый механизм"
-  VIRTUALITY_SOURCE_DIR="$SOURCE_DIR" VIRTUALITY_UPDATE_REMOTE="$REMOTE" VIRTUALITY_UPDATE_BRANCH="$BRANCH" VIRTUALITY_UPDATE_ZIP_URL="$ZIP_URL" bash "$APPLY_SCRIPT"
+  write_state "running" "Автообновление: устанавливаем обновление"
+  VIRTUALITY_SOURCE_DIR="$SOURCE_DIR" VIRTUALITY_UPDATE_REMOTE="$REMOTE" VIRTUALITY_UPDATE_BRANCH="$BRANCH" bash "$APPLY_SCRIPT"
 ) 9>"$LOCK_FILE"

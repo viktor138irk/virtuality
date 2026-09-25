@@ -66,7 +66,9 @@
       <div class="card-body" style="padding-top:6px;padding-bottom:6px">
         <div class="summary-row"><span>Установлена</span><strong>{{ info.current_version }}</strong></div>
         {% if info.has_update %}<div class="summary-row"><span>Доступна</span><strong>{{ info.latest_version }}</strong></div>{% endif %}
-        <div class="summary-row"><span>Канал</span><strong>{{ info.branch }}</strong></div>
+        <div class="summary-row"><span>Канал</span><strong>{{ info.channel_label or info.branch }}</strong></div>
+        {% if info.target %}<div class="summary-row"><span>Обновляемся до</span><strong class="mono">{{ info.target }}</strong></div>{% endif %}
+        <div class="summary-row"><span></span><a class="small" href="/settings#updates">Сменить канал</a></div>
         <div class="summary-row"><span>Сборка</span><strong class="mono">{{ info.current_commit[:8] if info.current_commit else '—' }}</strong></div>
       </div>
     </article>

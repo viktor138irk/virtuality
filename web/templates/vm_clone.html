@@ -29,6 +29,7 @@
               {% if st.running %}<form method="post" action="/vm/{{ vm_name }}/shutdown" class="alert-action" data-toast="Машина выключается — это может занять до минуты"><button class="btn btn-sm">{{ icon('power', 'icon-sm') }}Выключить</button></form>{% endif %}
             </div>
           {% endif %}
+          {% if 'saved' in blockers %}{{ alert('warning', 'Машина в спящем режиме, её память сохранена на диске. Запустите машину и выключите её обычным образом — тогда копия будет целой.', 'Сначала разбудите машину') }}{% endif %}
           {% if 'space' in blockers %}{{ alert('danger', 'Копии нужно ' ~ needed_text ~ ', а свободно только ' ~ free_text ~ '. Удалите ненужные машины или образы.', 'Не хватает места на сервере') }}{% endif %}
           {% if 'no_disks' in blockers %}{{ alert('danger', 'У машины нет дисков, которые можно скопировать.') }}{% endif %}
           {% if 'busy' in blockers %}{{ alert('info', 'Эта машина уже клонируется. Дождитесь окончания в разделе «Задачи».') }}{% endif %}

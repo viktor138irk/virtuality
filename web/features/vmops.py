@@ -174,6 +174,11 @@ def parse_desc_output(result: dict[str, Any]) -> str:
     return text
 
 
+def saved_state(name: str) -> bool:
+    """The machine is hibernated (virsh managedsave): its disks must not change until it is resumed."""
+    return has_managed_save(run(["virsh", "dominfo", name], timeout=10)["stdout"])
+
+
 def has_managed_save(dominfo: str) -> bool:
     """Строка «Managed save: yes» в `virsh dominfo` — машина в спящем режиме."""
     match = re.search(r"^Managed save:\s*(\S+)", dominfo or "", re.MULTILINE | re.IGNORECASE)
@@ -372,6 +377,8 @@ def disk_resize(request: Request, name: str, target: str, size_gb: int = Form(..
     free = free_space(disk["source"])
     if growth > free:
         return redirect_tab(name, "storage", "disk_error", f"На сервере свободно только {presenters.format_bytes(free)}: столько добавить диску не получится")
+    if saved_state(name):
+        return redirect_tab(name, "storage", "disk_error", "Машина в спящем режиме: сохранённая память рассчитана на старый размер диска. Сначала запустите её и выключите обычным образом.")
     if is_shut_off(vm_state(name)):
         result = run(["qemu-img", "resize", disk["source"], f"{size_gb}G"], timeout=120)
     else:
@@ -413,6 +420,8 @@ def clone_context(name: str) -> dict[str, Any]:
     blockers = []
     if not is_shut_off(state):
         blockers.append("running")
+    elif saved_state(name):
+        blockers.append("saved")
     if not cloneable:
         blockers.append("no_disks")
     if needed > free:
