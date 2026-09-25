@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -219,5 +220,11 @@ def start_update() -> dict[str, Any]:
         'finished_at': '',
     }
     write_json(STATE_FILE, data)
-    subprocess.Popen(['bash', str(script)], cwd=str(SOURCE_DIR), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    cmd = ['bash', str(script)]
+    if shutil.which('systemd-run'):
+        # Run outside virtuality-web's cgroup: the update restarts virtuality-web,
+        # which would otherwise kill the update script before it finishes.
+        unit = f"virtuality-update-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        cmd = ['systemd-run', '--unit', unit, '--collect', '--quiet', f'--setenv=VIRTUALITY_SOURCE_DIR={SOURCE_DIR}', f'--working-directory={SOURCE_DIR}'] + cmd
+    subprocess.Popen(cmd, cwd=str(SOURCE_DIR), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     return data

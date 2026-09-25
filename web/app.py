@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 import asyncio
-import crypt
 import json
 import os
+import platform
 import re
-import secrets
 import shutil
-import spwd
 import subprocess
 import tempfile
 import threading
@@ -17,14 +15,16 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlsplit
 import xml.etree.ElementTree as ET
 
 from fastapi import FastAPI, Request, Form, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from itsdangerous import BadSignature, URLSafeSerializer
+from itsdangerous import BadSignature, URLSafeSerializer, URLSafeTimedSerializer
 
+import auth
 import host_profile
 import network_core
 import update_core
@@ -49,6 +49,22 @@ if NOVNC_DIR:
     app.mount("/novnc", StaticFiles(directory=str(NOVNC_DIR)), name="novnc")
 OP_LOCK = threading.Lock()
 
+SECURITY_HEADERS = {
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+}
+
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and not same_origin(request):
+        return JSONResponse({"ok": False, "error": "Cross-origin request blocked"}, status_code=403)
+    response = await call_next(request)
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    return response
+
 
 def load_env() -> dict[str, str]:
     data: dict[str, str] = {}
@@ -62,9 +78,12 @@ def load_env() -> dict[str, str]:
 
 
 CONFIG = load_env()
-AUTH_USER = CONFIG.get("VIRTUALITY_AUTH_USER", os.environ.get("VIRTUALITY_AUTH_USER", "viktor"))
+AUTH_USER = CONFIG.get("VIRTUALITY_AUTH_USER", os.environ.get("VIRTUALITY_AUTH_USER", "root"))
 SESSION_SECRET = CONFIG.get("VIRTUALITY_SESSION_SECRET", os.environ.get("VIRTUALITY_SESSION_SECRET", "dev-secret-change-me"))
-serializer = URLSafeSerializer(SESSION_SECRET, salt="virtuality-session")
+COOKIE_SECURE = CONFIG.get("VIRTUALITY_COOKIE_SECURE", os.environ.get("VIRTUALITY_COOKIE_SECURE", "0")) == "1"
+SESSION_MAX_AGE = 60 * 60 * 12
+login_throttle = auth.LoginThrottle()
+serializer = URLSafeTimedSerializer(SESSION_SECRET, salt="virtuality-session")
 console_serializer = URLSafeSerializer(SESSION_SECRET, salt="virtuality-console")
 
 
@@ -73,24 +92,52 @@ def is_configured() -> bool:
 
 
 def verify_linux_password(username: str, password: str) -> bool:
-    if not username or not password or username != AUTH_USER:
+    if username != AUTH_USER:
         return False
-    try:
-        shadow = spwd.getspnam(username)
-    except (PermissionError, KeyError):
-        return False
-    stored_hash = shadow.sp_pwdp
-    if stored_hash in ("!", "*", "!!", ""):
-        return False
-    return secrets.compare_digest(crypt.crypt(password, stored_hash), stored_hash)
+    return auth.verify_password(username, password)
+
+
+def read_version() -> str:
+    for path in (BASE_DIR / "VERSION", BASE_DIR.parent / "VERSION"):
+        try:
+            return path.read_text().strip() or "unknown"
+        except OSError:
+            continue
+    return "unknown"
+
+
+APP_VERSION = read_version()
+
+
+def redirect_with_message(path: str, key: str, message: str) -> RedirectResponse:
+    return RedirectResponse(url=f"{path}?{key}={quote(message)}", status_code=303)
+
+
+def client_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def same_origin(request: Request) -> bool:
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if not origin or origin == "null":
+        # Browsers always send Origin on cross-site form posts; tools like curl do not.
+        return origin != "null"
+    origin_host = urlsplit(origin).netloc.lower()
+    allowed = {request.headers.get("host", "").lower()}
+    forwarded = request.headers.get("x-forwarded-host")
+    if forwarded:
+        allowed.update(item.strip().lower() for item in forwarded.split(","))
+    return origin_host in allowed
 
 
 def user_from_session_token(token: str | None) -> str | None:
     if not token:
         return None
     try:
-        data = serializer.loads(token)
+        data = serializer.loads(token, max_age=SESSION_MAX_AGE)
     except BadSignature:
+        return None
+    if not isinstance(data, dict):
         return None
     return AUTH_USER if data.get("user") == AUTH_USER else None
 
@@ -1119,14 +1166,19 @@ def mount_vm_iso(name: str, iso_path: str) -> tuple[bool, str]:
 
 
 def vm_details(name: str) -> dict[str, Any]:
+    dominfo = run_cmd(["virsh", "dominfo", name], timeout=10)["stdout"]
+    autostart = vm_autostart_status(name)
     return {
         "name": name,
-        "dominfo": run_cmd(["virsh", "dominfo", name], timeout=10)["stdout"],
+        "dominfo": dominfo,
         "vnc": vm_vnc_display(name),
         "ip": vm_ip(name),
         "disks": run_cmd(["virsh", "domblklist", name, "--details"], timeout=10)["stdout"],
         "interfaces": run_cmd(["virsh", "domiflist", name], timeout=10)["stdout"],
-        "autostart": run_cmd(["virsh", "dominfo", name], timeout=10)["stdout"],
+        "autostart": dominfo,
+        "autostart_enabled": autostart["enabled"],
+        "autostart_label": autostart["label"],
+        "autostart_css": autostart["css"],
     }
 
 
@@ -1232,11 +1284,17 @@ def login_page(request: Request):
 def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
     if not is_configured():
         return templates.TemplateResponse("login.html", {"request": request, "app_name": APP_NAME, "error": "Панель ещё не настроена. Запусти установщик веб-панели повторно.", "configured": False, "auth_user": AUTH_USER}, status_code=500)
+    key = client_key(request)
+    retry_after = login_throttle.retry_after(key)
+    if retry_after:
+        return templates.TemplateResponse("login.html", {"request": request, "app_name": APP_NAME, "error": f"Слишком много неудачных попыток входа. Повтори через {retry_after} сек.", "configured": True, "auth_user": AUTH_USER}, status_code=429, headers={"Retry-After": str(retry_after)})
     if not verify_linux_password(username, password):
+        login_throttle.record_failure(key)
         return templates.TemplateResponse("login.html", {"request": request, "app_name": APP_NAME, "error": "Неверный логин или пароль Linux-пользователя", "configured": True, "auth_user": AUTH_USER}, status_code=401)
+    login_throttle.record_success(key)
     token = serializer.dumps({"user": AUTH_USER})
     response = RedirectResponse(url="/", status_code=303)
-    response.set_cookie("virtuality_session", token, httponly=True, samesite="lax", max_age=60 * 60 * 12)
+    response.set_cookie("virtuality_session", token, httponly=True, samesite="lax", secure=COOKIE_SECURE, max_age=SESSION_MAX_AGE)
     return response
 
 
@@ -1819,8 +1877,8 @@ def vm_resources_apply(request: Request, name: str, memory_mb: int = Form(...), 
         return auth_redirect
     ok, message = apply_vm_resources(name, memory_mb, vcpus, guest_arch)
     if ok:
-        return RedirectResponse(url=f"/vm/{name}?resource_message={message}", status_code=303)
-    return RedirectResponse(url=f"/vm/{name}?resource_error={message}", status_code=303)
+        return redirect_with_message(f"/vm/{name}", "resource_message", message)
+    return redirect_with_message(f"/vm/{name}", "resource_error", message)
 
 
 @app.post("/vm/{name}/boot-order")
@@ -1830,8 +1888,8 @@ def vm_boot_order_apply(request: Request, name: str, boot_order: str = Form("aut
         return auth_redirect
     ok, message = apply_vm_boot_order(name, boot_order)
     if ok:
-        return RedirectResponse(url=f"/vm/{name}?boot_message={message}", status_code=303)
-    return RedirectResponse(url=f"/vm/{name}?boot_error={message}", status_code=303)
+        return redirect_with_message(f"/vm/{name}", "boot_message", message)
+    return redirect_with_message(f"/vm/{name}", "boot_error", message)
 
 
 @app.post("/vm/{name}/iso/mount")
@@ -1841,8 +1899,8 @@ def vm_iso_mount_apply(request: Request, name: str, iso_path: str = Form(...)):
         return auth_redirect
     ok, message = mount_vm_iso(name, iso_path)
     if ok:
-        return RedirectResponse(url=f"/vm/{name}?iso_message={message}", status_code=303)
-    return RedirectResponse(url=f"/vm/{name}?iso_error={message}", status_code=303)
+        return redirect_with_message(f"/vm/{name}", "iso_message", message)
+    return redirect_with_message(f"/vm/{name}", "iso_error", message)
 
 
 @app.post("/vm/{name}/iso/unmount")
@@ -1852,8 +1910,8 @@ def vm_iso_unmount_apply(request: Request, name: str):
         return auth_redirect
     ok, message = detach_vm_iso(name)
     if ok:
-        return RedirectResponse(url=f"/vm/{name}?iso_message={message}", status_code=303)
-    return RedirectResponse(url=f"/vm/{name}?iso_error={message}", status_code=303)
+        return redirect_with_message(f"/vm/{name}", "iso_message", message)
+    return redirect_with_message(f"/vm/{name}", "iso_error", message)
 
 
 @app.post("/vm/{name}/{action}")
@@ -1861,6 +1919,8 @@ def vm_action(request: Request, name: str, action: str):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
+    if not valid_vm_name(name):
+        return JSONResponse({"ok": False, "error": "Invalid VM name"}, status_code=400)
     allowed = {"start": ["virsh", "start", name], "shutdown": ["virsh", "shutdown", name], "reboot": ["virsh", "reboot", name], "destroy": ["virsh", "destroy", name], "autostart": ["virsh", "autostart", name], "autostart-disable": ["virsh", "autostart", "--disable", name]}
     if action == "delete":
         run_cmd(["virsh", "destroy", name], timeout=20)
@@ -1894,6 +1954,11 @@ def live_operations(request: Request):
     if not get_current_user(request):
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
     return JSONResponse({"ok": True, "generated_at": utc_now(), "operations": list_operations(25)})
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True, "app": APP_NAME, "version": APP_VERSION}
 
 
 @app.get("/api/health")

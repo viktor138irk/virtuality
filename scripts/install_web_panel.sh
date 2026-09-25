@@ -11,15 +11,51 @@ VENV_DIR="/opt/virtuality/venv"
 SERVICE_FILE="/etc/systemd/system/virtuality-web.service"
 AUTO_UPDATE_SERVICE_FILE="/etc/systemd/system/virtuality-auto-update.service"
 AUTO_UPDATE_TIMER_FILE="/etc/systemd/system/virtuality-auto-update.timer"
-PORT="${VIRTUALITY_WEB_PORT:-8088}"
-AUTH_USER="${VIRTUALITY_AUTH_USER:-${SUDO_USER:-viktor}}"
+NETWORK_SERVICE_FILE="/etc/systemd/system/virtuality-network.service"
 LOG_DIR="/var/log/virtuality"
 LOG_FILE="${LOG_DIR}/install_web_panel_$(date +%Y%m%d_%H%M%S).log"
 PROFILE_DIR="/var/lib/virtuality/config"
 PROFILE_FILE="${PROFILE_DIR}/host_profile.json"
 SESSION_SECRET_FILE="${PROFILE_DIR}/session_secret"
+NODE_CONFIG_FILE="${PROFILE_DIR}/web.env"
 UPLOAD_TMP_DIR="/var/lib/virtuality/tmp"
+WHEELS_DIR="${VIRTUALITY_WHEELS_DIR:-${REPO_DIR}/wheels}"
 TOTAL_STEPS=13
+
+# Settings survive updates: explicit env > saved node config > previous install > defaults.
+saved_setting() {
+  local key="$1"
+  [[ -f "$NODE_CONFIG_FILE" ]] || return 0
+  sed -n "s/^${key}=//p" "$NODE_CONFIG_FILE" | tail -n1 | tr -d "\"'"
+}
+legacy_auth_user() {
+  if [[ -f "${APP_DIR}/.env" ]]; then
+    sed -n 's/^VIRTUALITY_AUTH_USER=//p' "${APP_DIR}/.env" | tail -n1
+  fi
+}
+legacy_port() {
+  if [[ -f "$SERVICE_FILE" ]]; then
+    sed -n 's/.*--port \([0-9][0-9]*\).*/\1/p' "$SERVICE_FILE" | tail -n1
+  fi
+}
+first_human_user() {
+  getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/ {print $1; exit}'
+}
+
+PORT="${VIRTUALITY_WEB_PORT:-$(saved_setting VIRTUALITY_WEB_PORT)}"
+PORT="${PORT:-$(legacy_port)}"
+PORT="${PORT:-8088}"
+AUTH_USER="${VIRTUALITY_AUTH_USER:-$(saved_setting VIRTUALITY_AUTH_USER)}"
+AUTH_USER="${AUTH_USER:-$(legacy_auth_user)}"
+AUTH_USER="${AUTH_USER:-${SUDO_USER:-}}"
+AUTH_USER="${AUTH_USER:-$(first_human_user)}"
+AUTH_USER="${AUTH_USER:-root}"
+AUTO_UPDATE="${VIRTUALITY_AUTO_UPDATE:-$(saved_setting VIRTUALITY_AUTO_UPDATE)}"
+AUTO_UPDATE="${AUTO_UPDATE:-1}"
+WEB_HOST="${VIRTUALITY_WEB_HOST:-$(saved_setting VIRTUALITY_WEB_HOST)}"
+WEB_HOST="${WEB_HOST:-0.0.0.0}"
+COOKIE_SECURE="${VIRTUALITY_COOKIE_SECURE:-$(saved_setting VIRTUALITY_COOKIE_SECURE)}"
+COOKIE_SECURE="${COOKIE_SECURE:-0}"
 CURRENT_STEP=0
 
 ESC="\033"
@@ -156,7 +192,8 @@ fi
 
 step "Копируем web-панель в /opt/virtuality"
 run_logged "Создана директория /opt/virtuality" mkdir -p /opt/virtuality
-run_logged "Файлы панели синхронизированы в $APP_DIR" rsync -a --delete "$WEB_DIR/" "$APP_DIR/"
+run_logged "Файлы панели синхронизированы в $APP_DIR" rsync -a --delete --exclude='__pycache__/' --exclude='.env' "$WEB_DIR/" "$APP_DIR/"
+run_logged "Версия панели записана" install -m 0644 "${REPO_DIR}/VERSION" "${APP_DIR}/VERSION"
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
   ok "Профиль уже сохранён: $PROFILE_FILE"
@@ -174,9 +211,20 @@ else
   chmod 600 "$SESSION_SECRET_FILE"
   ok "Создан постоянный session secret: $SESSION_SECRET_FILE"
 fi
+cat > "$NODE_CONFIG_FILE" <<EOF
+# Virtuality node settings. Edit and re-run: sudo bash scripts/install_web_panel.sh
+VIRTUALITY_WEB_PORT=${PORT}
+VIRTUALITY_WEB_HOST=${WEB_HOST}
+VIRTUALITY_AUTH_USER=${AUTH_USER}
+VIRTUALITY_AUTO_UPDATE=${AUTO_UPDATE}
+VIRTUALITY_COOKIE_SECURE=${COOKIE_SECURE}
+EOF
+chmod 644 "$NODE_CONFIG_FILE"
+ok "Настройки ноды сохранены: $NODE_CONFIG_FILE"
 cat > "${APP_DIR}/.env" <<EOF
 VIRTUALITY_AUTH_USER=${AUTH_USER}
 VIRTUALITY_SESSION_SECRET=${SESSION_SECRET}
+VIRTUALITY_COOKIE_SECURE=${COOKIE_SECURE}
 TMPDIR=${UPLOAD_TMP_DIR}
 TEMP=${UPLOAD_TMP_DIR}
 TMP=${UPLOAD_TMP_DIR}
@@ -187,15 +235,24 @@ ok "Временный каталог загрузок: ${UPLOAD_TMP_DIR}"
 ok "Вход будет по Linux-пользователю: ${AUTH_USER}"
 
 step "Создаём Python virtualenv"
-if [[ -d "$VENV_DIR" ]]; then
+if [[ -x "$VENV_DIR/bin/python" ]] && "$VENV_DIR/bin/python" -c 'import sys' >/dev/null 2>&1; then
   warn "Virtualenv уже существует, будет переиспользован: $VENV_DIR"
 else
+  if [[ -d "$VENV_DIR" ]]; then
+    warn "Virtualenv повреждён (например, после обновления Python), пересоздаём"
+    rm -rf -- "${VENV_DIR:?}"
+  fi
   run_logged "Virtualenv создан: $VENV_DIR" python3 -m venv "$VENV_DIR"
 fi
 
 step "Устанавливаем Python-зависимости"
-run_logged "pip обновлён" "$VENV_DIR/bin/pip" install --upgrade pip
-run_logged "Python-зависимости установлены" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+if compgen -G "${WHEELS_DIR}/*.whl" >/dev/null; then
+  run_logged "Python-зависимости установлены офлайн из ${WHEELS_DIR}" "$VENV_DIR/bin/pip" install --no-index --find-links "$WHEELS_DIR" -r "$APP_DIR/requirements.txt"
+else
+  run_logged "pip обновлён" "$VENV_DIR/bin/pip" install --upgrade pip
+  run_logged "Python-зависимости установлены" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+fi
+run_logged "Web-панель импортируется без ошибок" bash -c "cd '$APP_DIR' && '$VENV_DIR/bin/python' -c 'import app'"
 
 step "Создаём systemd service"
 cat > "$SERVICE_FILE" <<EOF
@@ -207,9 +264,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${APP_DIR}
-ExecStart=${VENV_DIR}/bin/uvicorn app:app --host 0.0.0.0 --port ${PORT}
+ExecStart=${VENV_DIR}/bin/uvicorn app:app --host ${WEB_HOST} --port ${PORT} --workers 1 --no-server-header
 Restart=always
 RestartSec=3
+TimeoutStopSec=20
+LimitNOFILE=65536
 User=root
 Group=root
 Environment=PYTHONUNBUFFERED=1
@@ -223,7 +282,24 @@ Environment=TMP=${UPLOAD_TMP_DIR}
 WantedBy=multi-user.target
 EOF
 ok "Создан service: $SERVICE_FILE"
+cat > "$NETWORK_SERVICE_FILE" <<EOF
+[Unit]
+Description=Virtuality NAT port forwarding restore
+After=network-online.target libvirtd.service nftables.service ufw.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=${APP_DIR}
+ExecStart=${VENV_DIR}/bin/python ${APP_DIR}/restore_network.py
+
+[Install]
+WantedBy=multi-user.target
+EOF
+ok "Создан service: $NETWORK_SERVICE_FILE"
 run_logged "systemd daemon-reload выполнен" systemctl daemon-reload
+run_logged "virtuality-network.service включён" systemctl enable virtuality-network.service
 
 step "Настраиваем автообновление"
 if [[ -f "${REPO_DIR}/scripts/auto_update_check.sh" ]]; then
@@ -256,8 +332,13 @@ Unit=virtuality-auto-update.service
 WantedBy=timers.target
 EOF
   run_logged "systemd daemon-reload выполнен для автообновлений" systemctl daemon-reload
-  run_logged "virtuality-auto-update.timer включён" systemctl enable --now virtuality-auto-update.timer
-  ok "Автообновление будет проверять GitHub 1 раз в сутки в 00:00 по Москве"
+  if [[ "$AUTO_UPDATE" == "1" ]]; then
+    run_logged "virtuality-auto-update.timer включён" systemctl enable --now virtuality-auto-update.timer
+    ok "Автообновление будет проверять GitHub 1 раз в сутки в 00:00 по Москве"
+  else
+    systemctl disable --now virtuality-auto-update.timer >> "$LOG_FILE" 2>&1 || true
+    ok "Автообновление отключено (VIRTUALITY_AUTO_UPDATE=0). Обновления — вручную через /update"
+  fi
 else
   warn "auto_update_check.sh не найден, автообновление пропущено"
 fi
@@ -298,7 +379,8 @@ echo -e "${BOLD}Login:${RESET}      ${AUTH_USER} / пароль Linux-польз
 echo -e "${BOLD}Profile:${RESET}    ${LABEL:-$PROFILE}"
 echo -e "${BOLD}Arch:${RESET}       ${ARCH:-unknown}"
 echo -e "${BOLD}Service:${RESET}    virtuality-web.service"
-echo -e "${BOLD}Auto update:${RESET} virtuality-auto-update.timer / ежедневно в 00:00 по Москве"
+echo -e "${BOLD}Auto update:${RESET} $([[ "$AUTO_UPDATE" == "1" ]] && echo "ежедневно в 00:00 по Москве" || echo "отключено")"
+echo -e "${BOLD}Settings:${RESET}   ${NODE_CONFIG_FILE}"
 echo -e "${BOLD}Upload tmp:${RESET}  ${UPLOAD_TMP_DIR}"
 echo -e "${BOLD}Session key:${RESET} ${SESSION_SECRET_FILE}"
 echo -e "${BOLD}Status:${RESET}     systemctl status virtuality-web --no-pager"
