@@ -319,9 +319,21 @@ harden_vnc() {
   done < <(virsh list --all --name 2>/dev/null)
 }
 
+# Nodes installed before 0.11 had a text dashboard on tty1 instead of the login prompt.
+cleanup_legacy() {
+  if [[ -f "${UNIT_DIR}/virtuality-console-dashboard.service" ]]; then
+    systemctl disable --now virtuality-console-dashboard.service >/dev/null 2>&1 || true
+    rm -f "${UNIT_DIR}/virtuality-console-dashboard.service" /usr/local/bin/virtuality-console-dashboard
+    systemctl daemon-reload
+    systemctl enable --now getty@tty1.service >/dev/null 2>&1 || true
+    log "legacy tty1 console dashboard removed"
+  fi
+}
+
 cmd_reconfigure() {
   need_root reconfigure
   [[ -d "$APP_DIR" ]] || die "панель не установлена: ${APP_DIR} не найден"
+  cleanup_legacy
   write_units
   apply_firewall
   harden_vnc
