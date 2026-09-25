@@ -22,6 +22,7 @@ MIN_VAR_FREE_MB="${VIRTUALITY_MIN_VAR_FREE_MB:-20480}"
 MIN_RAM_MB="${VIRTUALITY_MIN_RAM_MB:-4096}"
 MIN_CPU_CORES="${VIRTUALITY_MIN_CPU_CORES:-2}"
 SKIP_REQUIREMENTS="${VIRTUALITY_SKIP_REQUIREMENTS:-0}"
+export DEBIAN_FRONTEND=noninteractive
 
 ESC="\033"
 RESET="${ESC}[0m"
@@ -174,14 +175,14 @@ ok "Images: ${IMAGES_DIR}"
 ok "Backups: ${BACKUP_DIR}"
 
 step "Добавляем пользователя в группы libvirt/kvm"
-REAL_USER="${SUDO_USER:-root}"
+REAL_USER="${VIRTUALITY_USER:-${SUDO_USER:-root}}"
 if [[ "$REAL_USER" != "root" ]]; then
   usermod -aG libvirt "$REAL_USER" >> "$LOG_FILE" 2>&1 || warn "Не удалось добавить ${REAL_USER} в libvirt"
   usermod -aG kvm "$REAL_USER" >> "$LOG_FILE" 2>&1 || warn "Не удалось добавить ${REAL_USER} в kvm"
   ok "Пользователь ${REAL_USER} добавлен в группы libvirt/kvm"
   warn "Чтобы группы применились, нужно выйти из SSH и зайти снова"
 else
-  warn "Запуск под root без SUDO_USER; пользователь не добавлен в группы"
+  warn "Запуск под root без SUDO_USER/VIRTUALITY_USER; пользователь не добавлен в группы"
 fi
 
 step "Включаем systemd-сервисы"

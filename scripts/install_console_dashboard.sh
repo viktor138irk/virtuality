@@ -5,7 +5,8 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DASH_SRC="${REPO_DIR}/scripts/virtuality_console_dashboard.sh"
 DASH_DST="/usr/local/bin/virtuality-console-dashboard"
 SERVICE_FILE="/etc/systemd/system/virtuality-console-dashboard.service"
-TARGET_USER="${SUDO_USER:-${USER:-root}}"
+export DEBIAN_FRONTEND=noninteractive
+TARGET_USER="${VIRTUALITY_USER:-${SUDO_USER:-${USER:-root}}}"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "Ошибка: запусти через sudo: sudo bash scripts/install_console_dashboard.sh"
@@ -49,7 +50,9 @@ EOF
 
 systemctl daemon-reload
 systemctl disable --now getty@tty1.service >/dev/null 2>&1 || true
-systemctl enable --now virtuality-console-dashboard.service
+systemctl enable virtuality-console-dashboard.service
+# --no-block: the unit is ordered after multi-user.target, which may still be starting (first boot).
+systemctl start --no-block virtuality-console-dashboard.service
 
 USER_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6 || true)"
 if [[ -n "$USER_HOME" && -d "$USER_HOME" ]]; then

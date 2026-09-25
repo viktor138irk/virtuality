@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${REPO_DIR}/scripts/virtuality_healthcheck.sh"
 DST="/usr/local/bin/vhealth"
-TARGET_USER="${SUDO_USER:-${USER:-root}}"
+TARGET_USER="${VIRTUALITY_USER:-${SUDO_USER:-${USER:-root}}}"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "Ошибка: запусти через sudo: sudo bash scripts/install_healthcheck_command.sh"

@@ -1,0 +1,19 @@
+[Unit]
+Description=Virtuality first boot setup
+Documentation=https://github.com/viktor138irk/virtuality/blob/main/docs/IMAGE.md
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=!/var/lib/virtuality/.firstboot-done
+StartLimitIntervalSec=0
+
+[Service]
+# simple, not oneshot: boot must not wait for a multi-minute package install.
+Type=simple
+ExecStart=/bin/bash /opt/virtuality/source/scripts/virtuality_firstboot.sh
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

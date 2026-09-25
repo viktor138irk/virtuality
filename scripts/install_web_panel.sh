@@ -21,6 +21,7 @@ NODE_CONFIG_FILE="${PROFILE_DIR}/web.env"
 UPLOAD_TMP_DIR="/var/lib/virtuality/tmp"
 WHEELS_DIR="${VIRTUALITY_WHEELS_DIR:-${REPO_DIR}/wheels}"
 TOTAL_STEPS=13
+export DEBIAN_FRONTEND=noninteractive
 
 # Settings survive updates: explicit env > saved node config > previous install > defaults.
 saved_setting() {
