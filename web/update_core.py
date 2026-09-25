@@ -142,6 +142,11 @@ def missing_versions(local_version: str, remote_version: str, manifest: dict[str
     return sorted(versions, key=lambda item: version_tuple(str(item.get('version', '0.0.0'))))
 
 
+def is_ancestor(older: str, newer: str) -> bool:
+    # Only offer an update when the remote is ahead; a node running a newer or diverged build must not be downgraded.
+    return run_cmd(['git', 'merge-base', '--is-ancestor', older, newer], cwd=SOURCE_DIR, timeout=10)['ok']
+
+
 def git_log_between(base: str, head: str, limit: int = 50) -> list[dict[str, str]]:
     if not base or not head or base == head:
         return []
@@ -173,7 +178,7 @@ def check_updates(fetch: bool = True) -> dict[str, Any]:
     manifest = load_manifest(f'{REMOTE}/{DEFAULT_BRANCH}')
     missed = missing_versions(local_version, remote_version, manifest)
     commits = git_log_between(local_commit, remote_commit)
-    has_update = bool(local_commit and remote_commit and local_commit != remote_commit)
+    has_update = bool(local_commit and remote_commit and local_commit != remote_commit and is_ancestor(local_commit, remote_commit))
 
     data = {
         'ok': True,
