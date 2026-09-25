@@ -11,7 +11,6 @@ DATA_DIR="/var/lib/virtuality"
 LOG_DIR="/var/log/virtuality"
 APP_DIR="/opt/virtuality/web"
 VENV_DIR="/opt/virtuality/venv"
-SOURCE_DIR="${VIRTUALITY_SOURCE_DIR:-/opt/virtuality/source}"
 UNIT_DIR="/etc/systemd/system"
 NETPLAN_DIR="/etc/netplan"
 NETPLAN_BACKUP="${CONFIG_DIR}/netplan-backup"
@@ -23,6 +22,7 @@ usage() {
 Usage: virtuality-ctl <command> [options]
 
   status                     Что установлено, порты, адреса панели
+  url                        Адрес панели управления
   reconfigure                Пересоздать systemd-юниты из ${NODE_ENV} и перезапустить панель
   set KEY=VALUE ...          Изменить настройку в web.env (например set VIRTUALITY_TLS=1) и применить
   passwd [USER]              Сменить пароль пользователя панели (пароль читается со стандартного ввода)
@@ -69,6 +69,8 @@ env_set() {
 }
 
 primary_ip() { hostname -I 2>/dev/null | awk '{print $1}'; }
+# Source checkout used by updates; the installer records it in web.env.
+SOURCE_DIR="${VIRTUALITY_SOURCE_DIR:-$(env_get VIRTUALITY_SOURCE_DIR /opt/virtuality/source)}"
 
 panel_url() {
   local tls port
@@ -682,6 +684,7 @@ cmd_uninstall() {
 
 case "${1:-}" in
   status) cmd_status ;;
+  url) panel_url; echo ;;
   reconfigure) cmd_reconfigure ;;
   set) shift; cmd_set "$@" ;;
   passwd) shift; cmd_passwd "$@" ;;

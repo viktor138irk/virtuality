@@ -1344,7 +1344,7 @@ def dashboard(request: Request):
         return auth_redirect
     if setup.wizard_pending():
         return RedirectResponse(url="/setup", status_code=303)
-    services = {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}
+    services = {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "web": service_state("virtuality-web.service")}
     service_rows = [{"key": key, "name": presenters.SERVICE_LABELS.get(key, key), "state": state, **presenters.service_state(state)} for key, state in services.items()]
     return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "service_rows": service_rows, "services_ok": all(row["tone"] == "success" for row in service_rows if row["key"] in ("libvirtd", "web")), "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "user": AUTH_USER, "profile": host_profile.load_host_profile(), "operations": list_operations(5), "operation_css": operation_css, "host": presenters.host_stats(STORAGE_DIR), "greeting": presenters.greeting()})
 
@@ -1999,7 +1999,7 @@ def live_status(request: Request):
             ip = "—"
         css = "ok" if "running" in state else "err" if "shut" in state else "warn"
         vms.append({"id": vm.get("id", "-"), "name": name, "state": state, "state_css": css, "ip": ip if ip and ip != "not available" else "—", "autostart_enabled": vm.get("autostart_enabled", False), "autostart_label": vm.get("autostart_label", "unknown"), "autostart_css": vm.get("autostart_css", "warn")})
-    return JSONResponse({"ok": True, "generated_at": utc_now(), "vms": vms, "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "web": service_state("virtuality-web.service")}, "operations": list_operations(5)})
+    return JSONResponse({"ok": True, "generated_at": utc_now(), "vms": vms, "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "web": service_state("virtuality-web.service")}, "operations": list_operations(5)})
 
 
 @app.get("/live/operations")
@@ -2018,7 +2018,7 @@ def healthz():
 def api_health(request: Request):
     if not get_current_user(request):
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-    return {"system": system_summary(), "host_profile": host_profile.load_host_profile(), "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "virtuality_nat": network_core.network_context()}
+    return {"system": system_summary(), "host_profile": host_profile.load_host_profile(), "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "web": service_state("virtuality-web.service")}, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "virtuality_nat": network_core.network_context()}
 
 
 app.include_router(setup.router)

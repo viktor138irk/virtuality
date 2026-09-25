@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ==========================================================
 # Virtuality Node Installer
-# Clean step-by-step installer for KVM/QEMU/libvirt/Cockpit
+# Clean step-by-step installer for KVM/QEMU/libvirt
 # ==========================================================
 
 PROJECT_NAME="Virtuality"
@@ -13,9 +13,8 @@ ISO_DIR="${STORAGE_DIR}/iso"
 IMAGES_DIR="${STORAGE_DIR}/images"
 BACKUP_DIR="${STORAGE_DIR}/backups"
 LOG_DIR="/var/log/virtuality"
-COCKPIT_PORT="9090"
 LOG_FILE="${LOG_DIR}/install_node_$(date +%Y%m%d_%H%M%S).log"
-TOTAL_STEPS=13
+TOTAL_STEPS=12
 CURRENT_STEP=0
 MIN_ROOT_FREE_MB="${VIRTUALITY_MIN_ROOT_FREE_MB:-8192}"
 MIN_VAR_FREE_MB="${VIRTUALITY_MIN_VAR_FREE_MB:-20480}"
@@ -45,12 +44,11 @@ print_header() {
   clear 2>/dev/null || true
   echo -e "${CYAN}${BOLD}╭────────────────────────────────────────────────────────────╮${RESET}"
   echo -e "${CYAN}${BOLD}│${RESET} ${BOLD}Virtuality Node Installer${RESET}                              ${CYAN}${BOLD}│${RESET}"
-  echo -e "${CYAN}${BOLD}│${RESET} KVM / QEMU / libvirt / Cockpit virtualization node       ${CYAN}${BOLD}│${RESET}"
+  echo -e "${CYAN}${BOLD}│${RESET} KVM / QEMU / libvirt virtualization node                 ${CYAN}${BOLD}│${RESET}"
   echo -e "${CYAN}${BOLD}╰────────────────────────────────────────────────────────────╯${RESET}"
   echo
   echo -e "${GRAY}Лог установки:${RESET} ${LOG_FILE}"
   echo -e "${GRAY}Storage:${RESET} ${STORAGE_DIR}"
-  echo -e "${GRAY}Cockpit:${RESET} ${COCKPIT_PORT}/tcp"
   echo
 }
 
@@ -182,9 +180,9 @@ install_available "Пакеты виртуализации установлен�
   "${QEMU_SYSTEM_PACKAGES[@]}" qemu-utils libvirt-daemon-system libvirt-clients virtinst \
   bridge-utils dnsmasq-base swtpm cloud-image-utils
 
-step "Устанавливаем Cockpit и модули"
-install_available "Cockpit установлен" \
-  cockpit cockpit-machines cockpit-networkmanager cockpit-storaged cockpit-packagekit
+step "Устанавливаем зависимости панели управления"
+install_available "Пакеты панели установлены" \
+  python3 python3-venv rsync openssl nftables novnc python3-websockify
 
 step "Создаём структуру Virtuality"
 run_logged "Директории Virtuality созданы" mkdir -p "$PROJECT_DIR" "$STORAGE_DIR" "$ISO_DIR" "$IMAGES_DIR" "$BACKUP_DIR" "$LOG_DIR"
@@ -208,15 +206,13 @@ fi
 step "Включаем systemd-сервисы"
 run_logged "libvirtd включён и запущен" systemctl enable --now libvirtd
 run_logged "virtlogd включён и запущен" systemctl enable --now virtlogd
-run_logged "cockpit.socket включён и запущен" systemctl enable --now cockpit.socket
 ok "libvirtd: $(service_state libvirtd) / $(service_enabled libvirtd)"
 ok "virtlogd: $(service_state virtlogd) / $(service_enabled virtlogd)"
-ok "cockpit.socket: $(service_state cockpit.socket) / $(service_enabled cockpit.socket)"
 
 step "Настраиваем firewall"
 run_logged "Разрешён OpenSSH" ufw allow OpenSSH
-run_logged "Разрешён Cockpit ${COCKPIT_PORT}/tcp" ufw allow "${COCKPIT_PORT}/tcp"
-run_logged "Разрешены VNC-порты 5900:5999/tcp" ufw allow 5900:5999/tcp
+# Consoles are proxied by the panel; VNC ports stay closed from outside.
+ufw delete allow 5900:5999/tcp >> "$LOG_FILE" 2>&1 || true
 if ufw status | grep -qi inactive; then
   echo "y" | ufw enable >> "$LOG_FILE" 2>&1 && ok "UFW включён" || warn "Не удалось включить UFW"
 else
@@ -243,7 +239,6 @@ ISO_DIR="${ISO_DIR}"
 IMAGES_DIR="${IMAGES_DIR}"
 BACKUP_DIR="${BACKUP_DIR}"
 LOG_DIR="${LOG_DIR}"
-COCKPIT_PORT="${COCKPIT_PORT}"
 EOF
 ok "Создан ${PROJECT_DIR}/virtuality.env"
 
@@ -253,11 +248,6 @@ if command -v virsh >/dev/null 2>&1; then
   virsh pool-list --all >> "$LOG_FILE" 2>&1 && ok "virsh pool-list работает" || warn "virsh pool-list вернул предупреждение"
 else
   warn "virsh не найден после установки"
-fi
-if ss -tulpn 2>/dev/null | grep -q ':9090'; then
-  ok "Cockpit слушает порт 9090"
-else
-  warn "Порт 9090 не виден в ss; Cockpit может быть socket-activated"
 fi
 if [[ -e /dev/kvm ]]; then
   ok "/dev/kvm доступен"
@@ -272,7 +262,6 @@ echo -e "${GREEN}${BOLD}╭─────────────────�
 echo -e "${GREEN}${BOLD}│${RESET} ${BOLD}Установка Virtuality Node завершена${RESET}                      ${GREEN}${BOLD}│${RESET}"
 echo -e "${GREEN}${BOLD}╰────────────────────────────────────────────────────────────╯${RESET}"
 echo
-echo -e "${BOLD}Cockpit:${RESET}     https://${SERVER_IP}:${COCKPIT_PORT}"
 echo -e "${BOLD}Project:${RESET}     ${PROJECT_DIR}"
 echo -e "${BOLD}ISO:${RESET}         ${ISO_DIR}"
 echo -e "${BOLD}Images:${RESET}      ${IMAGES_DIR}"
@@ -283,9 +272,7 @@ echo -e "${BOLD}Проверка:${RESET}"
 echo "  virsh list --all"
 echo "  virsh pool-list --all"
 echo "  systemctl status libvirtd --no-pager"
-echo "  systemctl status cockpit.socket --no-pager"
 echo
 line
-echo -e "${DIM}Следующий шаг: sudo bash scripts/setup_bridge_br0.sh enp2s0 static${RESET}"
-echo -e "${DIM}После bridge: sudo bash scripts/create_test_vm.sh${RESET}"
+echo -e "${DIM}Дальше: sudo bash scripts/install_web_panel.sh — панель управления и мастер настройки${RESET}"
 line

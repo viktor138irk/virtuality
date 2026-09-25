@@ -21,7 +21,7 @@ if [[ "${EUID}" -ne 0 ]]; then
       exit 1
     fi
     chmod +x "$tmp_installer"
-    exec sudo --preserve-env=VIRTUALITY_INSTALL_URL,VIRTUALITY_USER,VIRTUALITY_WEB_PORT,VIRTUALITY_MIN_ROOT_FREE_MB,VIRTUALITY_MIN_VAR_FREE_MB,VIRTUALITY_MIN_RAM_MB,VIRTUALITY_MIN_CPU_CORES,VIRTUALITY_SKIP_REQUIREMENTS,VIRTUALITY_SETUP_BRIDGE,VIRTUALITY_BRIDGE_IFACE,VIRTUALITY_CREATE_TEST_VM,VIRTUALITY_REPO_URL,VIRTUALITY_PROJECT_BASE_DIR,VIRTUALITY_PROJECT_DIR,VIRTUALITY_INSTALL_VERBOSE,VIRTUALITY_CLEAN_BEFORE_INSTALL,VIRTUALITY_AUTO_UPDATE bash "$tmp_installer" "$@"
+    exec sudo --preserve-env=VIRTUALITY_INSTALL_URL,VIRTUALITY_USER,VIRTUALITY_WEB_PORT,VIRTUALITY_MIN_ROOT_FREE_MB,VIRTUALITY_MIN_VAR_FREE_MB,VIRTUALITY_MIN_RAM_MB,VIRTUALITY_MIN_CPU_CORES,VIRTUALITY_SKIP_REQUIREMENTS,VIRTUALITY_REPO_URL,VIRTUALITY_PROJECT_BASE_DIR,VIRTUALITY_PROJECT_DIR,VIRTUALITY_INSTALL_VERBOSE,VIRTUALITY_AUTO_UPDATE,VIRTUALITY_BRANCH bash "$tmp_installer" "$@"
   fi
   echo "Root or sudo is required. Run: curl -fsSL $SELF_INSTALL_URL | sudo bash" >&2
   exit 1
@@ -32,9 +32,7 @@ DEFAULT_INSTALL_USER="${SUDO_USER:-root}"
 INSTALL_USER="${VIRTUALITY_USER:-$DEFAULT_INSTALL_USER}"
 PROJECT_BASE_DIR="${VIRTUALITY_PROJECT_BASE_DIR:-/opt/virtuality}"
 PROJECT_DIR="${VIRTUALITY_PROJECT_DIR:-${PROJECT_BASE_DIR}/source}"
-RUN_BRIDGE="${VIRTUALITY_SETUP_BRIDGE:-0}"
-BRIDGE_IFACE="${VIRTUALITY_BRIDGE_IFACE:-}"
-RUN_TEST_VM="${VIRTUALITY_CREATE_TEST_VM:-0}"
+BRANCH="${VIRTUALITY_BRANCH:-main}"
 WEB_PORT="${VIRTUALITY_WEB_PORT:-8088}"
 LOG_DIR="/var/log/virtuality"
 LOG_FILE="${LOG_DIR}/install_$(date +%Y%m%d_%H%M%S).log"
@@ -44,7 +42,6 @@ MIN_RAM_MB="${VIRTUALITY_MIN_RAM_MB:-4096}"
 MIN_CPU_CORES="${VIRTUALITY_MIN_CPU_CORES:-2}"
 SKIP_REQUIREMENTS="${VIRTUALITY_SKIP_REQUIREMENTS:-0}"
 INSTALL_VERBOSE="${VIRTUALITY_INSTALL_VERBOSE:-0}"
-CLEAN_BEFORE_INSTALL="${VIRTUALITY_CLEAN_BEFORE_INSTALL:-0}"
 export DEBIAN_FRONTEND=noninteractive
 
 ESC="\033"
@@ -118,7 +115,7 @@ header() {
   clear 2>/dev/null || true
   echo -e "${CYAN}${BOLD}╭────────────────────────────────────────────────────────────╮${RESET}"
   echo -e "${CYAN}${BOLD}│${RESET} ${BOLD}Virtuality Installer${RESET}                                   ${CYAN}${BOLD}│${RESET}"
-  echo -e "${CYAN}${BOLD}│${RESET} One-command KVM / libvirt / Cockpit / Web Panel setup     ${CYAN}${BOLD}│${RESET}"
+  echo -e "${CYAN}${BOLD}│${RESET} One-command KVM / libvirt / web panel setup               ${CYAN}${BOLD}│${RESET}"
   echo -e "${CYAN}${BOLD}╰────────────────────────────────────────────────────────────╯${RESET}"
   echo
   echo -e "${GRAY}Repository:${RESET} ${REPO_URL}"
@@ -251,13 +248,6 @@ ensure_user
 step "Готовим рабочую директорию в /opt"
 prepare_project_dir
 
-if [[ "$CLEAN_BEFORE_INSTALL" == "1" && -x "$PROJECT_DIR/scripts/clean_install.sh" ]]; then
-  step "Очищаем старую кривую установку перед установкой"
-  run_logged "Старая установка очищена" bash "$PROJECT_DIR/scripts/clean_install.sh" --yes
-elif [[ "$CLEAN_BEFORE_INSTALL" == "1" ]]; then
-  warn "Очистка запрошена, но clean_install.sh пока недоступен. Продолжаю установку."
-fi
-
 step "Проверяем место после подготовки пользователя"
 root_free_after="$(free_mb_for_path /)"
 if (( root_free_after < MIN_ROOT_FREE_MB )); then
@@ -267,14 +257,9 @@ ok "Место после подготовки пользователя: ${root_
 
 step "Клонируем или обновляем репозиторий"
 if [[ -d "$PROJECT_DIR/.git" ]]; then
-  run_logged "Репозиторий обновлён" run_as_user "cd '$PROJECT_DIR' && git fetch origin main && git reset --hard origin/main && git pull --ff-only"
+  run_logged "Репозиторий обновлён (${BRANCH})" run_as_user "cd '$PROJECT_DIR' && git fetch origin '$BRANCH' && git checkout -q -B '$BRANCH' 'origin/$BRANCH'"
 else
-  run_logged "Репозиторий склонирован" run_as_user "cd '$PROJECT_BASE_DIR' && git clone '$REPO_URL' source"
-fi
-
-if [[ "$CLEAN_BEFORE_INSTALL" == "1" && -x "$PROJECT_DIR/scripts/clean_install.sh" ]]; then
-  step "Очищаем старую кривую установку после обновления исходников"
-  run_logged "Старая установка очищена" bash "$PROJECT_DIR/scripts/clean_install.sh" --yes
+  run_logged "Репозиторий склонирован (${BRANCH})" run_as_user "cd '$PROJECT_BASE_DIR' && git clone --branch '$BRANCH' '$REPO_URL' source"
 fi
 
 step "Запускаем основной установщик ноды"
@@ -282,9 +267,6 @@ run_logged "Virtuality Node установлен" env VIRTUALITY_USER="$INSTALL_
 
 step "Устанавливаем healthcheck-команду"
 run_logged "Healthcheck установлен" bash "$PROJECT_DIR/scripts/install_healthcheck_command.sh"
-
-step "Устанавливаем консольный dashboard"
-run_logged "Console dashboard установлен" bash "$PROJECT_DIR/scripts/install_console_dashboard.sh"
 
 step "Устанавливаем web-панель"
 if [[ "$INSTALL_VERBOSE" == "1" ]]; then
@@ -313,25 +295,6 @@ else
   [[ "$web_code" -eq 0 ]] && ok "Web-панель установлена" || fail "Web-панель не установлена"
 fi
 
-if [[ "$RUN_BRIDGE" == "1" ]]; then
-  step "Настраиваем bridge br0"
-  if [[ -z "$BRIDGE_IFACE" ]]; then
-    BRIDGE_IFACE="$(ip route | awk '/default/ {print $5; exit}')"
-  fi
-  if [[ -z "$BRIDGE_IFACE" ]]; then
-    warn "Не удалось определить интерфейс для br0. Пропускаю bridge setup"
-  else
-    warn "Bridge меняет сеть. Если SSH зависнет, нужен физический доступ или консоль провайдера."
-    bash "$PROJECT_DIR/scripts/setup_bridge_br0.sh" "$BRIDGE_IFACE" static >> "$LOG_FILE" 2>&1 && ok "Bridge br0 настроен на ${BRIDGE_IFACE}" || warn "Bridge setup завершился с предупреждением. Проверь лог"
-  fi
-else
-  warn "Bridge br0 не настраивался автоматически. Запуск вручную: sudo bash scripts/setup_bridge_br0.sh INTERFACE static"
-fi
-
-if [[ "$RUN_TEST_VM" == "1" ]]; then
-  step "Создаём тестовую VM"
-  run_logged "Тестовая VM создана" bash "$PROJECT_DIR/scripts/create_test_vm.sh" || warn "Тестовая VM не создана. Проверь ISO/bridge/log"
-fi
 
 step "Финальная диагностика"
 if command -v vhealth >/dev/null 2>&1; then
@@ -347,18 +310,12 @@ echo -e "${GREEN}${BOLD}╭─────────────────�
 echo -e "${GREEN}${BOLD}│${RESET} ${BOLD}Virtuality установка завершена${RESET}                          ${GREEN}${BOLD}│${RESET}"
 echo -e "${GREEN}${BOLD}╰────────────────────────────────────────────────────────────╯${RESET}"
 echo
-echo -e "${BOLD}Cockpit:${RESET}       https://${SERVER_IP}:9090"
-echo -e "${BOLD}Web Panel:${RESET}     http://${SERVER_IP}:${WEB_PORT}"
-echo -e "${BOLD}Login:${RESET}         ${INSTALL_USER} / пароль Linux-пользователя"
-echo -e "${BOLD}Project:${RESET}       ${PROJECT_DIR}"
-echo -e "${BOLD}Log:${RESET}           ${LOG_FILE}"
+echo -e "${BOLD}Панель:${RESET}        http://${SERVER_IP}:${WEB_PORT}"
+echo -e "${BOLD}Логин:${RESET}         ${INSTALL_USER} / пароль пользователя Linux"
+echo -e "${BOLD}Исходники:${RESET}     ${PROJECT_DIR}"
+echo -e "${BOLD}Лог:${RESET}           ${LOG_FILE}"
 echo
-echo -e "${BOLD}После установки:${RESET}"
-echo "  passwd ${INSTALL_USER}        # если пароль ещё не задан или заблокирован"
-echo "  sudo vhealth"
-echo "  cd ${PROJECT_DIR}"
-echo "  ip -br a"
-echo
-echo -e "${YELLOW}Важно:${RESET} bridge br0 по умолчанию не включается в one-command режиме, чтобы не уронить SSH."
-echo "Для bridge: cd ${PROJECT_DIR} && sudo bash scripts/setup_bridge_br0.sh INTERFACE static"
+echo -e "${BOLD}Дальше:${RESET} откройте панель в браузере — мастер настройки поможет включить HTTPS,"
+echo "выбрать сеть для машин (NAT или ваша локальная сеть) и хранилище."
+echo "Если пароль ещё не задан: passwd ${INSTALL_USER}"
 echo

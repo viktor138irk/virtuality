@@ -29,8 +29,6 @@ OPERATION_STATES = {
 SERVICE_LABELS = {
     "libvirtd": "Виртуализация",
     "virtlogd": "Журналы машин",
-    "cockpit": "Cockpit",
-    "dashboard": "Экран сервера",
     "web": "Панель управления",
 }
 
