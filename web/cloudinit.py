@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 import catalog
-from core import STORAGE_DIR
+import core
 
 USER_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( .*)?$")
@@ -92,7 +92,7 @@ def build_meta_data(name: str) -> str:
 
 def write_seed(name: str, user_data: str, meta_data: str) -> tuple[Path, Path]:
     """Files for virt-install --cloud-init; the folder is removed once the machine is created."""
-    root = STORAGE_DIR / "tmp"
+    root = core.STORAGE_DIR / "tmp"
     root.mkdir(parents=True, exist_ok=True)
     folder = Path(tempfile.mkdtemp(prefix=f"cloudinit-{name}-", dir=str(root)))
     user_file, meta_file = folder / "user-data", folder / "meta-data"
