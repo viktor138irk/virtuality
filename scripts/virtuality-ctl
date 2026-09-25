@@ -253,12 +253,16 @@ ${LOG_DIR}/*.log {
 EOF
 
   # Guests shut down gracefully with the host instead of being killed (Proxmox behaviour).
-  cat > /etc/default/libvirt-guests <<EOF
+  # Only once libvirt is installed: the file is a dpkg conffile, and creating it earlier (the panel is
+  # installed first on the image) makes the libvirt package stop at a "keep your version?" question.
+  if [[ -f /usr/lib/libvirt/libvirt-guests.sh ]]; then
+    cat > /etc/default/libvirt-guests <<EOF
 ON_BOOT=ignore
 ON_SHUTDOWN=shutdown
 SHUTDOWN_TIMEOUT=180
 PARALLEL_SHUTDOWN=5
 EOF
+  fi
 
   systemctl daemon-reload
   systemctl enable virtuality-web.service virtuality-network.service virtuality-maintenance.timer >/dev/null 2>&1 || true

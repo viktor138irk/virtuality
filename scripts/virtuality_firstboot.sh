@@ -156,7 +156,7 @@ say "source: ${SOURCE_DIR}, panel user: ${AUTH_USER}, port: ${VIRTUALITY_WEB_POR
 cd "$SOURCE_DIR"
 
 # unattended-upgrades often holds the dpkg lock right after the first boot.
-printf 'DPkg::Lock::Timeout "900";\n' > "$APT_LOCK_CONF"
+printf 'DPkg::Lock::Timeout "900";\nDPkg::Options { "--force-confdef"; "--force-confold"; };\n' > "$APT_LOCK_CONF"
 
 cat > "$ISSUE_FILE" <<'EOF'
 Virtuality настраивается. Ход установки: sudo journalctl -fu virtuality-firstboot

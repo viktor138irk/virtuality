@@ -136,7 +136,7 @@ if [[ "$PANEL_ONLY" == "1" ]]; then
   ok "Пропущено (VIRTUALITY_PANEL_ONLY=1): пакеты поставит установщик ноды"
 elif command -v apt-get >/dev/null 2>&1; then
   run_logged "apt update выполнен" apt-get update
-  run_logged "Пакеты панели установлены" apt-get install -y python3 python3-venv rsync openssl curl nftables novnc python3-websockify qemu-utils virtinst libvirt-clients cloud-image-utils
+  run_logged "Пакеты панели установлены" apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold python3 python3-venv rsync openssl curl nftables novnc python3-websockify qemu-utils virtinst libvirt-clients cloud-image-utils
 else
   warn "apt не найден — пакеты не устанавливались"
 fi

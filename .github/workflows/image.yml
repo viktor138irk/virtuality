@@ -51,7 +51,7 @@ jobs:
           xorriso -indev "$iso" -report_el_torito plain 2>/dev/null | tee /dev/stderr | grep -q "UEFI"
           xorriso -osirrox on -indev "$iso" -extract /autoinstall.yaml autoinstall.yaml -extract /boot/grub/grub.cfg grub.cfg
           python3 -c "import yaml; d = yaml.safe_load(open('autoinstall.yaml')); assert d['autoinstall']['version'] == 1"
-          grep -q "Install Virtuality" grub.cfg
+          grep -q "Установить Virtuality" grub.cfg
       # Ubuntu server ISOs are larger than the 2 GB GitHub release asset limit,
       # so images are published as workflow artifacts.
       - uses: actions/upload-artifact@v4

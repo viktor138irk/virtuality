@@ -22,6 +22,8 @@ MIN_RAM_MB="${VIRTUALITY_MIN_RAM_MB:-4096}"
 MIN_CPU_CORES="${VIRTUALITY_MIN_CPU_CORES:-2}"
 SKIP_REQUIREMENTS="${VIRTUALITY_SKIP_REQUIREMENTS:-0}"
 export DEBIAN_FRONTEND=noninteractive
+# Keep existing configuration files without asking: there is nobody to answer on first boot.
+APT_OPTS=(-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
 
 ESC="\033"
 RESET="${ESC}[0m"
@@ -74,15 +76,18 @@ run_logged() {
   spinner=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
   i=0
   while kill -0 "$pid" 2>/dev/null; do
-    elapsed=$(( $(date +%s) - start_ts ))
-    symbol="${spinner[$((i % ${#spinner[@]}))]}"
-    printf "\r  ${CYAN}%s${RESET} %s... ${GRAY}%ss${RESET} ${GRAY}(лог: %s)${RESET}" "$symbol" "$description" "$elapsed" "$LOG_FILE"
+    # The spinner only makes sense on a terminal; first boot writes this output to a log.
+    if [[ -t 1 ]]; then
+      elapsed=$(( $(date +%s) - start_ts ))
+      symbol="${spinner[$((i % ${#spinner[@]}))]}"
+      printf "\r  ${CYAN}%s${RESET} %s... ${GRAY}%ss${RESET} ${GRAY}(лог: %s)${RESET}" "$symbol" "$description" "$elapsed" "$LOG_FILE"
+    fi
     sleep 1
     i=$((i + 1))
   done
-  wait "$pid"
-  code=$?
-  printf "\r%*s\r" 120 ""
+  code=0
+  wait "$pid" || code=$?
+  [[ -t 1 ]] && printf "\r%*s\r" 120 ""
   if [[ "$code" -eq 0 ]]; then
     ok "$description"
   else
@@ -103,7 +108,7 @@ install_available() {
       warn "Пакет ${pkg} недоступен в этом дистрибутиве, пропускаю"
     fi
   done
-  run_logged "$description" apt install -y "${available[@]}"
+  run_logged "$description" apt-get install -y "${APT_OPTS[@]}" "${available[@]}"
 }
 
 service_state() { systemctl is-active "$1" 2>/dev/null || echo "inactive"; }
@@ -164,7 +169,9 @@ else
 fi
 
 step "Обновляем apt cache"
-run_logged "apt update выполнен" apt update
+run_logged "apt update выполнен" apt-get update
+# A previous attempt may have stopped half way (power loss, a question from dpkg): finish it first.
+run_logged "Незавершённые установки пакетов доделаны" dpkg --configure -a --force-confdef --force-confold
 
 step "Устанавливаем базовые утилиты и зависимости диагностики"
 install_available "Базовые пакеты и диагностические утилиты установлены" \
