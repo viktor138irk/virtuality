@@ -24,6 +24,10 @@ import update_core
 BASE_DIR = Path(__file__).resolve().parent
 APP_NAME = "Virtuality"
 ENV_FILE = BASE_DIR / ".env"
+# virsh, ip and qemu-img print translated text under a Russian locale; the panel parses their output.
+os.environ["LC_ALL"] = "C.UTF-8"
+os.environ["LANG"] = "C.UTF-8"
+
 STORAGE_DIR = Path("/var/lib/virtuality")
 ISO_DIR = Path("/var/lib/virtuality/iso")
 IMAGES_DIR = Path("/var/lib/virtuality/images")
@@ -199,7 +203,10 @@ def tail_text(path: Path, max_lines: int = 220) -> str:
 
 
 def valid_vm_name(name: str) -> bool:
-    return bool(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}", name or ""))
+    """Latin letters, digits, dot, dash, underscore; never a bare number or a UUID — virsh would read those as an ID/UUID of another machine."""
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}", name or ""):
+        return False
+    return not name.isdigit() and not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", name)
 
 
 def valid_label(name: str) -> bool:

@@ -26,6 +26,13 @@ class NetworkError(Exception):
     pass
 
 
+def valid_vm_name(name: str) -> bool:
+    """Same rule as core.valid_vm_name (kept here: this module does not import core)."""
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', name or ''):
+        return False
+    return not name.isdigit() and not re.fullmatch(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', name)
+
+
 def run_cmd(cmd: list[str], timeout: int = 12) -> dict[str, Any]:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
@@ -206,7 +213,7 @@ def _net_update(action: str, host_xml: str) -> dict[str, Any]:
 
 def reserve_nat_address(vm_name: str, mac: str) -> str | None:
     """Pin the machine to one NAT address for its whole life; None when libvirt refused."""
-    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', vm_name or ''):
+    if not valid_vm_name(vm_name):
         return None
     reservations = nat_reservations()
     for item in reservations:
@@ -360,13 +367,16 @@ def resolve_vm_ip(vm_name: str) -> str | None:
         if match:
             return match.group(1)
 
+    macs = set(vm_mac_addresses(vm_name))
+    if not macs:
+        # Without the machine's MAC any lease would be a guess — possibly another machine's address.
+        return None
     leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
     if not leases['ok']:
         return None
-    macs = set(vm_mac_addresses(vm_name))
     for line in leases['stdout'].splitlines():
         low = line.lower()
-        if macs and not any(mac in low for mac in macs):
+        if not any(mac in low for mac in macs):
             continue
         match = re.search(r'\b(192\.168\.100\.\d+|\d+\.\d+\.\d+\.\d+)/\d+', line)
         if match:
@@ -383,7 +393,7 @@ def tcp_connect_check(host: str, port: int, timeout: float = 2.0) -> dict[str, A
 
 
 def add_port_forward(vm_name: str, guest_ip: str, external_port: Any, guest_port: Any, protocol: str, note: str = '') -> dict[str, Any]:
-    if not vm_name or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', vm_name):
+    if not valid_vm_name(vm_name):
         raise NetworkError('Некорректное имя VM')
     if guest_ip == 'auto':
         resolved_ip = resolve_vm_ip(vm_name)
@@ -611,7 +621,7 @@ def find_matching_forward(forwards: list[dict[str, Any]], vm_name: str, external
 
 
 def diagnose_public_access(vm_name: str, external_port: int, guest_port: int, protocol: str = 'tcp') -> dict[str, Any]:
-    if not vm_name or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', vm_name):
+    if not valid_vm_name(vm_name):
         raise NetworkError('Некорректное имя VM')
     if not valid_port(external_port) or not valid_port(guest_port):
         raise NetworkError('Порт должен быть от 1 до 65535')

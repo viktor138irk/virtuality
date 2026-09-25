@@ -467,11 +467,13 @@ def parse_virsh_list() -> list[dict[str, str]]:
 
     manual_ips = manual_ip_map()
 
-    def resolve_ip(name: str) -> str:
+    def resolve_ip(name: str, state: str = "running") -> str:
         if not name:
             return "—"
         if manual_ips.get(name):
             return manual_ips[name]
+        if "running" not in state and "paus" not in state:
+            return "—"
         macs = vm_macs(name)
         for resolver in (lambda: ip_from_domifaddr(name), lambda: ip_from_network_core(name), lambda: ip_from_dnsmasq_leases(macs), lambda: ip_from_neighbor_tables(macs)):
             try:
@@ -499,7 +501,7 @@ def parse_virsh_list() -> list[dict[str, str]]:
         label = "enabled" if enabled else "disabled" if info["autostart_known"] else "unknown"
         rows.append({"id": vm_id, "name": name, "state": state, "autostart_enabled": enabled, "autostart_label": label, "autostart_css": "ok" if enabled else "warn", "vcpus": info["vcpus"], "memory_mb": info["memory_mb"]})
     for row in rows:
-        row["ip"] = resolve_ip(row.get("name", ""))
+        row["ip"] = resolve_ip(row.get("name", ""), row.get("state", ""))
         row["manual_ip"] = manual_ips.get(row.get("name", ""), "")
     return rows
 
@@ -859,7 +861,10 @@ def disk_upload_response(request: Request, payload: dict[str, Any]):
 
 
 def valid_vm_name(name: str) -> bool:
-    return bool(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}", name or ""))
+    """Latin letters, digits, dot, dash, underscore; never a bare number or a UUID — virsh would read those as an ID/UUID of another machine."""
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}", name or ""):
+        return False
+    return not name.isdigit() and not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", name)
 
 
 def vm_exists(name: str) -> bool:
@@ -1096,16 +1101,14 @@ def vm_state(name: str) -> str:
 
 
 def current_vm_iso(name: str) -> str:
-    result = run_cmd(["virsh", "domblklist", name, "--details"], timeout=10)
-    if not result.get("ok"):
-        return ""
-    for line in (result.get("stdout") or "").splitlines():
-        if ".iso" not in line.lower():
-            continue
-        parts = line.split()
-        if parts:
-            return parts[-1]
-    return ""
+    return next((drive["source"] for drive in vm_cdrom_devices(name) if drive["source"]), "")
+
+
+def vms_using_iso(path: Path) -> list[str]:
+    """Machines that have this ISO in their CD-ROM drive (they would not start without the file)."""
+    listed = run_cmd(["virsh", "list", "--all", "--name"], timeout=10)
+    target = str(path)
+    return [name for name in (listed.get("stdout") or "").split() if any(drive["source"] == target for drive in vm_cdrom_devices(name))]
 
 
 def vm_cdrom_devices(name: str) -> list[dict[str, str]]:
@@ -1397,6 +1400,9 @@ def iso_delete(request: Request, name: str):
         return auth_redirect
     path = iso_path_by_name(name)
     if path and path.exists() and path.is_file():
+        users = vms_using_iso(path)
+        if users:
+            return redirect_with_message("/iso", "error", f"Образ вставлен в привод машин: {', '.join(users)}. Сначала извлеките его на странице машины — иначе машина не запустится.")
         path.unlink()
         refresh_iso_pool()
     return RedirectResponse(url="/iso", status_code=303)
@@ -1909,7 +1915,8 @@ async def console_websocket(websocket: WebSocket, token: str):
     except Exception:
         await websocket.close(code=1008)
         return
-    if not valid_vm_name(vm_name) or not vm_exists(vm_name) or target_port < 5900 or target_port > 5999:
+    # vm_exists runs virsh: in a thread, so one slow call does not freeze every console and page.
+    if not valid_vm_name(vm_name) or target_port < 5900 or target_port > 5999 or not await asyncio.to_thread(vm_exists, vm_name):
         await websocket.close(code=1008)
         return
     await websocket.accept()

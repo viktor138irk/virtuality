@@ -21,7 +21,7 @@
             <span class="list-icon brand">{{ icon('disc-3') }}</span>
             <div class="grow"><div class="title truncate">{{ iso.name }}</div><div class="meta">{{ iso.size|replace('MB', 'МБ') }} · загружен {{ iso.updated }}</div></div>
             <a class="btn btn-sm hide-sm" href="/vm/create?iso={{ iso.name|urlencode }}">Создать машину</a>
-            <form method="post" action="/iso/{{ iso.name }}/delete" class="inline-form" data-confirm="Файл {{ iso.name }} будет удалён с сервера. Уже созданные машины продолжат работать." data-confirm-title="Удалить образ?" data-confirm-button="Удалить" data-toast="Образ удалён" data-toast-tone="warning">
+            <form method="post" action="/iso/{{ iso.name }}/delete" class="inline-form" data-confirm="Файл {{ iso.name }} будет удалён с сервера. Если образ вставлен в привод какой-то машины, панель попросит сначала извлечь его." data-confirm-title="Удалить образ?" data-confirm-button="Удалить" data-toast="Образ удалён" data-toast-tone="warning">
               <button class="btn btn-sm btn-icon btn-ghost" aria-label="Удалить">{{ icon('trash-2', 'icon-sm') }}</button>
             </form>
           </div>

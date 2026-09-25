@@ -144,3 +144,60 @@ def test_snapshot_names_with_spaces_are_listed():
 
     rows = snapshots.parse_snapshot_list(" Name              Creation Time               State\n------\n before update     2026-09-25 10:12:03 +0000   shutoff\n clean             2026-09-10 12:05:00 +0000   running\n")
     assert [row["name"] for row in rows] == ["before update", "clean"]
+
+
+# ---------------------------------------------------------------- second audit round
+def test_vm_names_that_virsh_reads_as_id_or_uuid_are_rejected():
+    import core
+
+    for module in (app, core, network_core):
+        assert module.valid_vm_name("web01") and module.valid_vm_name("1c-server")
+        assert not module.valid_vm_name("10") and not module.valid_vm_name("6c1b3c1e-0000-0000-0000-000000000001")
+
+
+def test_subprocesses_use_c_locale():
+    import os
+
+    import core
+
+    assert core.STORAGE_DIR and os.environ["LC_ALL"] == "C.UTF-8"  # set when core is imported
+
+
+def test_lease_is_not_guessed_without_mac(data_dirs, monkeypatch):
+    recording(monkeypatch, network_core, [
+        (["virsh", "domifaddr"], conftest.fake_result(ok=False, stderr="domain is not running")),
+        (["virsh", "domiflist"], conftest.fake_result(ok=False, stderr="failed to get domain")),
+        (["virsh", "net-dhcp-leases"], conftest.fake_result(" 2026-09-26 10:00:00  52:54:00:11:22:33  ipv4  192.168.100.77/24  other  -")),
+    ])
+    assert network_core.resolve_vm_ip("gone") is None
+
+
+def test_stopped_machines_have_no_stale_ip(data_dirs, monkeypatch):
+    calls = recording(monkeypatch, app)
+    rows = {row["name"]: row for row in app.parse_virsh_list()}
+    assert rows["db01"]["ip"] == "—" and rows["web01"]["ip"] == "192.168.100.51"
+    assert not [cmd for cmd in calls if cmd[:2] == ["virsh", "domifaddr"] and cmd[-1] == "db01"]
+
+
+def test_system_disk_named_like_iso_is_not_shown_as_iso(data_dirs, monkeypatch):
+    xml = conftest.DUMPXML.replace("<disk type='file' device='disk'><target dev='vda' bus='virtio'/></disk>", "<disk type='file' device='disk'><source file='/var/lib/virtuality/images/web.iso.qcow2'/><target dev='vda' bus='virtio'/></disk><disk type='file' device='cdrom'><target dev='sda' bus='sata'/></disk>")
+    recording(monkeypatch, app, [(["virsh", "dumpxml"], conftest.fake_result(xml))])
+    assert app.current_vm_iso("web01") == ""
+
+
+def test_iso_in_use_is_not_deleted(logged_in, data_dirs, monkeypatch):
+    iso = data_dirs["iso"] / "old.iso"
+    iso.write_bytes(b"iso")
+    xml = CDROM_XML.replace("/var/lib/virtuality/iso/old.iso", str(iso))
+    recording(monkeypatch, app, [(["virsh", "dumpxml"], conftest.fake_result(xml)), (["virsh", "list", "--all", "--name"], conftest.fake_result("web01\n"))])
+    response = logged_in.post("/iso/old.iso/delete", follow_redirects=False)
+    assert "error=" in response.headers["location"] and iso.exists()
+
+
+def test_arm_board_is_ready_without_vmx_flags(monkeypatch):
+    import host_profile
+
+    monkeypatch.setattr(host_profile.platform, "machine", lambda: "aarch64")
+    monkeypatch.setattr(host_profile, "cpu_virtualization_flags_count", lambda: 0)
+    profile = host_profile.detect_host_profile()
+    assert not [check for check in profile["checks"] if check["name"] == "Поддержка виртуализации процессором"]

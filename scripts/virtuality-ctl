@@ -140,6 +140,7 @@ LimitNOFILE=65536
 User=root
 Group=root
 Environment=PYTHONUNBUFFERED=1
+Environment=LC_ALL=C.UTF-8
 Environment=VIRTUALITY_AUTH_USER=${auth_user}
 Environment=VIRTUALITY_SOURCE_DIR=${SOURCE_DIR}
 Environment=VIRTUALITY_NODE_ENV=${NODE_ENV}
