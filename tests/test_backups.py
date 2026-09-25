@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -26,9 +27,11 @@ def make_backup(dirs, vm="web01", backup_id="20260924-0300", size=2_684_354_560,
 class FakeVirsh:
     """Имитация virsh с состоянием: машина выключается после `virsh shutdown`."""
 
-    def __init__(self, running=True, shuts_down=True, exists=("web01", "db01")):
+    def __init__(self, running=True, shuts_down=True, exists=("web01", "db01"), paused=False, rejects_shutdown=False):
         self.running = running
+        self.paused = paused
         self.shuts_down = shuts_down
+        self.rejects_shutdown = rejects_shutdown
         self.exists = set(exists)
         self.calls: list[list[str]] = []
         self.defined_xml = ""
@@ -36,11 +39,16 @@ class FakeVirsh:
     def __call__(self, cmd, timeout=12, **_kwargs):
         self.calls.append(list(cmd))
         if cmd[:2] == ["virsh", "domstate"]:
-            return fake_result("running" if self.running else "shut off")
+            return fake_result("paused" if self.running and self.paused else "running" if self.running else "shut off")
         if cmd[:2] == ["virsh", "shutdown"]:
+            if self.rejects_shutdown:
+                return fake_result(ok=False, stderr="error: Requested operation is not valid: domain is not running")
             if self.shuts_down:
                 self.running = False
             return fake_result()
+        if cmd[:2] == ["virsh", "managedsave"]:
+            self.running = False
+            return fake_result(f"Domain '{cmd[2]}' state saved by libvirt")
         if cmd[:2] == ["virsh", "destroy"]:
             self.running = False
             return fake_result()
@@ -58,10 +66,11 @@ class FakeVirsh:
         return fake_run_cmd(cmd, timeout)
 
 
-def fake_stream(progress_lines=("(0.00/100%)", "(48.50/100%)", "(100.00/100%)"), code=0):
-    calls: list[list[str]] = []
+def fake_stream(progress_lines=("(0.00/100%)", "(48.50/100%)", "(100.00/100%)"), code=0, calls=None):
+    """Имитация qemu-img convert. calls — общий список с FakeVirsh, если важен порядок команд."""
+    calls = [] if calls is None else calls
 
-    def stream(cmd, on_line):
+    def stream(cmd, on_line, timeout=None):
         calls.append(list(cmd))
         Path(cmd[-1]).write_bytes(b"QFI\xfb" + b"\0" * 1000)
         for line in progress_lines:
@@ -72,12 +81,22 @@ def fake_stream(progress_lines=("(0.00/100%)", "(48.50/100%)", "(100.00/100%)"),
     return stream
 
 
+class FixedDatetime(datetime):
+    """datetime.now() всегда 24 сентября 2026, 03:00 — чтобы id копий были предсказуемы."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2026, 9, 24, 3, 0, 0)
+
+
 @pytest.fixture()
 def fast_worker(monkeypatch, data_dirs):
-    """Операции выполняются синхронно, ожидание выключения — мгновенно."""
+    """Операции и фоновые потоки выполняются синхронно, ожидание выключения — мгновенно."""
     monkeypatch.setattr(core, "run_operation", lambda operation, worker: worker(operation))
+    monkeypatch.setattr(backups, "start_thread", lambda target, *args: target(*args))
     monkeypatch.setattr(backups, "POLL_INTERVAL", 0.001)
     monkeypatch.setattr(backups, "SHUTDOWN_TIMEOUT", 0.05)
+    monkeypatch.setattr(backups, "LATE_SHUTDOWN_WATCH", 0.05)
     monkeypatch.setattr(backups, "free_bytes", lambda path: 500 * 1024 ** 3)
     return data_dirs
 
@@ -109,6 +128,29 @@ def test_stream_cmd_splits_carriage_returns():
     assert lines == ["a", "(10.00/100%)", "(55.50/100%)", "end"]
 
 
+def test_stream_cmd_stops_hung_command():
+    lines: list[str] = []
+    code = backups.stream_cmd(["python3", "-c", "import time; time.sleep(30)"], lines.append, timeout=0.2)
+    assert code != 0
+    assert any("остановлена" in line for line in lines)
+
+
+def test_disk_info_uses_shared_lock_and_raises_on_failure(monkeypatch):
+    calls: list[list[str]] = []
+
+    def info_ok(cmd, timeout=12, **_kw):
+        calls.append(list(cmd))
+        return fake_result(QEMU_IMG_INFO)
+
+    monkeypatch.setattr(core, "run_cmd", info_ok)
+    assert backups.disk_info("/x/web01.qcow2")["actual_size"] == 6443499520
+    assert calls == [["qemu-img", "info", "-U", "--output=json", "/x/web01.qcow2"]]  # -U: диск занят работающей машиной
+    monkeypatch.setattr(core, "run_cmd", lambda cmd, timeout=12, **_kw: fake_result(ok=False, stderr='qemu-img: Could not open: Failed to get shared "write" lock'))
+    with pytest.raises(backups.BackupError) as exc:
+        backups.disk_info("/x/web01.qcow2")
+    assert "размер диска" in str(exc.value) and "write" in str(exc.value)
+
+
 def test_rewrite_xml_renames_and_detaches_identity():
     xml = backups.rewrite_xml((FIXTURES / "dumpxml-web01.xml").read_text(), "web02", {"vda": "/var/lib/virtuality/images/web02.qcow2"})
     assert "<name>web02</name>" in xml
@@ -117,6 +159,27 @@ def test_rewrite_xml_renames_and_detaches_identity():
     assert "file=\"/var/lib/virtuality/images/web02.qcow2\"" in xml
     assert "Сайт компании" in xml  # заголовок и описание сохраняются
     assert "<readonly />" in xml or "<readonly/>" in xml  # привод CD остаётся как был
+
+
+def test_rewrite_xml_keeps_identity_on_replace_and_drops_stale_chain(tmp_path):
+    present = tmp_path / "debian.iso"
+    present.write_bytes(b"iso")
+    source = f"""<domain type='kvm' id='7'><name>web01</name><uuid>6c1b3c1e-0000-0000-0000-000000000001</uuid>
+    <devices>
+      <disk type='file' device='disk'><driver name='qemu' type='qcow2'/><source file='/var/lib/virtuality/images/web01.snap.qcow2'/>
+        <backingStore type='file'><format type='qcow2'/><source file='/var/lib/virtuality/images/web01.qcow2'/></backingStore>
+        <target dev='vda' bus='virtio'/></disk>
+      <disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='/var/lib/virtuality/iso/gone.iso'/><target dev='sda' bus='sata'/><readonly/></disk>
+      <disk type='file' device='cdrom'><driver name='qemu' type='raw'/><source file='{present}'/><target dev='sdb' bus='sata'/><readonly/></disk>
+      <interface type='network'><mac address='52:54:00:aa:bb:cc'/><source network='virtuality-nat'/></interface>
+    </devices></domain>"""
+    replaced = backups.rewrite_xml(source, "web01", {"vda": "/var/lib/virtuality/images/web01.qcow2"}, keep_identity=True)
+    assert "<uuid>6c1b3c1e-0000-0000-0000-000000000001</uuid>" in replaced and 'mac address="52:54:00:aa:bb:cc"' in replaced
+    assert "backingStore" not in replaced and "web01.snap.qcow2" not in replaced
+    assert "gone.iso" not in replaced and str(present) in replaced  # пропавший образ вынут, существующий остаётся
+    assert 'id="7"' not in replaced
+    fresh = backups.rewrite_xml(source, "web02", {"vda": "/var/lib/virtuality/images/web02.qcow2"})
+    assert "<uuid>" not in fresh and "<mac" not in fresh and "backingStore" not in fresh
 
 
 def test_rewrite_xml_converts_block_disk_and_drops_nvram():
@@ -130,6 +193,7 @@ def test_rewrite_xml_converts_block_disk_and_drops_nvram():
 
 def test_format_backup_date():
     assert backups.format_backup_date("20260924-0300") == "24 сентября 2026, 03:00"
+    assert backups.format_backup_date("20260924-0300-2") == "24 сентября 2026, 03:00"  # вторая копия в ту же минуту
     assert backups.format_backup_date("garbage") == "garbage"
 
 
@@ -165,6 +229,22 @@ def test_incomplete_backup_is_flagged(data_dirs):
     assert backups.read_backup("web01", "20260924-0300")["complete"] is False
 
 
+def test_backup_with_unsafe_disk_target_is_incomplete(data_dirs):
+    path = make_backup(data_dirs)
+    meta = json.loads((path / "meta.json").read_text())
+    meta["disks"].append({"target": "../../etc/shadow", "source": "/x", "size": 1})
+    (path / "meta.json").write_text(json.dumps(meta))
+    backup = backups.read_backup("web01", "20260924-0300")
+    assert [disk["target"] for disk in backup["disks"]] == ["vda"] and backup["complete"] is False
+
+
+def test_storage_summary_percent_is_share_of_whole_disk(data_dirs, monkeypatch):
+    monkeypatch.setattr(backups, "total_bytes", lambda path: 1000)
+    monkeypatch.setattr(backups, "free_bytes", lambda path: 400)
+    summary = backups.storage_summary([{"size_bytes": 350}])
+    assert summary["used_pct"] == 35 and summary["free_bytes"] == 400
+
+
 # ---------------------------------------------------------------- создание копии
 def test_create_backup_refuses_without_space(data_dirs, monkeypatch):
     monkeypatch.setattr(backups, "free_bytes", lambda path: 1024)
@@ -191,6 +271,7 @@ def test_create_backup_shuts_down_copies_and_restarts(fast_worker, monkeypatch):
     assert operation["progress"] == 100 and "Резервная копия создана" in operation["message"]
     assert ["virsh", "shutdown", "web01"] in virsh.calls
     assert ["virsh", "dumpxml", "web01", "--migratable"] in virsh.calls
+    assert ["qemu-img", "info", "-U", "--output=json", str(core.IMAGES_DIR / "web01.qcow2")] in virsh.calls
     assert virsh.calls[-1] == ["virsh", "start", "web01"]
     assert ["virsh", "destroy", "web01"] not in virsh.calls
     assert stream.calls == [["qemu-img", "convert", "-p", "-O", "qcow2", "-c", str(core.IMAGES_DIR / "web01.qcow2"), str(fast_worker["backups"] / "web01" / operation["backup_id"] / "vda.qcow2")]]
@@ -216,9 +297,55 @@ def test_backup_fails_when_vm_does_not_shut_down(fast_worker, monkeypatch):
     monkeypatch.setattr(backups, "stream_cmd", fake_stream())
     operation = backups.create_backup("web01")
     fresh = core.read_operation(operation["id"])
-    assert fresh["status"] == "error" and "не выключилась" in fresh["message"]
+    assert fresh["status"] == "error" and "не выключилась" in fresh["message"] and "запустит её снова" in fresh["message"]
     assert ["virsh", "destroy", "web01"] not in virsh.calls
+    assert ["virsh", "start", "web01"] not in virsh.calls  # так и не выключилась — запускать нечего
+    assert "так и не выключилась" in fresh["log_tail"]
     assert not (fast_worker["backups"] / "web01").exists()
+
+
+def test_backup_restarts_vm_that_shuts_down_late(fast_worker, monkeypatch):
+    virsh = FakeVirsh(running=True, shuts_down=False)
+    monkeypatch.setattr(core, "run_cmd", virsh)
+    monkeypatch.setattr(backups, "stream_cmd", fake_stream())
+
+    def shut_down_after_giving_up(target, *args):
+        virsh.running = False  # ACPI-выключение дошло уже после того, как задача сдалась
+        target(*args)
+
+    monkeypatch.setattr(backups, "start_thread", shut_down_after_giving_up)
+    operation = backups.create_backup("web01")
+    fresh = core.read_operation(operation["id"])
+    assert fresh["status"] == "error" and "не выключилась" in fresh["message"]
+    assert virsh.calls[-1] == ["virsh", "start", "web01"] and virsh.running
+    assert "запускаем её снова" in fresh["log_tail"]
+
+
+def test_backup_reports_rejected_shutdown_command(fast_worker, monkeypatch):
+    virsh = FakeVirsh(running=True, rejects_shutdown=True)
+    monkeypatch.setattr(core, "run_cmd", virsh)
+    monkeypatch.setattr(backups, "stream_cmd", fake_stream())
+    monkeypatch.setattr(backups, "start_thread", lambda target, *args: pytest.fail("нечего ждать — команда не принята"))
+    operation = backups.create_backup("web01")
+    fresh = core.read_operation(operation["id"])
+    assert fresh["status"] == "error"
+    assert "не приняла команду выключения" in fresh["message"] and "domain is not running" in fresh["message"]
+    assert "не выключилась" not in fresh["message"]
+    assert ["virsh", "start", "web01"] not in virsh.calls
+    assert not (fast_worker["backups"] / "web01").exists()
+
+
+def test_backup_of_paused_vm_saves_state_instead_of_shutdown(fast_worker, monkeypatch):
+    virsh = FakeVirsh(running=True, paused=True)
+    monkeypatch.setattr(core, "run_cmd", virsh)
+    monkeypatch.setattr(backups, "stream_cmd", fake_stream())
+    operation = backups.create_backup("web01")
+    fresh = core.read_operation(operation["id"])
+    assert fresh["status"] == "success", fresh["message"]
+    assert ["virsh", "managedsave", "web01"] in virsh.calls and ["virsh", "shutdown", "web01"] not in virsh.calls
+    assert virsh.calls.index(["virsh", "managedsave", "web01"]) < virsh.calls.index(["virsh", "dumpxml", "web01", "--migratable"])
+    assert virsh.calls[-1] == ["virsh", "start", "web01"]
+    assert "на паузе" in fresh["log_tail"]
 
 
 def test_backup_cleans_up_and_restarts_after_copy_error(fast_worker, monkeypatch):
@@ -240,6 +367,22 @@ def test_create_backup_refuses_while_another_runs(fast_worker, monkeypatch):
     assert "уже идёт" in str(exc.value)
 
 
+def test_second_backup_in_same_minute_gets_own_folder_and_keeps_first(fast_worker, monkeypatch):
+    monkeypatch.setattr(backups, "datetime", FixedDatetime)
+    monkeypatch.setattr(core, "run_cmd", FakeVirsh(running=False))
+    monkeypatch.setattr(backups, "stream_cmd", fake_stream())
+    first = core.read_operation(backups.create_backup("web01", "первая")["id"])
+    assert first["status"] == "success" and first["backup_id"] == "20260924-0300"
+    monkeypatch.setattr(backups, "stream_cmd", fake_stream(code=1))
+    second = core.read_operation(backups.create_backup("web01", "вторая")["id"])
+    assert second["status"] == "error" and second["backup_id"] == "20260924-0300-2"
+    first_dir = fast_worker["backups"] / "web01" / "20260924-0300"
+    assert (first_dir / "meta.json").exists() and (first_dir / "vda.qcow2").exists()  # чужую папку неудачная задача не трогает
+    assert not (fast_worker["backups"] / "web01" / "20260924-0300-2").exists()
+    assert [item["id"] for item in backups.list_backups("web01")] == ["20260924-0300"]
+    assert backups.backup_path("web01", "20260924-0300-2") == fast_worker["backups"] / "web01" / "20260924-0300-2"
+
+
 # ---------------------------------------------------------------- восстановление
 def test_restore_under_new_name(fast_worker, monkeypatch):
     make_backup(fast_worker)
@@ -252,11 +395,13 @@ def test_restore_under_new_name(fast_worker, monkeypatch):
     assert fresh["status"] == "success", fresh["message"]
     assert fresh["vm_name"] == "web02"
     target = fast_worker["images"] / "web02.qcow2"
-    assert stream.calls == [["qemu-img", "convert", "-p", "-O", "qcow2", str(fast_worker["backups"] / "web01" / "20260924-0300" / "vda.qcow2"), str(target)]]
-    assert target.exists()
+    assert stream.calls[0][:6] == ["qemu-img", "convert", "-p", "-O", "qcow2", str(fast_worker["backups"] / "web01" / "20260924-0300" / "vda.qcow2")]
+    assert stream.calls[0][6].startswith(str(fast_worker["images"] / "web02.restore-"))  # сначала во временный файл
+    assert target.exists() and not list(fast_worker["images"].glob("*.restore-*"))
     assert "<name>web02</name>" in virsh.defined_xml and str(target) in virsh.defined_xml and "<mac" not in virsh.defined_xml
     assert not any(cmd[:2] == ["virsh", "undefine"] for cmd in virsh.calls)
     assert not list((fast_worker["backups"] / "web01" / "20260924-0300").glob("restore-*.xml"))
+    assert not (fast_worker["backups"] / "web01" / "20260924-0300" / backups.RESTORE_MARKER).exists()
 
 
 def test_restore_requires_replace_confirmation(fast_worker):
@@ -266,18 +411,48 @@ def test_restore_requires_replace_confirmation(fast_worker):
     assert exc.value.code == "exists"
 
 
-def test_restore_replaces_existing_vm(fast_worker, monkeypatch):
+UNDEFINE = ["virsh", "undefine", "web01", "--remove-all-storage", "--nvram", "--managed-save", "--snapshots-metadata"]
+
+
+def test_restore_replaces_existing_vm_only_after_disks_are_ready(fast_worker, monkeypatch):
     make_backup(fast_worker)
     virsh = FakeVirsh(running=True)
     monkeypatch.setattr(core, "run_cmd", virsh)
-    monkeypatch.setattr(backups, "stream_cmd", fake_stream())
+    monkeypatch.setattr(backups, "stream_cmd", fake_stream(calls=virsh.calls))
     operation = backups.start_restore("web01", "20260924-0300", "", True)
     fresh = core.read_operation(operation["id"])
     assert fresh["status"] == "success", fresh["message"]
-    assert ["virsh", "destroy", "web01"] in virsh.calls
-    assert ["virsh", "undefine", "web01", "--remove-all-storage", "--nvram", "--managed-save", "--snapshots-metadata"] in virsh.calls
-    assert virsh.calls.index(["virsh", "destroy", "web01"]) < virsh.calls.index(["virsh", "undefine", "web01", "--remove-all-storage", "--nvram", "--managed-save", "--snapshots-metadata"])
+    convert = next(index for index, cmd in enumerate(virsh.calls) if cmd[:2] == ["qemu-img", "convert"])
+    assert convert < virsh.calls.index(["virsh", "destroy", "web01"]) < virsh.calls.index(UNDEFINE)
+    assert virsh.calls.index(UNDEFINE) < next(index for index, cmd in enumerate(virsh.calls) if cmd[:2] == ["virsh", "define"])
+    assert (fast_worker["images"] / "web01.qcow2").exists() and not list(fast_worker["images"].glob("*.restore-*"))
     assert "<name>web01</name>" in virsh.defined_xml
+    # при замене машина остаётся «той же»: UUID и MAC из копии сохраняются
+    assert "<uuid>6c1b3c1e-0000-0000-0000-000000000001</uuid>" in virsh.defined_xml and "52:54:00:aa:bb:cc" in virsh.defined_xml
+
+
+def test_replace_restore_keeps_old_vm_when_copy_fails(fast_worker, monkeypatch):
+    make_backup(fast_worker)
+    virsh = FakeVirsh(running=True)
+    monkeypatch.setattr(core, "run_cmd", virsh)
+    monkeypatch.setattr(backups, "stream_cmd", fake_stream(code=1))
+    operation = backups.start_restore("web01", "20260924-0300", "web01", True)
+    fresh = core.read_operation(operation["id"])
+    assert fresh["status"] == "error" and "Не удалось восстановить диск vda" in fresh["message"] and "qemu-img" not in fresh["message"]
+    assert "qemu-img завершился с кодом 1" in fresh["log_tail"]
+    assert ["virsh", "destroy", "web01"] not in virsh.calls and UNDEFINE not in virsh.calls and virsh.running
+    assert not list(fast_worker["images"].iterdir())
+
+
+def test_restore_refuses_when_space_is_tight_even_if_old_vm_would_free_it(fast_worker, monkeypatch):
+    make_backup(fast_worker)
+    monkeypatch.setattr(backups, "free_bytes", lambda path: 1024)
+    with pytest.raises(backups.BackupError) as exc:
+        backups.start_restore("web01", "20260924-0300", "web01", True)
+    assert exc.value.code == "space" and "рядом со старой машиной" in str(exc.value)
+    with pytest.raises(backups.BackupError) as exc:
+        backups.start_restore("web01", "20260924-0300", "web02", False)
+    assert exc.value.code == "space" and "рядом со старой машиной" not in str(exc.value)
 
 
 def test_restore_ejects_iso_before_undefine(fast_worker, monkeypatch):
@@ -296,7 +471,7 @@ def test_restore_ejects_iso_before_undefine(fast_worker, monkeypatch):
     backups.start_restore("web01", "20260924-0300", "web01", True)
     eject = ["virsh", "change-media", "web01", "sda", "--eject", "--config"]
     assert eject in virsh.calls
-    assert virsh.calls.index(eject) < virsh.calls.index(["virsh", "undefine", "web01", "--remove-all-storage", "--nvram", "--managed-save", "--snapshots-metadata"])
+    assert virsh.calls.index(eject) < virsh.calls.index(UNDEFINE)
 
 
 def test_restore_rejects_bad_name_and_incomplete_backup(fast_worker):
@@ -325,7 +500,7 @@ def test_restore_cleans_up_on_define_failure(fast_worker, monkeypatch):
     operation = backups.start_restore("web01", "20260924-0300", "web02", False)
     fresh = core.read_operation(operation["id"])
     assert fresh["status"] == "error" and "bad thing" in fresh["message"]
-    assert not (fast_worker["images"] / "web02.qcow2").exists()
+    assert not (fast_worker["images"] / "web02.qcow2").exists() and not list(fast_worker["images"].glob("*.restore-*"))
 
 
 def test_restore_disk_path_avoids_collisions(data_dirs):
@@ -391,6 +566,7 @@ def test_restore_page_and_submit(logged_in, fast_worker, monkeypatch):
     monkeypatch.setattr(backups, "stream_cmd", fake_stream())
     html = logged_in.get("/backups/web01/20260924-0300/restore").text
     assert 'name="replace"' in html and "Заменить существующую машину web01" in html
+    assert "Старая машина удаляется только после распаковки" in html and "Сетевые адреса сохраняются" in html
     response = logged_in.post("/backups/web01/20260924-0300/restore", data={"name": "web01", "replace": ""})
     assert response.status_code == 400 and "уже есть на сервере" in response.text
     response = logged_in.post("/backups/web01/20260924-0300/restore", data={"name": "web02", "replace": ""}, follow_redirects=False)
@@ -413,6 +589,34 @@ def test_delete_backup_path_traversal(logged_in, data_dirs, tmp_path):
     victim = tmp_path / "victim"
     victim.mkdir()
     (victim / "20260924-0300").mkdir()
-    logged_in.post("/backups/..%2Fvictim/20260924-0300/delete", follow_redirects=False)
-    logged_in.post("/backups/web01/..%2F..%2Fvictim/delete", follow_redirects=False)
+    # %2F раскрывается до маршрутизации: лишние сегменты не подходят ни под один маршрут
+    assert logged_in.post("/backups/..%2Fvictim/20260924-0300/delete", follow_redirects=False).status_code == 404
+    assert logged_in.post("/backups/web01/..%2F..%2Fvictim/delete", follow_redirects=False).status_code == 404
+    # а сама проверка путей — в delete_backup, независимо от маршрутизации
+    with pytest.raises(backups.BackupError):
+        backups.delete_backup("../victim", "20260924-0300")
+    with pytest.raises(backups.BackupError):
+        backups.delete_backup("web01", "../x")
     assert (victim / "20260924-0300").exists()
+
+
+def test_delete_backup_refused_while_copy_is_in_use(fast_worker, monkeypatch):
+    monkeypatch.setattr(core, "run_operation", lambda operation, worker: None)  # задачи остаются в очереди
+    monkeypatch.setattr(core, "run_cmd", FakeVirsh(running=False))
+    queued = backups.create_backup("web01")
+    with pytest.raises(backups.BackupError) as exc:
+        backups.delete_backup("web01", queued["backup_id"])
+    assert "идёт работа" in str(exc.value)
+    core.finish_operation(queued, False, "прервано")
+    backups.delete_backup("web01", queued["backup_id"])
+    assert not (fast_worker["backups"] / "web01").exists()
+
+    path = make_backup(fast_worker)
+    restore = backups.start_restore("web01", "20260924-0300", "web02", False)  # под другим именем: задача записана на web02
+    assert (path / backups.RESTORE_MARKER).read_text() == restore["id"]
+    with pytest.raises(backups.BackupError) as exc:
+        backups.delete_backup("web01", "20260924-0300")
+    assert "идёт работа" in str(exc.value)
+    core.finish_operation(restore, False, "прервано")  # устаревшая метка после перезапуска панели не мешает
+    backups.delete_backup("web01", "20260924-0300")
+    assert not path.exists()

@@ -5,7 +5,8 @@
 восстановление выполняются как фоновые операции с прогрессом и журналом.
 
 `create_backup(vm_name, note)` можно вызывать без HTTP — например, из
-расписания: `python3 web/features/backups.py web01 "ночная копия"`.
+расписания на сервере (зависимости панели лежат в её virtualenv):
+`/opt/virtuality/venv/bin/python /opt/virtuality/web/features/backups.py web01 "ночная копия"`.
 """
 import json
 import re
@@ -13,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -30,12 +32,19 @@ import presenters  # noqa: E402
 
 router = APIRouter()
 
-BACKUP_ID_RE = re.compile(r"\d{8}-\d{4}")
+BACKUP_ID_RE = re.compile(r"\d{8}-\d{4}(?:-\d{1,2})?")  # ГГГГММДД-ЧЧММ, при второй копии в ту же минуту — суффикс -2, -3…
+TARGET_RE = re.compile(r"[a-z]{2,3}[a-z0-9]{0,8}")  # имя диска в meta.json: vda, sdb, hda…
+OPERATION_TYPES = ("backup", "restore")
 SHUTDOWN_TIMEOUT = 180.0  # секунд ждём мягкого выключения
+LATE_SHUTDOWN_WATCH = 600.0  # секунд после отказа ещё следим: если машина выключится позже, запустим её снова
+SAVE_TIMEOUT = 1800  # секунд на сохранение памяти машины на паузе
+COPY_TIMEOUT = 12 * 3600.0  # секунд на копирование одного диска — дольше только зависший qemu-img
 POLL_INTERVAL = 2.0
 SPACE_MARGIN = 256 * 1024 * 1024  # запас, чтобы не забить диск под завязку
 NOTE_MAX = 120
+RESTORE_MARKER = ".restoring"  # файл в папке копии с id задачи восстановления, которая её читает
 MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря")
+BACKUP_ID_LOCK = threading.Lock()
 
 
 class BackupError(Exception):
@@ -51,29 +60,48 @@ def run(cmd: list[str], timeout: int = 12) -> dict[str, Any]:
     return core.run_cmd(cmd, timeout=timeout)
 
 
-def stream_cmd(cmd: list[str], on_line: Callable[[str], None]) -> int:
+def stream_cmd(cmd: list[str], on_line: Callable[[str], None], timeout: float = COPY_TIMEOUT) -> int:
     """Запустить команду и отдавать каждую строку вывода (по \\r и \\n) в on_line.
 
     qemu-img с ключом -p печатает прогресс через \\r, поэтому обычное чтение
-    по строкам не подходит. Возвращает код завершения."""
+    по строкам не подходит. Команду, не уложившуюся в timeout, убиваем, чтобы
+    зависший qemu-img не держал задачу «в работе» вечно. Возвращает код завершения."""
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    expired = threading.Event()
+
+    def kill() -> None:
+        expired.set()
+        process.kill()
+
+    timer = threading.Timer(timeout, kill)
+    timer.start()
     pending = b""
     assert process.stdout is not None
-    while True:
-        chunk = process.stdout.read(512)
-        if not chunk:
-            break
-        pending += chunk
-        parts = re.split(rb"[\r\n]+", pending)
-        pending = parts.pop()
-        for part in parts:
-            text = part.decode("utf-8", "replace").strip()
-            if text:
-                on_line(text)
-    tail = pending.decode("utf-8", "replace").strip()
-    if tail:
-        on_line(tail)
-    return process.wait()
+    try:
+        while True:
+            chunk = process.stdout.read(512)
+            if not chunk:
+                break
+            pending += chunk
+            parts = re.split(rb"[\r\n]+", pending)
+            pending = parts.pop()
+            for part in parts:
+                text = part.decode("utf-8", "replace").strip()
+                if text:
+                    on_line(text)
+        tail = pending.decode("utf-8", "replace").strip()
+        if tail:
+            on_line(tail)
+        code = process.wait()
+    finally:
+        timer.cancel()
+    if expired.is_set():
+        on_line(f"Команда не завершилась за отведённое время ({int(timeout)} с) и была остановлена.")
+    return code
+
+
+def start_thread(target: Callable[..., None], *args: Any) -> None:
+    threading.Thread(target=target, args=args, daemon=True).start()
 
 
 def parse_progress(line: str) -> int | None:
@@ -98,8 +126,11 @@ def parse_qemu_img_info(text: str) -> dict[str, Any]:
 
 
 def disk_info(path: str) -> dict[str, Any]:
-    result = run(["qemu-img", "info", "--output=json", path], timeout=30)
-    return parse_qemu_img_info(result["stdout"]) if result["ok"] else parse_qemu_img_info("")
+    # -U: диск работающей машины занят QEMU, без этого ключа qemu-img info отказывает («Failed to get shared write lock»).
+    result = run(["qemu-img", "info", "-U", "--output=json", path], timeout=30)
+    if not result["ok"]:
+        raise BackupError(f"Не удалось определить размер диска {path}: " + core.cmd_error(result, "qemu-img info"))
+    return parse_qemu_img_info(result["stdout"])
 
 
 def vm_disks(name: str) -> list[dict[str, str]]:
@@ -117,12 +148,24 @@ def vm_cdroms_with_media(name: str) -> list[dict[str, str]]:
     return [disk for disk in presenters.parse_domblklist(result["stdout"]) if disk["device"] == "cdrom" and disk["source"]]
 
 
-def free_bytes(path: Path) -> int:
+def existing_parent(path: Path) -> Path:
+    """Сам путь или ближайший существующий родитель — чтобы спросить у ФС о разделе."""
     target = path
     while not target.exists() and target != target.parent:
         target = target.parent
+    return target
+
+
+def free_bytes(path: Path) -> int:
     try:
-        return shutil.disk_usage(target).free
+        return shutil.disk_usage(existing_parent(path)).free
+    except OSError:
+        return 0
+
+
+def total_bytes(path: Path) -> int:
+    try:
+        return shutil.disk_usage(existing_parent(path)).total
     except OSError:
         return 0
 
@@ -133,7 +176,7 @@ def format_bytes(value: int | float) -> str:
 
 def format_backup_date(backup_id: str) -> str:
     try:
-        moment = datetime.strptime(backup_id, "%Y%m%d-%H%M")
+        moment = datetime.strptime((backup_id or "")[:13], "%Y%m%d-%H%M")
     except ValueError:
         return backup_id
     return f"{moment.day} {MONTHS[moment.month - 1]} {moment.year}, {moment:%H:%M}"
@@ -167,9 +210,12 @@ def backup_path(vm: str, backup_id: str) -> Path | None:
 
 
 def describe_backup(vm: str, backup_id: str, path: Path, meta: dict[str, Any]) -> dict[str, Any]:
-    disks = [disk for disk in meta.get("disks", []) if isinstance(disk, dict) and disk.get("target")]
+    listed = meta.get("disks")
+    listed = [disk for disk in listed if isinstance(disk, dict)] if isinstance(listed, list) else []
+    # Имя диска попадает в пути файлов, поэтому испорченный meta.json не должен увести за пределы папок.
+    disks = [disk for disk in listed if TARGET_RE.fullmatch(str(disk.get("target") or ""))]
     size = int(meta.get("size_bytes") or 0)
-    complete = (path / "vm.xml").exists() and bool(disks) and all((path / f"{disk['target']}.qcow2").exists() for disk in disks)
+    complete = (path / "vm.xml").exists() and bool(disks) and len(disks) == len(listed) and all((path / f"{disk['target']}.qcow2").exists() for disk in disks)
     return {
         "vm": vm,
         "id": backup_id,
@@ -237,7 +283,7 @@ def storage_summary(items: list[dict[str, Any]] | None = None) -> dict[str, Any]
     items = list_backups() if items is None else items
     used = sum(item["size_bytes"] for item in items)
     free = free_bytes(backup_root())
-    total = used + free
+    total = total_bytes(backup_root())  # доля именно от всего диска сервера, как и написано на странице
     return {
         "count": len(items),
         "used_bytes": used,
@@ -259,22 +305,50 @@ def remove_backup_dir(path: Path) -> None:
         pass
 
 
+def backup_in_use(vm: str, backup_id: str, path: Path) -> bool:
+    """Пишет ли сейчас эту копию задача копирования или читает задача восстановления."""
+    if any(operation.get("backup_id") == backup_id for operation in core.active_operations_for(vm, OPERATION_TYPES)):
+        return True
+    # Восстановление под другим именем записано на новую машину, поэтому его id лежит меткой в папке копии.
+    try:
+        marker = (path / RESTORE_MARKER).read_text().strip()
+    except OSError:
+        return False
+    operation = core.read_operation(marker)
+    return bool(operation and operation.get("status") in ("queued", "running"))
+
+
 def delete_backup(vm: str, backup_id: str) -> None:
     path = backup_path(vm, backup_id)
     if not path or not path.is_dir():
         raise BackupError("Копия не найдена — возможно, её уже удалили")
-    for operation in core.running_operations():
-        if operation.get("type") in ("backup", "restore") and operation.get("backup_id") == backup_id and operation.get("source_vm", operation.get("vm_name")) == vm:
-            raise BackupError("С этой копией сейчас идёт работа — дождитесь завершения задачи")
+    if backup_in_use(vm, backup_id, path):
+        raise BackupError("С этой копией сейчас идёт работа — дождитесь завершения задачи")
     remove_backup_dir(path)
 
 
 def active_operation(vm: str) -> dict[str, Any] | None:
-    """Идущая сейчас задача копирования/восстановления, связанная с машиной."""
-    for operation in core.running_operations():
-        if operation.get("type") in ("backup", "restore") and vm in (operation.get("vm_name"), operation.get("source_vm")):
-            return operation
-    return None
+    """Идущая сейчас задача копирования/восстановления этой машины (по всей папке задач, а не последним N)."""
+    found = core.active_operations_for(vm, OPERATION_TYPES)
+    return found[0] if found else None
+
+
+def reserve_backup_dir(vm_name: str) -> str:
+    """Занять папку под новую копию и вернуть её id.
+
+    Папка создаётся здесь, атомарно и под замком, чтобы две задачи в одну минуту
+    получили разные папки (вторая — с суффиксом -2) и при ошибке каждая удаляла
+    только свою."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    with BACKUP_ID_LOCK:
+        for counter in range(1, 100):
+            backup_id = stamp if counter == 1 else f"{stamp}-{counter}"
+            try:
+                (backup_root() / vm_name / backup_id).mkdir(parents=True, exist_ok=False)
+            except FileExistsError:
+                continue
+            return backup_id
+    raise BackupError("Слишком много копий этой машины за одну минуту. Подождите минуту и повторите.")
 
 
 # ---------------------------------------------------------------- создание копии
@@ -304,10 +378,12 @@ def create_backup(vm_name: str, note: str = "", wait: bool = False) -> dict[str,
     free = free_bytes(backup_root())
     if free < need + SPACE_MARGIN:
         raise BackupError(f"Недостаточно места для копии: нужно около {format_bytes(need)}, свободно {format_bytes(free)}. Удалите старые копии или освободите место на сервере.", "space")
-    backup_id = datetime.now().strftime("%Y%m%d-%H%M")
-    if (backup_root() / vm_name / backup_id).exists():
-        raise BackupError("Копия этой машины уже создана в эту минуту. Подождите минуту и повторите.")
-    operation = core.new_operation("backup", f"Резервная копия {vm_name}", "Ожидает начала", vm_name=vm_name, backup_id=backup_id, note=note, disks=plan, size_bytes=need)
+    backup_id = reserve_backup_dir(vm_name)
+    try:
+        operation = core.new_operation("backup", f"Резервная копия {vm_name}", "Ожидает начала", vm_name=vm_name, backup_id=backup_id, note=note, disks=plan, size_bytes=need)
+    except Exception:
+        remove_backup_dir(backup_root() / vm_name / backup_id)
+        raise
     if wait:
         core.update_operation(operation, status="running", started_at=core.utc_now())
         backup_worker(operation)
@@ -337,14 +413,16 @@ def disk_progress_reporter(operation: dict[str, Any], index: int, total: int, la
     return on_line
 
 
-def shutdown_and_wait(operation: dict[str, Any], vm: str) -> bool:
+def shutdown_and_wait(operation: dict[str, Any], vm: str) -> str:
+    """Мягко выключить машину. Возвращает пустую строку или текст проблемы для пользователя."""
     log = lambda text: core.append_operation_log(operation["id"], text)  # noqa: E731
     log("Машина работает — отправляем команду выключения (как кнопка питания, система завершит работу сама).")
     core.update_operation(operation, progress=2, message="Выключаем машину…")
     result = run(["virsh", "shutdown", vm], timeout=20)
     if not result["ok"]:
-        log("Команда выключения не принята: " + core.cmd_error(result, "virsh shutdown"))
-        return False
+        problem = core.cmd_error(result, "virsh shutdown")
+        log("Команда выключения не принята: " + problem)
+        return f"Машина не приняла команду выключения: {problem}. Выключите её вручную и создайте копию ещё раз."
     deadline = time.monotonic() + SHUTDOWN_TIMEOUT
     polls = 0
     while time.monotonic() < deadline:
@@ -352,12 +430,54 @@ def shutdown_and_wait(operation: dict[str, Any], vm: str) -> bool:
         polls += 1
         if not core.vm_is_running(vm):
             log("Машина выключена.")
-            return True
+            return ""
         if polls % 5 == 0:
             waited = int(polls * POLL_INTERVAL)
             core.update_operation(operation, message=f"Ждём выключения машины… {waited} с из {int(SHUTDOWN_TIMEOUT)}")
             log(f"Всё ещё работает, ждём ({waited} с).")
-    return False
+    minutes = max(1, int(SHUTDOWN_TIMEOUT // 60))
+    watch = max(1, int(LATE_SHUTDOWN_WATCH // 60))
+    log(f"Машина не выключилась за {minutes} {presenters.plural(minutes, 'минуту', 'минуты', 'минут')} — прекращаем, но ещё {watch} {presenters.plural(watch, 'минуту', 'минуты', 'минут')} следим за ней.")
+    start_thread(restart_after_late_shutdown, operation, vm)
+    return (
+        f"Машина не выключилась за {minutes} {presenters.plural(minutes, 'минуту', 'минуты', 'минут')}. Сохраните работу внутри неё, выключите её вручную и создайте копию ещё раз. "
+        f"Команда выключения уже отправлена: если машина выключится сама в ближайшие {watch} {presenters.plural(watch, 'минуту', 'минуты', 'минут')}, панель запустит её снова."
+    )
+
+
+def restart_after_late_shutdown(operation: dict[str, Any], vm: str) -> None:
+    """Команда выключения уже ушла в машину: если она всё же выключится с опозданием, вернуть её в работу."""
+    deadline = time.monotonic() + LATE_SHUTDOWN_WATCH
+    while time.monotonic() < deadline:
+        time.sleep(POLL_INTERVAL)
+        if not core.vm_is_running(vm):
+            core.append_operation_log(operation["id"], "Машина всё-таки выключилась — запускаем её снова.")
+            start_vm(operation, vm)
+            return
+    core.append_operation_log(operation["id"], "Машина так и не выключилась — оставляем её работать.")
+
+
+def save_paused(operation: dict[str, Any], vm: str) -> str:
+    """Машина на паузе не обработает команду выключения — сохраняем её память на диск (как спящий режим).
+
+    После копирования `virsh start` восстановит её с того же места. Возвращает пустую строку или текст проблемы."""
+    log = lambda text: core.append_operation_log(operation["id"], text)  # noqa: E731
+    log("Машина на паузе — сохраняем её состояние на диск сервера, после копирования она продолжит с того же места.")
+    core.update_operation(operation, progress=2, message="Сохраняем состояние машины…")
+    result = run(["virsh", "managedsave", vm], timeout=SAVE_TIMEOUT)
+    if not result["ok"]:
+        problem = core.cmd_error(result, "virsh managedsave")
+        log("Не удалось сохранить состояние: " + problem)
+        return f"Машина на паузе, и сохранить её состояние не удалось: {problem}. Снимите её с паузы или выключите и создайте копию ещё раз."
+    log("Состояние сохранено, машина остановлена.")
+    return ""
+
+
+def stop_for_backup(operation: dict[str, Any], vm: str) -> str:
+    """Остановить работающую машину перед копированием; вернуть текст проблемы или пустую строку."""
+    if core.vm_state(vm) == "paused":
+        return save_paused(operation, vm)
+    return shutdown_and_wait(operation, vm)
 
 
 def start_vm(operation: dict[str, Any], vm: str) -> str:
@@ -375,14 +495,17 @@ def backup_worker(operation: dict[str, Any]) -> None:
     vm = operation["vm_name"]
     plan = operation["disks"]
     log = lambda text: core.append_operation_log(operation["id"], text)  # noqa: E731
+    dest = backup_root() / vm / operation["backup_id"]  # папка занята ещё в create_backup, поэтому она точно наша
     was_running = core.vm_is_running(vm)
-    if was_running and not shutdown_and_wait(operation, vm):
-        core.finish_operation(operation, False, "Машина не выключилась за 3 минуты. Сохраните работу внутри неё, выключите её вручную и создайте копию ещё раз.")
-        return
-    dest = backup_root() / vm / operation["backup_id"]
+    if was_running:
+        problem = stop_for_backup(operation, vm)
+        if problem:
+            remove_backup_dir(dest)
+            core.finish_operation(operation, False, problem)
+            return
     size = 0
     try:
-        dest.mkdir(parents=True, exist_ok=False)
+        dest.mkdir(parents=True, exist_ok=True)
         result = run(["virsh", "dumpxml", vm, "--migratable"], timeout=20)
         if not result["ok"]:
             raise BackupError("Не удалось сохранить настройки машины: " + core.cmd_error(result, "virsh dumpxml"))
@@ -398,7 +521,8 @@ def backup_worker(operation: dict[str, Any]) -> None:
             log(" ".join(cmd))
             code = stream_cmd(cmd, disk_progress_reporter(operation, index, total, label))
             if code != 0:
-                raise BackupError(f"Не удалось скопировать диск {disk['target']} (qemu-img завершился с кодом {code})")
+                log(f"qemu-img завершился с кодом {code}.")
+                raise BackupError(f"Не удалось скопировать диск {disk['target']} — подробности в журнале задачи")
         size = sum(item.stat().st_size for item in dest.iterdir() if item.is_file())
         meta = {"vm": vm, "created_at": core.utc_now(), "disks": plan, "size_bytes": size, "version": core.APP_VERSION, "note": operation.get("note", "")}
         (dest / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -420,12 +544,16 @@ def backup_worker(operation: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------- восстановление
-def rewrite_xml(xml_text: str, new_name: str, disk_map: dict[str, str]) -> str:
+def rewrite_xml(xml_text: str, new_name: str, disk_map: dict[str, str], keep_identity: bool = False) -> str:
     """Подготовить XML копии к `virsh define` под именем new_name.
 
-    Меняет <name>, убирает <uuid> и id, переключает диски на новые файлы,
-    удаляет <mac> (libvirt выдаст новые адреса) и <nvram> (libvirt заведёт
-    свой файл под новое имя, чтобы не делить его со старой машиной)."""
+    Меняет <name>, убирает id, переключает диски на новые файлы (без
+    <backingStore> — копии сплошные, а старая цепочка могла указывать на диски
+    удалённой машины), вынимает из привода образ, которого больше нет на
+    сервере, и удаляет <nvram> (libvirt заведёт свой файл под новое имя).
+    Без keep_identity убирает и <uuid> с <mac>, чтобы вторая машина не мешала
+    оригиналу; при замене оригинала (keep_identity) их лучше оставить — гость
+    не увидит «новую» сетевую карту и не потребует повторной активации."""
     root = ET.fromstring(xml_text)
     root.attrib.pop("id", None)
     name = root.find("name")
@@ -433,16 +561,21 @@ def rewrite_xml(xml_text: str, new_name: str, disk_map: dict[str, str]) -> str:
         name = ET.Element("name")
         root.insert(0, name)
     name.text = new_name
-    for element in root.findall("uuid"):
-        root.remove(element)
+    if not keep_identity:
+        for element in root.findall("uuid"):
+            root.remove(element)
     devices = root.find("devices")
     if devices is not None:
         for disk in devices.findall("disk"):
             target = disk.find("target")
             dev = target.get("dev") if target is not None else None
+            source = disk.find("source")
+            if disk.get("device") == "cdrom":
+                if source is not None and source.get("file") and not Path(source.get("file", "")).is_file():
+                    disk.remove(source)
+                continue
             if disk.get("device") != "disk" or dev not in disk_map:
                 continue
-            source = disk.find("source")
             if source is None:
                 source = ET.SubElement(disk, "source")
             source.attrib.clear()
@@ -453,9 +586,12 @@ def rewrite_xml(xml_text: str, new_name: str, disk_map: dict[str, str]) -> str:
                 driver = ET.SubElement(disk, "driver")
                 driver.set("name", "qemu")
             driver.set("type", "qcow2")
-        for interface in devices.findall("interface"):
-            for mac in interface.findall("mac"):
-                interface.remove(mac)
+            for chain in disk.findall("backingStore"):
+                disk.remove(chain)
+        if not keep_identity:
+            for interface in devices.findall("interface"):
+                for mac in interface.findall("mac"):
+                    interface.remove(mac)
     os_element = root.find("os")
     if os_element is not None:
         for nvram in os_element.findall("nvram"):
@@ -476,6 +612,11 @@ def restore_disk_path(new_name: str, target: str, index: int) -> Path:
     return images / f"{new_name}-{target}-{counter}.qcow2"
 
 
+def restore_temp_path(new_name: str, operation_id: str, target: str) -> Path:
+    """Куда распаковывать диск, пока он не готов: <машина>.restore-<id задачи>-<диск>.qcow2 рядом с остальными."""
+    return core.IMAGES_DIR / f"{new_name}.restore-{operation_id[:8]}-{target}.qcow2"
+
+
 def plan_restore(vm: str, backup_id: str, new_name: str, replace: bool) -> dict[str, Any]:
     backup = read_backup(vm, backup_id)
     if not backup:
@@ -491,15 +632,11 @@ def plan_restore(vm: str, backup_id: str, new_name: str, replace: bool) -> dict[
     if active_operation(new_name) or active_operation(vm):
         raise BackupError("С этой машиной уже идёт копирование или восстановление — дождитесь завершения")
     need = sum(int(disk.get("size") or 0) for disk in backup["disks"])
-    reclaim = 0
-    if exists:
-        try:
-            reclaim = sum(disk_info(disk["source"])["actual_size"] for disk in vm_disks(new_name))
-        except BackupError:
-            reclaim = 0
-    free = free_bytes(core.IMAGES_DIR) + reclaim
+    # Диски старой машины не считаем освобождающимися: копия распаковывается рядом с ними, а старая удаляется только потом.
+    free = free_bytes(core.IMAGES_DIR)
     if free < need + SPACE_MARGIN:
-        raise BackupError(f"Недостаточно места для дисков машины: нужно около {format_bytes(need)}, свободно {format_bytes(free)}.", "space")
+        hint = " Копия сначала распаковывается рядом со старой машиной и только потом заменяет её, поэтому место нужно на обе." if exists else ""
+        raise BackupError(f"Недостаточно места для дисков машины: нужно около {format_bytes(need)}, свободно {format_bytes(free)}.{hint}", "space")
     return {"backup": backup, "new_name": new_name, "replace": exists, "need": need}
 
 
@@ -508,6 +645,10 @@ def start_restore(vm: str, backup_id: str, new_name: str, replace: bool) -> dict
     backup = plan["backup"]
     title = f"Восстановление {plan['new_name']} из копии"
     operation = core.new_operation("restore", title, "Ожидает начала", vm_name=plan["new_name"], source_vm=vm, backup_id=backup_id, replace=plan["replace"], disks=backup["disks"], size_bytes=plan["need"])
+    try:
+        (Path(backup["path"]) / RESTORE_MARKER).write_text(operation["id"], encoding="utf-8")  # чтобы копию не удалили, пока её читают
+    except OSError:
+        pass
     core.run_operation(operation, restore_worker)
     return operation
 
@@ -533,34 +674,45 @@ def remove_vm(operation: dict[str, Any], name: str) -> None:
 
 
 def restore_worker(operation: dict[str, Any]) -> None:
+    """Сначала распаковать все диски во временные файлы, и только когда они готовы —
+    удалить старую машину (при замене), переименовать диски и зарегистрировать новую.
+    Так ошибка на середине копирования не оставляет пользователя без машины."""
     new_name = operation["vm_name"]
     log = lambda text: core.append_operation_log(operation["id"], text)  # noqa: E731
     backup = read_backup(operation["source_vm"], operation["backup_id"])
-    created: list[Path] = []
+    created: list[Path] = []  # файлы, которые появились по вине этой задачи — только их и убираем при ошибке
     try:
         if not backup or not backup["complete"]:
             raise BackupError("Копия не найдена или неполная")
-        if operation.get("replace"):
-            core.update_operation(operation, progress=3, message=f"Удаляем существующую машину {new_name}…")
-            remove_vm(operation, new_name)
         core.IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-        disk_map: dict[str, str] = {}
+        copies: list[tuple[str, Path]] = []
         total = len(backup["disks"])
         for index, disk in enumerate(backup["disks"]):
             source = Path(backup["path"]) / f"{disk['target']}.qcow2"
-            target = restore_disk_path(new_name, disk["target"], index)
-            created.append(target)
+            temp = restore_temp_path(new_name, operation["id"], disk["target"])
+            created.append(temp)
             label = f"Восстанавливаем диск {disk['target']} ({index + 1} из {total})"
             core.update_operation(operation, progress=int(5 + index / total * 90), message=label)
-            log(f"{label}: {source} → {target}")
-            cmd = ["qemu-img", "convert", "-p", "-O", "qcow2", str(source), str(target)]
+            log(f"{label}: {source} → {temp}")
+            cmd = ["qemu-img", "convert", "-p", "-O", "qcow2", str(source), str(temp)]
             log(" ".join(cmd))
             code = stream_cmd(cmd, disk_progress_reporter(operation, index, total, label))
             if code != 0:
-                raise BackupError(f"Не удалось восстановить диск {disk['target']} (qemu-img завершился с кодом {code})")
-            disk_map[disk["target"]] = str(target)
+                log(f"qemu-img завершился с кодом {code}.")
+                raise BackupError(f"Не удалось восстановить диск {disk['target']} — подробности в журнале задачи")
+            copies.append((disk["target"], temp))
+        if operation.get("replace"):
+            core.update_operation(operation, progress=95, message=f"Диски готовы — удаляем существующую машину {new_name}…")
+            remove_vm(operation, new_name)
+        disk_map: dict[str, str] = {}
+        for index, (target, temp) in enumerate(copies):
+            final = restore_disk_path(new_name, target, index)
+            temp.replace(final)
+            created[created.index(temp)] = final
+            disk_map[target] = str(final)
+            log(f"Диск {target} готов: {final}")
         core.update_operation(operation, progress=96, message="Регистрируем машину…")
-        xml = rewrite_xml((Path(backup["path"]) / "vm.xml").read_text(encoding="utf-8"), new_name, disk_map)
+        xml = rewrite_xml((Path(backup["path"]) / "vm.xml").read_text(encoding="utf-8"), new_name, disk_map, keep_identity=bool(operation.get("replace")))
         with tempfile.NamedTemporaryFile("w", dir=backup["path"], prefix="restore-", suffix=".xml", delete=False, encoding="utf-8") as handle:
             handle.write(xml)
             tmp_xml = Path(handle.name)
@@ -578,6 +730,9 @@ def restore_worker(operation: dict[str, Any]) -> None:
         log(f"Ошибка: {exc}")
         core.finish_operation(operation, False, str(exc)[:240])
         return
+    finally:
+        if backup:
+            (Path(backup["path"]) / RESTORE_MARKER).unlink(missing_ok=True)
     created_label = backup["created_label"] if backup else ""
     core.finish_operation(operation, True, f"Машина {new_name} восстановлена из копии от {created_label}. Она выключена — запустите её, когда будете готовы.")
 
@@ -681,7 +836,7 @@ def vm_backup_create(request: Request, name: str, note: str = Form("")):
     return RedirectResponse(url=f"/operations/{operation['id']}", status_code=303)
 
 
-if __name__ == "__main__":  # python3 web/features/backups.py <машина> [заметка]
+if __name__ == "__main__":  # /opt/virtuality/venv/bin/python /opt/virtuality/web/features/backups.py <машина> [заметка]
     try:
         finished = create_backup(sys.argv[1], " ".join(sys.argv[2:]), wait=True)
     except (IndexError, BackupError) as error:
