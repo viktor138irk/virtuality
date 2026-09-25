@@ -2027,6 +2027,8 @@ def vm_action(request: Request, name: str, action: str):
     if not valid_vm_name(name):
         return JSONResponse({"ok": False, "error": "Invalid VM name"}, status_code=400)
     allowed = {"start": ["virsh", "start", name], "shutdown": ["virsh", "shutdown", name], "reboot": ["virsh", "reboot", name], "destroy": ["virsh", "destroy", name], "autostart": ["virsh", "autostart", name], "autostart-disable": ["virsh", "autostart", "--disable", name]}
+    if action in ("shutdown", "destroy", "delete"):
+        backups.cancel_late_restart(name)
     if action == "delete":
         if vm_state(name) == "running":
             run_cmd(["virsh", "destroy", name], timeout=20)

@@ -401,7 +401,6 @@ def test_restore_under_new_name(fast_worker, monkeypatch):
     assert "<name>web02</name>" in virsh.defined_xml and str(target) in virsh.defined_xml and "<mac" not in virsh.defined_xml
     assert not any(cmd[:2] == ["virsh", "undefine"] for cmd in virsh.calls)
     assert not list((fast_worker["backups"] / "web01" / "20260924-0300").glob("restore-*.xml"))
-    assert not (fast_worker["backups"] / "web01" / "20260924-0300" / backups.RESTORE_MARKER).exists()
 
 
 def test_restore_requires_replace_confirmation(fast_worker):
@@ -613,10 +612,34 @@ def test_delete_backup_refused_while_copy_is_in_use(fast_worker, monkeypatch):
 
     path = make_backup(fast_worker)
     restore = backups.start_restore("web01", "20260924-0300", "web02", False)  # под другим именем: задача записана на web02
-    assert (path / backups.RESTORE_MARKER).read_text() == restore["id"]
+    second = backups.start_restore("web01", "20260924-0300", "web03", False)  # две распаковки одной копии сразу
     with pytest.raises(backups.BackupError) as exc:
         backups.delete_backup("web01", "20260924-0300")
     assert "идёт работа" in str(exc.value)
-    core.finish_operation(restore, False, "прервано")  # устаревшая метка после перезапуска панели не мешает
+    core.finish_operation(second, False, "прервано")  # первая ещё идёт — копию по-прежнему нельзя удалить
+    with pytest.raises(backups.BackupError):
+        backups.delete_backup("web01", "20260924-0300")
+    core.finish_operation(restore, False, "прервано")
     backups.delete_backup("web01", "20260924-0300")
     assert not path.exists()
+
+
+def test_late_restart_watch_is_cancelled_by_user_action(fast_worker, monkeypatch):
+    import threading
+
+    virsh = FakeVirsh(running=True, shuts_down=False)
+    monkeypatch.setattr(core, "run_cmd", virsh)
+    monkeypatch.setattr(backups, "stream_cmd", fake_stream())
+    monkeypatch.setattr(backups, "LATE_SHUTDOWN_WATCH", 5.0)
+    watchers = []
+    monkeypatch.setattr(backups, "start_thread", lambda target, *args: watchers.append(threading.Thread(target=target, args=args)) or watchers[-1].start())
+    operation = backups.create_backup("web01")
+    for _ in range(200):  # наблюдатель запущен и ждёт
+        if "web01" in backups.LATE_WATCHES:
+            break
+        __import__("time").sleep(0.01)
+    backups.cancel_late_restart("web01")  # пользователь нажал «Выключить» в панели
+    virsh.running = False
+    watchers[0].join(timeout=5)
+    assert not watchers[0].is_alive() and ["virsh", "start", "web01"] not in virsh.calls
+    assert "Наблюдение снято" in core.read_operation(operation["id"])["log_tail"]

@@ -42,7 +42,6 @@ COPY_TIMEOUT = 12 * 3600.0  # секунд на копирование одно�
 POLL_INTERVAL = 2.0
 SPACE_MARGIN = 256 * 1024 * 1024  # запас, чтобы не забить диск под завязку
 NOTE_MAX = 120
-RESTORE_MARKER = ".restoring"  # файл в папке копии с id задачи восстановления, которая её читает
 MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря")
 BACKUP_ID_LOCK = threading.Lock()
 
@@ -305,17 +304,24 @@ def remove_backup_dir(path: Path) -> None:
         pass
 
 
+def unfinished_restores_of(vm: str, backup_id: str) -> list[dict[str, Any]]:
+    """Все незавершённые восстановления из этой копии — под любым именем машины (их может быть несколько)."""
+    found = []
+    for path in core.OPERATIONS_DIR.glob("*.json") if core.OPERATIONS_DIR.exists() else []:
+        try:
+            operation = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if operation.get("type") == "restore" and operation.get("status") in ("queued", "running") and operation.get("source_vm") == vm and operation.get("backup_id") == backup_id:
+            found.append(operation)
+    return found
+
+
 def backup_in_use(vm: str, backup_id: str, path: Path) -> bool:
     """Пишет ли сейчас эту копию задача копирования или читает задача восстановления."""
     if any(operation.get("backup_id") == backup_id for operation in core.active_operations_for(vm, OPERATION_TYPES)):
         return True
-    # Восстановление под другим именем записано на новую машину, поэтому его id лежит меткой в папке копии.
-    try:
-        marker = (path / RESTORE_MARKER).read_text().strip()
-    except OSError:
-        return False
-    operation = core.read_operation(marker)
-    return bool(operation and operation.get("status") in ("queued", "running"))
+    return bool(unfinished_restores_of(vm, backup_id))
 
 
 def delete_backup(vm: str, backup_id: str) -> None:
@@ -358,6 +364,7 @@ def create_backup(vm_name: str, note: str = "", wait: bool = False) -> dict[str,
     Проверки (машина есть, диски есть, места хватает) выполняются сразу и
     поднимают BackupError с понятным текстом. С wait=True копия делается
     в текущем потоке — удобно для расписания."""
+    cancel_late_restart(vm_name)
     if not core.valid_vm_name(vm_name):
         raise BackupError("Некорректное имя машины")
     note = clean_note(note)
@@ -445,16 +452,37 @@ def shutdown_and_wait(operation: dict[str, Any], vm: str) -> str:
     )
 
 
+LATE_WATCHES: dict[str, threading.Event] = {}
+
+
+def cancel_late_restart(vm: str) -> None:
+    """Пользователь сам выключает машину или снова делает копию — наблюдатель не должен её запускать."""
+    event = LATE_WATCHES.pop(vm, None)
+    if event:
+        event.set()
+
+
 def restart_after_late_shutdown(operation: dict[str, Any], vm: str) -> None:
     """Команда выключения уже ушла в машину: если она всё же выключится с опозданием, вернуть её в работу."""
+    cancel_late_restart(vm)
+    cancelled = LATE_WATCHES.setdefault(vm, threading.Event())
     deadline = time.monotonic() + LATE_SHUTDOWN_WATCH
-    while time.monotonic() < deadline:
-        time.sleep(POLL_INTERVAL)
-        if not core.vm_is_running(vm):
-            core.append_operation_log(operation["id"], "Машина всё-таки выключилась — запускаем её снова.")
-            start_vm(operation, vm)
-            return
-    core.append_operation_log(operation["id"], "Машина так и не выключилась — оставляем её работать.")
+    try:
+        while time.monotonic() < deadline:
+            if cancelled.wait(POLL_INTERVAL):
+                core.append_operation_log(operation["id"], "Наблюдение снято: машиной занялись вручную или новой задачей.")
+                return
+            if not core.vm_is_running(vm):
+                if any(other["id"] != operation["id"] for other in core.active_operations_for(vm, OPERATION_TYPES)):
+                    core.append_operation_log(operation["id"], "Машина выключилась, но с ней уже работает другая задача — не запускаем.")
+                    return
+                core.append_operation_log(operation["id"], "Машина всё-таки выключилась — запускаем её снова.")
+                start_vm(operation, vm)
+                return
+        core.append_operation_log(operation["id"], "Машина так и не выключилась — оставляем её работать.")
+    finally:
+        if LATE_WATCHES.get(vm) is cancelled:
+            LATE_WATCHES.pop(vm, None)
 
 
 def save_paused(operation: dict[str, Any], vm: str) -> str:
@@ -645,10 +673,6 @@ def start_restore(vm: str, backup_id: str, new_name: str, replace: bool) -> dict
     backup = plan["backup"]
     title = f"Восстановление {plan['new_name']} из копии"
     operation = core.new_operation("restore", title, "Ожидает начала", vm_name=plan["new_name"], source_vm=vm, backup_id=backup_id, replace=plan["replace"], disks=backup["disks"], size_bytes=plan["need"])
-    try:
-        (Path(backup["path"]) / RESTORE_MARKER).write_text(operation["id"], encoding="utf-8")  # чтобы копию не удалили, пока её читают
-    except OSError:
-        pass
     core.run_operation(operation, restore_worker)
     return operation
 
@@ -730,9 +754,6 @@ def restore_worker(operation: dict[str, Any]) -> None:
         log(f"Ошибка: {exc}")
         core.finish_operation(operation, False, str(exc)[:240])
         return
-    finally:
-        if backup:
-            (Path(backup["path"]) / RESTORE_MARKER).unlink(missing_ok=True)
     created_label = backup["created_label"] if backup else ""
     core.finish_operation(operation, True, f"Машина {new_name} восстановлена из копии от {created_label}. Она выключена — запустите её, когда будете готовы.")
 
