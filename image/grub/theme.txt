@@ -1,0 +1,41 @@
+desktop-image: "background.png"
+desktop-image-scale-method: "stretch"
+desktop-color: "#0b0a1f"
+title-text: ""
+terminal-font: "Unicode Regular"
+terminal-left: "7%"
+terminal-top: "36%"
+terminal-width: "86%"
+terminal-height: "50%"
+terminal-border: "0"
+
++ boot_menu {
+  left = 7%
+  top = 36%
+  width = 60%
+  height = 42%
+  item_font = "Unicode Regular"
+  item_color = "#b9b8cf"
+  selected_item_color = "#ffffff"
+  item_height = 36
+  item_padding = 10
+  item_spacing = 6
+  icon_width = 0
+  icon_height = 0
+  scrollbar = false
+  selected_item_pixmap_style = "select_*.png"
+}
+
++ progress_bar {
+  id = "__timeout__"
+  left = 7%
+  top = 86%
+  width = 60%
+  height = 24
+  font = "Unicode Regular"
+  text_color = "#ffffff"
+  fg_color = "#7b6bff"
+  bg_color = "#1c1a36"
+  border_color = "#2a2748"
+  text = "Автоматический запуск через %d с"
+}

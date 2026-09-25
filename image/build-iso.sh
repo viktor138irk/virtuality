@@ -216,20 +216,41 @@ import sys
 path, unattended, version = sys.argv[1], sys.argv[2] == "1", sys.argv[3]
 text = open(path).read()
 # /autoinstall.yaml applies to every entry, so all Ubuntu entries become Virtuality entries.
-suffix = " (UNATTENDED: erases disk)" if unattended else ""
-text = text.replace('menuentry "Try or Install Ubuntu Server"', 'menuentry "Install Virtuality %s%s"' % (version, suffix), 1)
-text = text.replace('menuentry "Ubuntu Server with the HWE kernel"', 'menuentry "Install Virtuality %s with the HWE kernel%s"' % (version, suffix), 1)
-if "Install Virtuality" not in text:
+suffix = " — автоматически, диск будет стёрт" if unattended else ""
+text = text.replace('menuentry "Try or Install Ubuntu Server"', 'menuentry "Установить Virtuality %s%s"' % (version, suffix), 1)
+text = text.replace('menuentry "Ubuntu Server with the HWE kernel"', 'menuentry "Установить Virtuality %s (новое ядро HWE)%s"' % (version, suffix), 1)
+text = text.replace("menuentry 'Boot from next volume'", "menuentry 'Загрузить с другого диска'", 1)
+text = text.replace("menuentry 'UEFI Firmware Settings'", "menuentry 'Настройки UEFI'", 1)
+text = text.replace("menuentry 'Test memory'", "menuentry 'Проверить память'", 1)
+if "Установить Virtuality" not in text:
     raise SystemExit("unexpected grub.cfg menu titles")
 if unattended:
     text = re.sub(r"^(\s*linux\s+\S+\s+)---", r"\1autoinstall ---", text, flags=re.M)
-text = re.sub(r"^set timeout=\d+", "set default=0\nset timeout=10", text, count=1, flags=re.M)
-open(path, "w").write(text)
+text = re.sub(r"^set timeout=\d+\n", "", text, count=1, flags=re.M)
+text = text.replace("loadfont unicode\n", "", 1)
+# Branded graphical menu; if a module or the font is missing GRUB falls back to the plain text menu.
+theme = """insmod all_video
+insmod gfxterm
+insmod png
+insmod gfxmenu
+set gfxmode=1024x768,auto
+if loadfont /boot/grub/fonts/unicode.pf2; then
+  terminal_output gfxterm
+  set theme=/boot/grub/themes/virtuality/theme.txt
+  export theme
+fi
+set default=0
+set timeout=10
+"""
+open(path, "w").write(theme + text)
 PYEOF
 new_md5="$(md5sum "${WORK_DIR}/grub.cfg" | cut -d' ' -f1)"
 sed -i "s|^[0-9a-f]\{32\}  \./boot/grub/grub.cfg$|${new_md5}  ./boot/grub/grub.cfg|" "${WORK_DIR}/md5sum.txt"
 
 # ---------------------------------------------------------- repack
+THEME_DIR="${WORK_DIR}/theme"
+mkdir -p "$THEME_DIR"
+cp "${IMAGE_DIR}"/grub/theme.txt "${IMAGE_DIR}"/grub/*.png "$THEME_DIR"/
 say "Writing ${OUTPUT_ISO}"
 rm -f "$OUTPUT_ISO"
 chmod -R a+rX,go-w "$PAYLOAD"
@@ -238,6 +259,7 @@ if ! xorriso -indev "$UBUNTU_ISO" -outdev "$OUTPUT_ISO" \
   -map "$PAYLOAD" /virtuality \
   -map "${WORK_DIR}/autoinstall.yaml" /autoinstall.yaml \
   -map "${WORK_DIR}/grub.cfg" /boot/grub/grub.cfg \
+  -map "${THEME_DIR}" /boot/grub/themes/virtuality \
   -map "${WORK_DIR}/md5sum.txt" /md5sum.txt \
   -boot_image any replay > "${WORK_DIR}/xorriso.log" 2>&1; then
   tail -n 30 "${WORK_DIR}/xorriso.log" >&2
