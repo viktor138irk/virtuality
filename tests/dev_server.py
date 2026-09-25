@@ -13,9 +13,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import conftest  # noqa: E402  (sets sys.path and env)
 
 import app  # noqa: E402
+import core  # noqa: E402
 import host_profile  # noqa: E402
 import network_core  # noqa: E402
 import update_core  # noqa: E402
+
+# Снимки для демо: имя, дата, состояние, описание.
+DEMO_SNAPSHOTS = [
+    ("snap-20260925-1012", "2026-09-25 10:12:03 +0000", "shutoff", "Перед обновлением ядра"),
+    ("snap-20260924-0900", "2026-09-24 09:00:41 +0000", "running", "Настроен nginx и сертификаты"),
+    ("snap-20260918-1830", "2026-09-18 18:30:12 +0000", "running", "Чистая система после установки"),
+    ("clean", "2026-09-10 12:05:00 +0000", "shutoff", ""),
+]
+
+
+def demo_run_cmd(cmd, timeout=12, **kwargs):
+    """Как conftest.fake_run_cmd, но со списком снимков побогаче."""
+    if cmd[:2] == ["virsh", "snapshot-list"]:
+        rows = "\n".join(f" {name:<20} {when}   {state}" for name, when, state, _ in DEMO_SNAPSHOTS)
+        return conftest.fake_result(" Name                 Creation Time               State\n" + "-" * 62 + "\n" + rows)
+    if cmd[:2] == ["virsh", "snapshot-current"]:
+        return conftest.fake_result("snap-20260924-0900")
+    if cmd[:2] == ["virsh", "snapshot-create-as"] and "uefi" in conftest.option(cmd, "--description").lower():
+        # Описание со словом «uefi» показывает, как выглядит ошибка libvirt.
+        return conftest.fake_result(ok=False, stderr="error: unsupported configuration: internal snapshots of a VM with pflash based firmware are not supported")
+    if cmd[:2] == ["virsh", "snapshot-dumpxml"]:
+        snap = conftest.option(cmd, "--snapshotname")
+        state, description = next(((s, d) for n, _, s, d in DEMO_SNAPSHOTS if n == snap), ("shutoff", ""))
+        memory = "internal" if state == "running" else "no"
+        return conftest.fake_result(f"<domainsnapshot><name>{snap}</name><description>{description}</description><state>{state}</state><memory snapshot='{memory}'/></domainsnapshot>")
+    return conftest.fake_run_cmd(cmd, timeout, **kwargs)
 
 
 def seed(root: Path) -> None:
@@ -23,6 +50,7 @@ def seed(root: Path) -> None:
     for path in dirs.values():
         path.mkdir(parents=True, exist_ok=True)
     app.ISO_DIR, app.IMAGES_DIR, app.DISK_IMAGES_DIR, app.OPERATIONS_DIR = dirs["iso"], dirs["images"], dirs["disk-images"], dirs["operations"]
+    core.OPERATIONS_DIR = dirs["operations"]
     network_core.CONFIG_DIR, network_core.NETWORK_DIR, network_core.NFT_DIR = dirs["config"], dirs["network"], dirs["nft"]
     network_core.PORT_FORWARDS_FILE = dirs["network"] / "port_forwards.json"
     network_core.NAT_XML_FILE = dirs["network"] / "virtuality-nat.xml"
@@ -32,8 +60,8 @@ def seed(root: Path) -> None:
     host_profile.PROFILE_FILE = dirs["config"] / "host_profile.json"
     update_core.STATE_DIR, update_core.STATE_FILE, update_core.LOG_FILE = dirs["update"], dirs["update"] / "state.json", dirs["update"] / "update.log"
     update_core.SOURCE_DIR = Path(__file__).resolve().parents[1]
-    for module in (app, network_core, host_profile):
-        module.run_cmd = conftest.fake_run_cmd
+    for module in (app, network_core, host_profile, core, *conftest.feature_modules()):
+        module.run_cmd = demo_run_cmd
     app.auth.verify_password = lambda user, password: True
 
     for name, size in (("ubuntu-26.04-live-server-amd64.iso", 3), ("debian-13.7.0-amd64-netinst.iso", 1)):
@@ -49,6 +77,9 @@ def seed(root: Path) -> None:
         op_id = str(uuid.uuid4())
         app.write_operation({"id": op_id, "type": "vm_create", "title": title, "status": status, "progress": progress, "message": "Готово" if status == "success" else "qemu-img: 64%" if status == "running" else "virt-install завершился с ошибкой: 1", "created_at": app.utc_now(), "updated_at": app.utc_now(), "created_by": "tester"})
         app.append_operation_log(op_id, "virt-install --name web01 --memory 2048 ...")
+    # Идущий снимок машины db01 — видно на /vm/db01/snapshots.
+    snap_op = core.new_operation("snapshot_create", "Снимок машины db01", vm_name="db01", snapshot="snap-20260925-1500", vm_running=True)
+    core.update_operation(snap_op, status="running", progress=15, message="Сохраняем состояние машины и памяти — она на несколько секунд замрёт…")
 
 
 if __name__ == "__main__":

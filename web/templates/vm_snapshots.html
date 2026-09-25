@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, vm_badge, op_badge, empty, alert %}
+{% set page_title = 'Снимки — ' ~ vm.name %}
+{% set s = vm.info.state|vm_state %}
+{% set count = snapshots|length %}
+
+{% block page_header %}
+<div class="page-header" data-live-vm="{{ vm.name }}" data-running="{{ '1' if s.running else '0' }}" data-reload-on-change>
+  <div>
+    <div class="eyebrow"><a href="/">{{ icon('arrow-left', 'icon-sm') }} Все машины</a></div>
+    <div class="title-row">
+      <span class="vm-avatar {{ 'on' if s.running else '' }}" style="width:48px;height:48px">{{ icon('monitor', 'icon-lg') }}<span class="status-dot {{ s.tone }}" data-live="dot"></span></span>
+      <div>
+        <div class="row"><h1>{{ vm.name }}</h1>{{ vm_badge(vm.info.state, 'lg') }}</div>
+        <p class="subtle mt-1">{{ vm.info.vcpus }} {{ plural(vm.info.vcpus, 'ядро', 'ядра', 'ядер') }} · {{ vm.info.memory_mb|format_mb }} памяти · {{ count }} {{ plural(count, 'снимок', 'снимка', 'снимков') }} из {{ max_snapshots }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-primary{{ ' disabled' if blockers else '' }}" href="#create" {% if blockers %}aria-disabled="true"{% endif %}>{{ icon('camera') }}Создать снимок</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block alerts %}
+  {% if snapshot_message %}{{ alert('success', snapshot_message) }}{% endif %}
+  {% if snapshot_error %}{{ alert('danger', snapshot_error) }}{% endif %}
+  {% if operation and operation.status == 'success' %}{{ alert('success', operation.message) }}{% endif %}
+  {% if operation and operation.status == 'error' %}{{ alert('danger', operation.message, title='Не получилось: ' ~ operation.title|lower) }}{% endif %}
+{% endblock %}
+
+{% block content %}
+<nav class="tabs">
+  <a href="/vm/{{ vm.name }}#overview">{{ icon('layout-dashboard', 'icon-sm') }}Обзор</a>
+  <a href="/vm/{{ vm.name }}#resources">{{ icon('cpu', 'icon-sm') }}Ресурсы</a>
+  <a href="/vm/{{ vm.name }}#storage">{{ icon('hard-drive', 'icon-sm') }}Диски и загрузка</a>
+  <a href="/vm/{{ vm.name }}/snapshots" class="active" aria-current="page">{{ icon('camera', 'icon-sm') }}Снимки<span class="tag">{{ count }}</span></a>
+  <a href="/vm/{{ vm.name }}#expert">{{ icon('terminal', 'icon-sm') }}Для специалистов</a>
+</nav>
+
+<section class="grid grid-main">
+  <div class="stack">
+    {% for op in active_operations %}
+      <div class="alert info" role="status" data-watch-operation="{{ op.id }}">
+        <span class="spinner" style="margin-top:1px"></span>
+        <div class="grow">
+          <strong>{{ op.title }}</strong>
+          <span>{{ op.message }}</span>
+          <div class="progress indeterminate mt-2" style="max-width:360px"><span></span></div>
+        </div>
+        <a class="btn btn-sm" href="/operations/{{ op.id }}">Подробнее{{ icon('chevron-right', 'icon-sm') }}</a>
+      </div>
+    {% endfor %}
+
+    <article class="card">
+      <div class="card-header">
+        <div><h2>Точки восстановления</h2><p>Сохранённые состояния машины, к которым можно вернуться</p></div>
+        <span class="tag nowrap" title="Не больше {{ max_snapshots }} снимков на одну машину">{{ count }} из {{ max_snapshots }}</span>
+      </div>
+      {% if snapshots %}
+        <div class="list">
+          {% for snap in snapshots %}
+            <div class="list-item">
+              <span class="list-icon {{ 'brand' if snap.is_current else '' }}">{{ icon('camera') }}</span>
+              <div class="grow">
+                <div class="row" style="gap:8px">
+                  <span class="title truncate">{{ snap.title }}</span>
+                  {% if snap.is_current %}{{ badge('Текущий', 'brand', dot=False, attrs='title="Машина сейчас продолжает работу от этого снимка"') }}{% endif %}
+                </div>
+                <div class="meta">{{ snap.when }} · {{ snap.state_info.label }}{% if snap.with_memory %} — сохранена вместе с памятью{% endif %}{% if snap.description %} · <span class="mono">{{ snap.name }}</span>{% endif %}</div>
+              </div>
+              <form method="post" action="/vm/{{ vm.name }}/snapshots/{{ snap.name }}/revert" class="inline-form"
+                    data-confirm="Машина {{ vm.name }} вернётся в состояние на момент «{{ snap.when|lower }}». Всё, что изменилось после этого — файлы, программы, настройки — будет потеряно без возможности восстановления. {% if snap.with_memory %}После возврата машина будет работать, как в момент снимка.{% else %}После возврата машина будет выключена.{% endif %}"
+                    data-confirm-title="Вернуться к этому снимку?" data-confirm-button="Вернуться">
+                <button class="btn btn-sm">{{ icon('history', 'icon-sm') }}<span class="hide-sm">Вернуться</span></button>
+              </form>
+              <form method="post" action="/vm/{{ vm.name }}/snapshots/{{ snap.name }}/delete" class="inline-form"
+                    data-confirm="Снимок «{{ snap.title }}» будет удалён. Сама машина не изменится — пропадёт только возможность вернуться к этому состоянию."
+                    data-confirm-title="Удалить снимок?" data-confirm-button="Удалить" data-toast="Снимок удалён" data-toast-tone="warning">
+                <button class="btn btn-sm btn-icon btn-ghost" aria-label="Удалить снимок" title="Удалить снимок">{{ icon('trash-2', 'icon-sm') }}</button>
+              </form>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        {{ empty('camera', 'Снимков пока нет', 'Сделайте снимок перед обновлением или рискованной настройкой. Если что-то пойдёт не так, машину можно будет вернуть назад за минуту.') }}
+      {% endif %}
+    </article>
+
+    <details class="advanced">
+      <summary>{{ icon('terminal', 'icon-sm') }}Для специалистов<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+      <div class="advanced-body stack-sm">
+        <p class="subtle small">Это внутренние снимки libvirt (<code>virsh snapshot-create-as … --atomic</code>): они хранятся внутри qcow2-файла диска. Возврат — <code>virsh snapshot-revert</code>, удаление — <code>virsh snapshot-delete</code>.</p>
+        <div>
+          <div class="terminal-head"><i></i><i></i><i></i><span style="margin-left:6px">virsh snapshot-list --domain {{ vm.name }}</span></div>
+          <pre class="terminal">{{ raw_list or '—' }}</pre>
+        </div>
+        {% if checks.disks %}
+          <p class="subtle small">Диски: {% for d in checks.disks %}{{ d.target }} — {{ d.format }}{{ ', ' if not loop.last }}{% endfor %}{% if checks.uefi %} · прошивка UEFI{% endif %}</p>
+        {% endif %}
+      </div>
+    </details>
+  </div>
+
+  <aside class="stack">
+    <article class="card" id="create">
+      <div class="card-header"><div><h2>Создать снимок</h2><p>Запомнить состояние машины прямо сейчас</p></div></div>
+      <form method="post" action="/vm/{{ vm.name }}/snapshots/create" data-busy="Создаём снимок…">
+        <div class="card-body stack-sm">
+          <div class="field">
+            <label for="description">Описание</label>
+            <input class="input" id="description" name="description" maxlength="{{ description_max }}" placeholder="Например: перед обновлением до Ubuntu 26.04" {% if blockers %}disabled{% endif %}>
+            <span class="hint">Необязательно, но так проще узнать снимок в списке. Имя снимка задаётся автоматически: <span class="mono">{{ suggested_name }}</span></span>
+          </div>
+          {% if blockers %}
+            {% for reason in blockers %}{{ alert('warning', reason) }}{% endfor %}
+          {% elif vm_running %}
+            {{ alert('info', 'Машина работает, поэтому в снимок попадёт и содержимое памяти. На несколько секунд машина замрёт — так и должно быть. После возврата она продолжит работу с того же места.', title='Снимок работающей машины') }}
+          {% else %}
+            {{ alert('info', 'Машина выключена, поэтому в снимок попадёт только диск. Это быстро и не занимает лишнего места.', title='Снимок выключенной машины') }}
+          {% endif %}
+          {% if checks.uefi and not blockers %}
+            {{ alert('warning', 'У этой машины прошивка UEFI. Некоторые версии libvirt не умеют делать для таких машин внутренние снимки — если так, мы покажем ответ libvirt.') }}
+          {% endif %}
+        </div>
+        <div class="card-footer">
+          <span class="subtle small" style="margin-right:auto">{{ count }} из {{ max_snapshots }}</span>
+          <button type="submit" class="btn btn-primary" {% if blockers %}disabled{% endif %}>{{ icon('camera') }}Создать снимок</button>
+        </div>
+      </form>
+    </article>
+
+    <article class="card">
+      <div class="card-header"><div class="row">{{ icon('sparkles') }}<h2>Что важно знать</h2></div></div>
+      <div class="checklist">
+        <div class="check-item">{{ icon('hard-drive') }}<div><strong>Это не резервная копия</strong><span>Снимок хранится внутри диска машины. Если диск повредится, пропадут и снимки. Для защиты данных делайте резервные копии.</span></div></div>
+        <div class="check-item">{{ icon('history') }}<div><strong>Возврат стирает изменения</strong><span>Всё, что появилось после снимка, будет потеряно. Перед возвратом сохраните нужное.</span></div></div>
+        <div class="check-item">{{ icon('layers') }}<div><strong>Не больше {{ max_snapshots }} снимков</strong><span>Каждый снимок занимает место и немного замедляет диск. Удаляйте те, что уже не нужны.</span></div></div>
+        <div class="check-item">{{ icon('info') }}<div><strong>Только диски qcow2</strong><span>Все машины, созданные в Virtuality, подходят. Для машин с UEFI поддержка зависит от версии libvirt.</span></div></div>
+      </div>
+    </article>
+  </aside>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if active_operations %}
+<script>
+  (function () {
+    var ids = Array.prototype.map.call(document.querySelectorAll('[data-watch-operation]'), function (el) { return el.dataset.watchOperation; });
+    var timer = setInterval(async function () {
+      for (var i = 0; i < ids.length; i++) {
+        try {
+          var response = await fetch('/api/operations/' + ids[i], { cache: 'no-store' });
+          var data = await response.json();
+          if (data.ok && (data.operation.status === 'success' || data.operation.status === 'error')) {
+            clearInterval(timer);
+            location.replace(location.pathname + '?op=' + ids[i]);
+            return;
+          }
+        } catch (e) {}
+      }
+    }, 2000);
+  })();
+</script>
+{% endif %}
+{% endblock %}

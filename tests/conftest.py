@@ -35,12 +35,37 @@ DUMPXML = """<domain type='kvm'>
 """
 
 
+FIXTURES = ROOT / "tests" / "fixtures"
+
+# Снимки web01: имя → (состояние, описание); список берётся из fixtures/snapshot-list.txt.
+SNAPSHOTS = {"before-upd": ("shutoff", "Перед обновлением ядра"), "clean": ("running", "Чистая система после установки")}
+
+
 def fake_result(stdout: str = "", ok: bool = True, stderr: str = "") -> dict:
     return {"ok": ok, "code": 0 if ok else 1, "stdout": stdout, "stderr": stderr, "cmd": ""}
 
 
+def option(cmd, name):
+    """Значение опции virsh вида --name VALUE (или '')."""
+    return cmd[cmd.index(name) + 1] if name in cmd and cmd.index(name) + 1 < len(cmd) else ""
+
+
+def fake_snapshot_xml(snap: str) -> str:
+    state, description = SNAPSHOTS.get(snap, ("shutoff", ""))
+    memory = "<memory snapshot='internal'/>" if state == "running" else "<memory snapshot='no'/>"
+    return f"<domainsnapshot><name>{snap}</name><description>{description}</description><state>{state}</state>{memory}<creationTime>1758794400</creationTime></domainsnapshot>"
+
+
 def fake_run_cmd(cmd, timeout=12, **_kwargs):
     joined = " ".join(cmd)
+    if cmd[:2] == ["virsh", "snapshot-list"]:
+        return fake_result((FIXTURES / "snapshot-list.txt").read_text())
+    if cmd[:2] == ["virsh", "snapshot-current"]:
+        return fake_result("clean")
+    if cmd[:2] == ["virsh", "snapshot-dumpxml"]:
+        return fake_result(fake_snapshot_xml(option(cmd, "--snapshotname")))
+    if cmd[:2] in (["virsh", "snapshot-create-as"], ["virsh", "snapshot-revert"], ["virsh", "snapshot-delete"]):
+        return fake_result("Domain snapshot %s created" % option(cmd, "--name"))
     if cmd[:2] == ["virsh", "list"]:
         return fake_result(" Id   Name    State\n-----------------------\n 1    web01   running\n -    db01    shut off")
     if cmd[:2] == ["virsh", "dominfo"]:
@@ -72,9 +97,15 @@ def fake_run_cmd(cmd, timeout=12, **_kwargs):
     return fake_result()
 
 
+def feature_modules():
+    """Загруженные модули web/features/* — им тоже подменяем run_cmd."""
+    return [module for name, module in sys.modules.items() if name.startswith("features.") and hasattr(module, "run_cmd")]
+
+
 @pytest.fixture()
 def data_dirs(tmp_path, monkeypatch):
     import app
+    import core
     import host_profile
     import network_core
     import update_core
@@ -95,6 +126,7 @@ def data_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "IMAGES_DIR", dirs["images"])
     monkeypatch.setattr(app, "DISK_IMAGES_DIR", dirs["disk_images"])
     monkeypatch.setattr(app, "OPERATIONS_DIR", dirs["operations"])
+    monkeypatch.setattr(core, "OPERATIONS_DIR", dirs["operations"])
     monkeypatch.setattr(network_core, "CONFIG_DIR", dirs["config"])
     monkeypatch.setattr(network_core, "NETWORK_DIR", dirs["network"])
     monkeypatch.setattr(network_core, "NFT_DIR", dirs["nft"])
@@ -108,7 +140,7 @@ def data_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(update_core, "STATE_FILE", dirs["update"] / "state.json")
     monkeypatch.setattr(update_core, "LOG_FILE", dirs["update"] / "update.log")
     monkeypatch.setattr(update_core, "SOURCE_DIR", ROOT)
-    for module in (app, network_core, host_profile):
+    for module in (app, network_core, host_profile, core, *feature_modules()):
         monkeypatch.setattr(module, "run_cmd", fake_run_cmd)
     return dirs
 
