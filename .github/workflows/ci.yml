@@ -15,8 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.12: Ubuntu 24.04 nodes; 3.13: Debian 13 (no crypt/spwd modules).
-        python: ["3.11", "3.12", "3.13"]
+        # 3.12: Ubuntu 24.04, 3.13: Debian 13, 3.14: Ubuntu 26.04 (no crypt/spwd modules).
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ==========================================================
 # Virtuality ISO builder
-# Remasters the official Ubuntu Server 24.04 live ISO into a
+# Remasters the official Ubuntu Server LTS live ISO (26.04 by default) into a
 # Virtuality installer: Ubuntu autoinstall + bundled Virtuality
 # source and Python wheels + first boot setup service.
 #
@@ -16,7 +16,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE_DIR="${REPO_ROOT}/image"
 
 ARCH="amd64"
-UBUNTU_SERIES="24.04"
+UBUNTU_SERIES="26.04"
 UBUNTU_ISO=""
 CACHE_DIR="${VIRTUALITY_ISO_CACHE:-${REPO_ROOT}/.cache/iso}"
 OUTPUT_DIR="${REPO_ROOT}/dist"
@@ -32,7 +32,7 @@ LOCALE="en_US.UTF-8"
 KEYBOARD="us"
 TIMEZONE="Etc/UTC"
 WITH_WHEELS="1"
-TARGET_PYTHON="3.12"
+TARGET_PYTHON=""
 
 usage() {
   cat <<EOF
@@ -40,7 +40,8 @@ Usage: $(basename "$0") [options]
 
 Options:
   --arch amd64|arm64         Target architecture (default: ${ARCH})
-  --ubuntu-iso PATH          Use a local Ubuntu ${UBUNTU_SERIES} live-server ISO instead of downloading
+  --ubuntu 26.04|24.04       Ubuntu Server LTS release to base on (default: ${UBUNTU_SERIES})
+  --ubuntu-iso PATH          Use a local Ubuntu live-server ISO of that release instead of downloading
   --cache-dir DIR            Where downloaded Ubuntu ISOs are kept (default: ${CACHE_DIR})
   --output DIR               Output directory (default: ${OUTPUT_DIR})
   --ref GIT_REF              Git ref of Virtuality to bundle (default: ${GIT_REF})
@@ -69,6 +70,7 @@ say() { echo "==> $*"; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --arch) ARCH="$2"; shift 2 ;;
+    --ubuntu) UBUNTU_SERIES="$2"; shift 2 ;;
     --ubuntu-iso) UBUNTU_ISO="$2"; shift 2 ;;
     --cache-dir) CACHE_DIR="$2"; shift 2 ;;
     --output) OUTPUT_DIR="$2"; shift 2 ;;
@@ -88,6 +90,13 @@ while [[ $# -gt 0 ]]; do
     *) usage >&2; die "unknown option: $1" ;;
   esac
 done
+
+# Python of the target release decides which wheels are bundled.
+case "$UBUNTU_SERIES" in
+  26.04) TARGET_PYTHON="3.14" ;;
+  24.04) TARGET_PYTHON="3.12" ;;
+  *) die "unsupported --ubuntu ${UBUNTU_SERIES} (26.04 or 24.04)" ;;
+esac
 
 case "$ARCH" in
   amd64) PY_PLATFORM_ARCH="x86_64"; MIRROR="https://releases.ubuntu.com/${UBUNTU_SERIES}" ;;

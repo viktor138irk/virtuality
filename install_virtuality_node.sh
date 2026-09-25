@@ -92,6 +92,22 @@ run_logged() {
   fi
 }
 
+# Installs the packages this distribution has; package names differ between
+# Ubuntu 24.04/26.04 and Debian 13 (e.g. qemu-kvm became a virtual package).
+install_available() {
+  local description="$1"
+  shift
+  local pkg available=()
+  for pkg in "$@"; do
+    if apt-cache show "$pkg" >/dev/null 2>&1; then
+      available+=("$pkg")
+    else
+      warn "Пакет ${pkg} недоступен в этом дистрибутиве, пропускаю"
+    fi
+  done
+  run_logged "$description" apt install -y "${available[@]}"
+}
+
 service_state() { systemctl is-active "$1" 2>/dev/null || echo "inactive"; }
 service_enabled() { systemctl is-enabled "$1" 2>/dev/null || echo "disabled"; }
 free_mb_for_path() { local path="$1"; mkdir -p "$path" 2>/dev/null || true; df -Pm "$path" | awk 'NR==2 {print $4}'; }
@@ -153,17 +169,21 @@ step "Обновляем apt cache"
 run_logged "apt update выполнен" apt update
 
 step "Устанавливаем базовые утилиты и зависимости диагностики"
-run_logged "Базовые пакеты и диагностические утилиты установлены" apt install -y \
+install_available "Базовые пакеты и диагностические утилиты установлены" \
   curl wget git nano htop btop tree ncdu jq unzip xz-utils tar gzip ca-certificates gnupg lsb-release \
-  software-properties-common apt-transport-https ufw rsync iproute2 iptables nftables dnsutils net-tools openssh-client
+  software-properties-common apt-transport-https ufw rsync iproute2 iptables nftables bind9-dnsutils net-tools openssh-client
 
 step "Устанавливаем KVM/QEMU/libvirt"
-run_logged "Пакеты виртуализации установлены" apt install -y \
-  qemu-kvm qemu-utils libvirt-daemon-system libvirt-clients virtinst \
-  bridge-utils dnsmasq-base ovmf swtpm cloud-image-utils
+case "$(uname -m)" in
+  aarch64|arm64) QEMU_SYSTEM_PACKAGES=(qemu-system-arm qemu-efi-aarch64) ;;
+  *) QEMU_SYSTEM_PACKAGES=(qemu-system-x86 ovmf) ;;
+esac
+install_available "Пакеты виртуализации установлены" \
+  "${QEMU_SYSTEM_PACKAGES[@]}" qemu-utils libvirt-daemon-system libvirt-clients virtinst \
+  bridge-utils dnsmasq-base swtpm cloud-image-utils
 
 step "Устанавливаем Cockpit и модули"
-run_logged "Cockpit установлен" apt install -y \
+install_available "Cockpit установлен" \
   cockpit cockpit-machines cockpit-networkmanager cockpit-storaged cockpit-packagekit
 
 step "Создаём структуру Virtuality"
