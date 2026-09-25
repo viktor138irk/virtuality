@@ -1,0 +1,665 @@
+#!/usr/bin/env bash
+# virtuality-ctl — node management for Virtuality.
+# Installed to /usr/local/bin by scripts/install_web_panel.sh. Run as root.
+set -euo pipefail
+
+CONFIG_DIR="/var/lib/virtuality/config"
+NODE_ENV="${CONFIG_DIR}/web.env"
+TLS_DIR="${CONFIG_DIR}/tls"
+STATE_FILE="${CONFIG_DIR}/ports.state"
+DATA_DIR="/var/lib/virtuality"
+LOG_DIR="/var/log/virtuality"
+APP_DIR="/opt/virtuality/web"
+VENV_DIR="/opt/virtuality/venv"
+SOURCE_DIR="${VIRTUALITY_SOURCE_DIR:-/opt/virtuality/source}"
+UNIT_DIR="/etc/systemd/system"
+NETPLAN_DIR="/etc/netplan"
+NETPLAN_BACKUP="${CONFIG_DIR}/netplan-backup"
+BRIDGE_FILE="${NETPLAN_DIR}/60-virtuality-br0.yaml"
+REVERT_UNIT="virtuality-netplan-revert"
+
+usage() {
+  cat <<EOF
+Usage: virtuality-ctl <command> [options]
+
+  status                     Что установлено, порты, адреса панели
+  reconfigure                Пересоздать systemd-юниты из ${NODE_ENV} и перезапустить панель
+  set KEY=VALUE ...          Изменить настройку в web.env (например set VIRTUALITY_TLS=1) и применить
+  passwd [USER]              Сменить пароль пользователя панели (пароль читается со стандартного ввода)
+  timezone <Area/City>       Установить часовой пояс сервера
+  power reboot|poweroff      Перезагрузить или выключить сервер (машины выключаются корректно)
+  backup-config [FILE]       Сохранить настройки ноды и описания машин в архив
+  restore-config FILE        Восстановить настройки ноды из архива
+  rollback                   Вернуть предыдущую версию панели после неудачного обновления
+  maintenance                Ежедневное обслуживание: старые задачи, временные файлы, свободное место
+  bridge <iface> [dhcp|static]  Подключить машины к локальной сети через мост br0 с автооткатом
+  bridge-confirm             Подтвердить новую сеть (отменяет автооткат)
+  bridge-revert              Вернуть прежнюю сеть
+  support-bundle [FILE]      Собрать отчёт для поддержки
+  uninstall [--purge] [--yes]  Удалить Virtuality (по умолчанию машины и образы остаются)
+EOF
+}
+
+die() { echo "virtuality-ctl: $*" >&2; exit 1; }
+need_root() { [[ "$EUID" -eq 0 ]] || die "нужны права root: sudo virtuality-ctl $*"; }
+now() { date '+%Y-%m-%d %H:%M:%S'; }
+log() { mkdir -p "$LOG_DIR"; echo "[$(now)] [virtuality-ctl] $*" >> "${LOG_DIR}/virtuality-ctl.log"; }
+
+# ---------------------------------------------------------------- settings
+env_get() {
+  local key="$1" default="${2:-}"
+  local value=""
+  if [[ -f "$NODE_ENV" ]]; then
+    value="$(sed -n "s/^${key}=//p" "$NODE_ENV" | tail -n1 | tr -d '"' | tr -d "'")"
+  fi
+  printf '%s' "${value:-$default}"
+}
+
+env_set() {
+  local key="$1" value="$2"
+  mkdir -p "$CONFIG_DIR"
+  touch "$NODE_ENV"
+  if grep -q "^${key}=" "$NODE_ENV"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$NODE_ENV"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$NODE_ENV"
+  fi
+  chmod 644 "$NODE_ENV"
+}
+
+primary_ip() { hostname -I 2>/dev/null | awk '{print $1}'; }
+
+panel_url() {
+  local tls port
+  tls="$(env_get VIRTUALITY_TLS 0)"
+  if [[ "$tls" == "1" ]]; then
+    port="$(env_get VIRTUALITY_TLS_PORT 8443)"
+    printf 'https://%s:%s' "$(primary_ip)" "$port"
+  else
+    port="$(env_get VIRTUALITY_WEB_PORT 8088)"
+    printf 'http://%s:%s' "$(primary_ip)" "$port"
+  fi
+}
+
+# ---------------------------------------------------------------- tls
+ensure_cert() {
+  local ip host
+  mkdir -p "$TLS_DIR"
+  chmod 700 "$TLS_DIR"
+  if [[ -s "${TLS_DIR}/panel.key" && -s "${TLS_DIR}/panel.crt" ]]; then
+    return 0
+  fi
+  ip="$(primary_ip)"
+  host="$(hostname)"
+  local san="DNS:${host},DNS:localhost,IP:127.0.0.1"
+  [[ -n "$ip" ]] && san="${san},IP:${ip}"
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+    -subj "/CN=Virtuality on ${host}" -addext "subjectAltName=${san}" \
+    -keyout "${TLS_DIR}/panel.key" -out "${TLS_DIR}/panel.crt" >/dev/null 2>&1 \
+    || die "не удалось создать TLS-сертификат (нужен openssl)"
+  chmod 600 "${TLS_DIR}/panel.key"
+  log "TLS certificate created for ${host} ${ip}"
+}
+
+# ---------------------------------------------------------------- units
+write_units() {
+  local port host tls tls_port auth_user auto_update
+  port="$(env_get VIRTUALITY_WEB_PORT 8088)"
+  host="$(env_get VIRTUALITY_WEB_HOST 0.0.0.0)"
+  tls="$(env_get VIRTUALITY_TLS 0)"
+  tls_port="$(env_get VIRTUALITY_TLS_PORT 8443)"
+  auth_user="$(env_get VIRTUALITY_AUTH_USER root)"
+  auto_update="$(env_get VIRTUALITY_AUTO_UPDATE 1)"
+  local listen_port="$port" ssl_args=""
+  if [[ "$tls" == "1" ]]; then
+    ensure_cert
+    listen_port="$tls_port"
+    ssl_args="--ssl-keyfile ${TLS_DIR}/panel.key --ssl-certfile ${TLS_DIR}/panel.crt"
+    env_set VIRTUALITY_COOKIE_SECURE 1
+  else
+    env_set VIRTUALITY_COOKIE_SECURE 0
+  fi
+
+  cat > "${UNIT_DIR}/virtuality-web.service" <<EOF
+[Unit]
+Description=Virtuality Web Panel
+After=network-online.target libvirtd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${APP_DIR}
+ExecStart=${VENV_DIR}/bin/uvicorn app:app --host ${host} --port ${listen_port} --workers 1 --no-server-header ${ssl_args}
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+LimitNOFILE=65536
+User=root
+Group=root
+Environment=PYTHONUNBUFFERED=1
+Environment=VIRTUALITY_AUTH_USER=${auth_user}
+Environment=VIRTUALITY_SOURCE_DIR=${SOURCE_DIR}
+Environment=VIRTUALITY_NODE_ENV=${NODE_ENV}
+Environment=TMPDIR=${DATA_DIR}/tmp
+Environment=TEMP=${DATA_DIR}/tmp
+Environment=TMP=${DATA_DIR}/tmp
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  if [[ "$tls" == "1" ]]; then
+    cat > "${UNIT_DIR}/virtuality-redirect.service" <<EOF
+[Unit]
+Description=Virtuality HTTP to HTTPS redirect
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=${VENV_DIR}/bin/python ${APP_DIR}/redirect_http.py --port ${port} --target-port ${tls_port}
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  else
+    rm -f "${UNIT_DIR}/virtuality-redirect.service"
+  fi
+
+  cat > "${UNIT_DIR}/virtuality-network.service" <<EOF
+[Unit]
+Description=Virtuality NAT port forwarding restore
+After=network-online.target libvirtd.service nftables.service ufw.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=${APP_DIR}
+ExecStart=${VENV_DIR}/bin/python ${APP_DIR}/restore_network.py
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat > "${UNIT_DIR}/virtuality-auto-update.service" <<EOF
+[Unit]
+Description=Virtuality automatic update check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=VIRTUALITY_SOURCE_DIR=${SOURCE_DIR}
+Environment=TMPDIR=${DATA_DIR}/tmp
+ExecStart=/bin/bash ${SOURCE_DIR}/scripts/auto_update_check.sh
+EOF
+  cat > "${UNIT_DIR}/virtuality-auto-update.timer" <<EOF
+[Unit]
+Description=Virtuality nightly update check
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=30min
+AccuracySec=1min
+Persistent=true
+Unit=virtuality-auto-update.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  cat > "${UNIT_DIR}/virtuality-maintenance.service" <<EOF
+[Unit]
+Description=Virtuality daily maintenance
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/virtuality-ctl maintenance
+EOF
+  cat > "${UNIT_DIR}/virtuality-maintenance.timer" <<EOF
+[Unit]
+Description=Virtuality daily maintenance
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+Unit=virtuality-maintenance.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  mkdir -p /etc/logrotate.d
+  cat > /etc/logrotate.d/virtuality <<EOF
+${LOG_DIR}/*.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+
+  # Guests shut down gracefully with the host instead of being killed (Proxmox behaviour).
+  cat > /etc/default/libvirt-guests <<EOF
+ON_BOOT=ignore
+ON_SHUTDOWN=shutdown
+SHUTDOWN_TIMEOUT=180
+PARALLEL_SHUTDOWN=5
+EOF
+
+  systemctl daemon-reload
+  systemctl enable virtuality-web.service virtuality-network.service virtuality-maintenance.timer >/dev/null 2>&1 || true
+  systemctl enable libvirt-guests.service >/dev/null 2>&1 || true
+  if [[ "$tls" == "1" ]]; then
+    systemctl enable virtuality-redirect.service >/dev/null 2>&1 || true
+  else
+    systemctl disable --now virtuality-redirect.service >/dev/null 2>&1 || true
+  fi
+  if [[ "$auto_update" == "1" ]]; then
+    systemctl enable virtuality-auto-update.timer >/dev/null 2>&1 || true
+  else
+    systemctl disable --now virtuality-auto-update.timer >/dev/null 2>&1 || true
+  fi
+}
+
+apply_firewall() {
+  command -v ufw >/dev/null 2>&1 || return 0
+  local port tls tls_port old
+  port="$(env_get VIRTUALITY_WEB_PORT 8088)"
+  tls="$(env_get VIRTUALITY_TLS 0)"
+  tls_port="$(env_get VIRTUALITY_TLS_PORT 8443)"
+  if [[ -f "$STATE_FILE" ]]; then
+    while read -r old; do
+      [[ -n "$old" ]] && ufw delete allow "${old}/tcp" >/dev/null 2>&1 || true
+    done < "$STATE_FILE"
+  fi
+  # VM consoles are proxied by the panel over 127.0.0.1; VNC must never be reachable directly.
+  ufw delete allow 5900:5999/tcp >/dev/null 2>&1 || true
+  ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+  printf '%s\n' "$port" > "$STATE_FILE"
+  if [[ "$tls" == "1" ]]; then
+    ufw allow "${tls_port}/tcp" >/dev/null 2>&1 || true
+    printf '%s\n' "$tls_port" >> "$STATE_FILE"
+  fi
+}
+
+restart_panel() {
+  systemctl restart virtuality-web.service
+  if [[ "$(env_get VIRTUALITY_TLS 0)" == "1" ]]; then
+    systemctl restart virtuality-redirect.service || true
+  fi
+  systemctl enable --now virtuality-maintenance.timer >/dev/null 2>&1 || true
+  if [[ "$(env_get VIRTUALITY_AUTO_UPDATE 1)" == "1" ]]; then
+    systemctl enable --now virtuality-auto-update.timer >/dev/null 2>&1 || true
+  fi
+}
+
+cmd_reconfigure() {
+  need_root reconfigure
+  [[ -d "$APP_DIR" ]] || die "панель не установлена: ${APP_DIR} не найден"
+  write_units
+  apply_firewall
+  restart_panel
+  log "reconfigured: $(panel_url)"
+  echo "Панель перезапущена: $(panel_url)"
+}
+
+cmd_set() {
+  need_root set
+  [[ $# -gt 0 ]] || die "usage: virtuality-ctl set KEY=VALUE [KEY=VALUE ...]"
+  local pair key value
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    value="${pair#*=}"
+    [[ "$key" =~ ^VIRTUALITY_[A-Z_]+$ ]] || die "недопустимый ключ: $key"
+    case "$key" in
+      VIRTUALITY_WEB_PORT|VIRTUALITY_TLS_PORT) [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 1 && value <= 65535 )) || die "порт должен быть числом 1–65535" ;;
+      VIRTUALITY_TLS|VIRTUALITY_AUTO_UPDATE) [[ "$value" == "0" || "$value" == "1" ]] || die "$key принимает 0 или 1" ;;
+      VIRTUALITY_UPDATE_CHANNEL) [[ "$value" == "stable" || "$value" == "main" ]] || die "канал: stable или main" ;;
+      VIRTUALITY_WEB_HOST) [[ "$value" =~ ^[0-9a-fA-F.:]+$ ]] || die "адрес должен быть IP" ;;
+    esac
+    env_set "$key" "$value"
+  done
+  cmd_reconfigure
+}
+
+# ---------------------------------------------------------------- account
+cmd_passwd() {
+  need_root passwd
+  local user="${1:-$(env_get VIRTUALITY_AUTH_USER root)}"
+  id "$user" >/dev/null 2>&1 || die "пользователь $user не найден"
+  local password
+  if [[ -t 0 ]]; then
+    read -r -s -p "Новый пароль для ${user}: " password; echo
+  else
+    IFS= read -r password
+  fi
+  [[ ${#password} -ge 6 ]] || die "пароль должен быть не короче 6 символов"
+  printf '%s:%s\n' "$user" "$password" | chpasswd || die "не удалось сменить пароль"
+  passwd -u "$user" >/dev/null 2>&1 || true
+  log "password changed for ${user}"
+  echo "Пароль пользователя ${user} обновлён"
+}
+
+cmd_timezone() {
+  need_root timezone
+  local tz="${1:-}"
+  [[ "$tz" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+){0,2}$ ]] || die "usage: virtuality-ctl timezone Europe/Moscow"
+  timedatectl set-timezone "$tz" || die "часовой пояс $tz не найден"
+  timedatectl set-ntp true >/dev/null 2>&1 || true
+  log "timezone set to ${tz}"
+  echo "Часовой пояс: $(timedatectl show -p Timezone --value)"
+}
+
+cmd_power() {
+  need_root power
+  case "${1:-}" in
+    reboot) log "reboot requested"; systemctl reboot ;;
+    poweroff|shutdown) log "poweroff requested"; systemctl poweroff ;;
+    *) die "usage: virtuality-ctl power reboot|poweroff" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- config backup
+cmd_backup_config() {
+  need_root backup-config
+  local out="${1:-${DATA_DIR}/backups/config-$(date +%Y%m%d-%H%M).tar.gz}"
+  local work
+  work="$(mktemp -d)"
+  mkdir -p "$work/node" "$work/vms" "$work/networks" "$(dirname "$out")"
+  cp -a "$CONFIG_DIR" "$work/node/config" 2>/dev/null || true
+  cp -a "${DATA_DIR}/network" "$work/node/network" 2>/dev/null || true
+  cp -a /etc/virtuality "$work/node/etc-virtuality" 2>/dev/null || true
+  cp -a "$BRIDGE_FILE" "$work/node/" 2>/dev/null || true
+  cp -a /etc/default/libvirt-guests "$work/node/" 2>/dev/null || true
+  cat "${SOURCE_DIR}/VERSION" > "$work/VERSION" 2>/dev/null || true
+  if command -v virsh >/dev/null 2>&1; then
+    local name
+    while read -r name; do
+      [[ -n "$name" ]] && virsh dumpxml --migratable "$name" > "$work/vms/${name}.xml" 2>/dev/null || true
+    done < <(virsh list --all --name 2>/dev/null)
+    while read -r name; do
+      [[ -n "$name" ]] && virsh net-dumpxml "$name" > "$work/networks/${name}.xml" 2>/dev/null || true
+    done < <(virsh net-list --all --name 2>/dev/null)
+  fi
+  tar -czf "$out" -C "$work" .
+  rm -rf "$work"
+  chmod 600 "$out"
+  log "config backup written to ${out}"
+  echo "$out"
+}
+
+cmd_restore_config() {
+  need_root restore-config
+  local file="${1:-}"
+  [[ -f "$file" ]] || die "usage: virtuality-ctl restore-config FILE.tar.gz"
+  local work
+  work="$(mktemp -d)"
+  tar -xzf "$file" -C "$work" || die "архив повреждён"
+  [[ -d "$work/node/config" ]] || die "в архиве нет настроек Virtuality"
+  mkdir -p "$CONFIG_DIR" "${DATA_DIR}/network" /etc/virtuality
+  cp -a "$work/node/config/." "$CONFIG_DIR/"
+  [[ -d "$work/node/network" ]] && cp -a "$work/node/network/." "${DATA_DIR}/network/"
+  [[ -d "$work/node/etc-virtuality" ]] && cp -a "$work/node/etc-virtuality/." /etc/virtuality/
+  [[ -f "$work/node/libvirt-guests" ]] && cp -a "$work/node/libvirt-guests" /etc/default/libvirt-guests
+  if command -v virsh >/dev/null 2>&1; then
+    local xml
+    for xml in "$work"/networks/*.xml; do
+      [[ -f "$xml" ]] || continue
+      virsh net-define "$xml" >/dev/null 2>&1 || true
+      virsh net-autostart "$(basename "$xml" .xml)" >/dev/null 2>&1 || true
+      virsh net-start "$(basename "$xml" .xml)" >/dev/null 2>&1 || true
+    done
+    for xml in "$work"/vms/*.xml; do
+      [[ -f "$xml" ]] || continue
+      virsh define "$xml" >/dev/null 2>&1 || echo "Машина $(basename "$xml" .xml): описание восстановлено с ошибкой (диски отсутствуют?)"
+    done
+  fi
+  rm -rf "$work"
+  log "config restored from ${file}"
+  if [[ -d "$APP_DIR" ]]; then
+    cmd_reconfigure
+  fi
+  echo "Настройки восстановлены"
+}
+
+# ---------------------------------------------------------------- updates
+cmd_rollback() {
+  need_root rollback
+  [[ -d "${APP_DIR}.prev" ]] || die "предыдущей версии панели нет"
+  rm -rf "${APP_DIR}.broken"
+  mv "$APP_DIR" "${APP_DIR}.broken"
+  mv "${APP_DIR}.prev" "$APP_DIR"
+  systemctl restart virtuality-web.service
+  log "rolled back to previous panel version"
+  echo "Возвращена предыдущая версия панели. Сломанная сохранена в ${APP_DIR}.broken"
+}
+
+# ---------------------------------------------------------------- maintenance
+cmd_maintenance() {
+  need_root maintenance
+  local ops="${LOG_DIR}/operations"
+  if [[ -d "$ops" ]]; then
+    find "$ops" -type f -mtime +30 -delete 2>/dev/null || true
+    # keep at most the 300 newest operations
+    ls -t "$ops"/*.json 2>/dev/null | tail -n +301 | while read -r f; do rm -f "$f" "${f%.json}.log"; done
+  fi
+  find "${DATA_DIR}/tmp" -mindepth 1 -mtime +1 -delete 2>/dev/null || true
+  find "${DATA_DIR}/iso" "${DATA_DIR}/disk-images" -maxdepth 1 -name '.*.uploading' -mtime +1 -delete 2>/dev/null || true
+  find "${DATA_DIR}/iso" "${DATA_DIR}/disk-images" -maxdepth 1 -name '.*.part' -mtime +1 -delete 2>/dev/null || true
+  find "$LOG_DIR" -maxdepth 1 -name 'install_*.log' -mtime +30 -delete 2>/dev/null || true
+  journalctl --vacuum-size=300M >/dev/null 2>&1 || true
+  local used
+  used="$(df -P "$DATA_DIR" | awk 'NR==2 {gsub("%","",$5); print $5}')"
+  mkdir -p "$CONFIG_DIR"
+  printf '{"disk_used_pct": %s, "checked_at": "%s"}\n' "${used:-0}" "$(now)" > "${CONFIG_DIR}/health.json"
+  log "maintenance done, disk used ${used}%"
+}
+
+# ---------------------------------------------------------------- network bridge
+cmd_bridge() {
+  need_root bridge
+  local iface="${1:-}" mode="${2:-dhcp}"
+  [[ -n "$iface" ]] || die "usage: virtuality-ctl bridge <iface> [dhcp|static]"
+  ip link show "$iface" >/dev/null 2>&1 || die "интерфейс $iface не найден"
+  [[ -d "/sys/class/net/${iface}/wireless" ]] && die "Wi-Fi нельзя объединить в мост; используйте режим NAT"
+  command -v netplan >/dev/null 2>&1 || die "netplan не найден"
+  local mac ip gw
+  mac="$(cat "/sys/class/net/${iface}/address")"
+  ip="$(ip -4 addr show "$iface" | awk '/inet / {print $2; exit}')"
+  gw="$(ip route show default | awk '/default/ {print $3; exit}')"
+
+  rm -rf "$NETPLAN_BACKUP"
+  mkdir -p "$NETPLAN_BACKUP"
+  cp -a "$NETPLAN_DIR"/*.yaml "$NETPLAN_BACKUP"/ 2>/dev/null || true
+  # Neutralise the interface in existing files so it is not configured twice.
+  local file
+  for file in "$NETPLAN_DIR"/*.yaml; do
+    [[ -f "$file" && "$file" != "$BRIDGE_FILE" ]] || continue
+    if grep -q "^\s*${iface}:" "$file"; then
+      cat > "$file" <<EOF
+network:
+  version: 2
+  ethernets:
+    ${iface}:
+      dhcp4: false
+      dhcp6: false
+EOF
+    fi
+  done
+  {
+    echo "network:"
+    echo "  version: 2"
+    echo "  ethernets:"
+    echo "    ${iface}:"
+    echo "      dhcp4: false"
+    echo "      dhcp6: false"
+    echo "  bridges:"
+    echo "    br0:"
+    echo "      interfaces: [${iface}]"
+    echo "      macaddress: \"${mac}\""
+    echo "      parameters:"
+    echo "        stp: false"
+    echo "        forward-delay: 0"
+    if [[ "$mode" == "static" ]]; then
+      [[ -n "$ip" && -n "$gw" ]] || die "не удалось определить текущий адрес и шлюз"
+      echo "      addresses: [${ip}]"
+      echo "      routes:"
+      echo "        - to: default"
+      echo "          via: ${gw}"
+      echo "      nameservers:"
+      echo "        addresses: [${gw}, 1.1.1.1]"
+    else
+      echo "      dhcp4: true"
+      echo "      dhcp-identifier: mac"
+      echo "      dhcp6: false"
+    fi
+  } > "$BRIDGE_FILE"
+  chmod 600 "$NETPLAN_DIR"/*.yaml 2>/dev/null || true
+  netplan generate || { cmd_bridge_revert; die "конфигурация сети не прошла проверку, изменения отменены"; }
+  # Auto-revert unless confirmed from the panel within two minutes.
+  systemctl stop "${REVERT_UNIT}.timer" >/dev/null 2>&1 || true
+  systemd-run --unit="$REVERT_UNIT" --on-active=120 --quiet /usr/local/bin/virtuality-ctl bridge-revert
+  netplan apply
+  log "bridge br0 on ${iface} applied (${mode}); auto-revert armed"
+  echo "Мост br0 включён. Подтвердите в течение 2 минут: virtuality-ctl bridge-confirm"
+}
+
+cmd_bridge_confirm() {
+  need_root bridge-confirm
+  systemctl stop "${REVERT_UNIT}.timer" >/dev/null 2>&1 || true
+  systemctl stop "${REVERT_UNIT}.service" >/dev/null 2>&1 || true
+  rm -rf "$NETPLAN_BACKUP"
+  log "bridge confirmed"
+  echo "Сеть подтверждена"
+}
+
+cmd_bridge_revert() {
+  need_root bridge-revert
+  systemctl stop "${REVERT_UNIT}.timer" >/dev/null 2>&1 || true
+  [[ -d "$NETPLAN_BACKUP" ]] || die "нечего откатывать"
+  rm -f "$NETPLAN_DIR"/*.yaml
+  cp -a "$NETPLAN_BACKUP"/*.yaml "$NETPLAN_DIR"/ 2>/dev/null || true
+  chmod 600 "$NETPLAN_DIR"/*.yaml 2>/dev/null || true
+  netplan generate && netplan apply
+  ip link delete br0 >/dev/null 2>&1 || true
+  rm -rf "$NETPLAN_BACKUP"
+  log "bridge reverted"
+  echo "Прежняя сеть восстановлена"
+}
+
+# ---------------------------------------------------------------- support
+cmd_support_bundle() {
+  need_root support-bundle
+  local out="${1:-${DATA_DIR}/tmp/virtuality-support-$(date +%Y%m%d-%H%M).tar.gz}"
+  local work
+  work="$(mktemp -d)"
+  mkdir -p "$(dirname "$out")"
+  {
+    echo "Virtuality $(cat "${SOURCE_DIR}/VERSION" 2>/dev/null || echo unknown)"
+    echo "Host: $(hostname) $(uname -r)"; date
+    echo; echo "== web.env"; sed 's/SECRET=.*/SECRET=***/' "$NODE_ENV" 2>/dev/null
+    echo; echo "== services"; systemctl --no-pager --plain list-units 'virtuality-*' 'libvirtd*' 2>/dev/null
+    echo; echo "== virsh"; virsh list --all 2>&1; virsh net-list --all 2>&1; virsh pool-list --all 2>&1
+    echo; echo "== network"; ip -br a 2>&1; ip route 2>&1
+    echo; echo "== firewall"; ufw status 2>&1; nft list ruleset 2>&1 | head -200
+    echo; echo "== disk"; df -h / "$DATA_DIR" 2>&1
+  } > "$work/summary.txt"
+  journalctl -u virtuality-web -n 500 --no-pager > "$work/virtuality-web.log" 2>&1 || true
+  journalctl -u libvirtd -n 200 --no-pager > "$work/libvirtd.log" 2>&1 || true
+  cp "${LOG_DIR}"/update.log "${LOG_DIR}"/firstboot.log "${LOG_DIR}"/virtuality-ctl.log "$work"/ 2>/dev/null || true
+  mkdir -p "$work/operations"
+  ls -t "${LOG_DIR}/operations"/*.json 2>/dev/null | head -20 | while read -r f; do cp "$f" "${f%.json}.log" "$work/operations/" 2>/dev/null || true; done
+  tar -czf "$out" -C "$work" .
+  rm -rf "$work"
+  echo "$out"
+}
+
+cmd_status() {
+  echo "Virtuality $(cat "${SOURCE_DIR}/VERSION" 2>/dev/null || echo unknown)"
+  echo "Панель:      $(panel_url)  ($(systemctl is-active virtuality-web.service 2>/dev/null || echo unknown))"
+  echo "Пользователь: $(env_get VIRTUALITY_AUTH_USER root)"
+  echo "HTTPS:       $([[ "$(env_get VIRTUALITY_TLS 0)" == "1" ]] && echo включён || echo выключен)"
+  echo "Автообновление: $([[ "$(env_get VIRTUALITY_AUTO_UPDATE 1)" == "1" ]] && echo "включено ($(env_get VIRTUALITY_UPDATE_CHANNEL stable))" || echo выключено)"
+  echo "Часовой пояс: $(timedatectl show -p Timezone --value 2>/dev/null || echo unknown)"
+  echo "Хранилище:   $(df -h "$DATA_DIR" 2>/dev/null | awk 'NR==2 {print $4" свободно из "$2}')"
+}
+
+# ---------------------------------------------------------------- uninstall
+cmd_uninstall() {
+  need_root uninstall
+  local purge=0 yes=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --purge) purge=1 ;;
+      --yes|-y) yes=1 ;;
+      *) die "unknown option: $arg" ;;
+    esac
+  done
+  if [[ "$yes" -ne 1 ]]; then
+    echo "Будут удалены панель, службы и настройки Virtuality."
+    [[ "$purge" -eq 1 ]] && echo "Режим --purge: также удаляются ВСЕ машины, диски, образы и резервные копии."
+    read -r -p "Продолжить? Введите YES: " answer
+    [[ "$answer" == "YES" ]] || { echo "Отменено."; exit 0; }
+  fi
+  local unit
+  for unit in virtuality-web.service virtuality-redirect.service virtuality-network.service virtuality-auto-update.timer virtuality-auto-update.service virtuality-maintenance.timer virtuality-maintenance.service virtuality-console-dashboard.service virtuality-firstboot.service; do
+    systemctl disable --now "$unit" >/dev/null 2>&1 || true
+    rm -f "${UNIT_DIR}/${unit}"
+  done
+  systemctl enable --now getty@tty1.service >/dev/null 2>&1 || true
+  systemctl daemon-reload
+  nft delete table ip virtuality >/dev/null 2>&1 || true
+  if command -v ufw >/dev/null 2>&1 && [[ -f "$STATE_FILE" ]]; then
+    while read -r old; do [[ -n "$old" ]] && ufw delete allow "${old}/tcp" >/dev/null 2>&1 || true; done < "$STATE_FILE"
+  fi
+  rm -rf /opt/virtuality /etc/virtuality /etc/logrotate.d/virtuality /etc/sysctl.d/98-virtuality-rpfilter.conf /etc/sysctl.d/99-virtuality-forward.conf
+  rm -f /usr/local/bin/vhealth /usr/local/bin/virtuality-console-dashboard /etc/issue.d/virtuality.issue
+  if [[ "$purge" -eq 1 ]]; then
+    if command -v virsh >/dev/null 2>&1; then
+      local name
+      while read -r name; do
+        [[ -n "$name" ]] || continue
+        virsh destroy "$name" >/dev/null 2>&1 || true
+        virsh undefine "$name" --remove-all-storage --nvram --managed-save --snapshots-metadata >/dev/null 2>&1 || true
+      done < <(virsh list --all --name 2>/dev/null)
+      virsh net-destroy virtuality-nat >/dev/null 2>&1 || true
+      virsh net-undefine virtuality-nat >/dev/null 2>&1 || true
+    fi
+    rm -rf "$DATA_DIR" "$LOG_DIR"
+  else
+    rm -rf "$CONFIG_DIR" "${DATA_DIR}/update" "${DATA_DIR}/tmp"
+    echo "Машины, образы и резервные копии сохранены в ${DATA_DIR}"
+  fi
+  rm -f /usr/local/bin/virtuality-ctl
+  echo "Virtuality удалена"
+}
+
+case "${1:-}" in
+  status) cmd_status ;;
+  reconfigure) cmd_reconfigure ;;
+  set) shift; cmd_set "$@" ;;
+  passwd) shift; cmd_passwd "$@" ;;
+  timezone) shift; cmd_timezone "$@" ;;
+  power) shift; cmd_power "$@" ;;
+  backup-config) shift; cmd_backup_config "$@" ;;
+  restore-config) shift; cmd_restore_config "$@" ;;
+  rollback) cmd_rollback ;;
+  maintenance) cmd_maintenance ;;
+  bridge) shift; cmd_bridge "$@" ;;
+  bridge-confirm) cmd_bridge_confirm ;;
+  bridge-revert) cmd_bridge_revert ;;
+  support-bundle) shift; cmd_support_bundle "$@" ;;
+  uninstall) shift; cmd_uninstall "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) usage >&2; die "неизвестная команда: $1" ;;
+esac
