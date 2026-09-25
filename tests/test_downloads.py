@@ -318,7 +318,8 @@ def test_download_cancel(data_dirs, www, logged_in):
     assert done["cancelled"] is True and done["cancel_requested"] is True
     assert not (data_dirs["iso"] / ".slow.iso.part").exists()
     assert not (data_dirs["iso"] / "slow.iso").exists()
-    assert not downloads.cancel_requested(operation["id"]) and not downloads.is_live(operation["id"])
+    # The worker thread releases its markers right after it finishes the operation.
+    wait_until(lambda: not downloads.cancel_requested(operation["id"]) and not downloads.is_live(operation["id"]))
 
 
 def test_cancel_flag_on_disk_is_honoured_and_not_overwritten(data_dirs, www):
