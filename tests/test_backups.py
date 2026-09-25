@@ -98,7 +98,7 @@ def test_parse_qemu_img_info_fixture():
 
 def test_vm_disks_skips_cdrom(data_dirs):
     disks = backups.vm_disks("web01")
-    assert [(d["target"], d["source"]) for d in disks] == [("vda", "/var/lib/virtuality/images/web01.qcow2")]
+    assert [(d["target"], d["source"]) for d in disks] == [("vda", str(core.IMAGES_DIR / "web01.qcow2"))]
     assert DOMBLKLIST_DETAILS.count("cdrom") == 1
 
 
@@ -193,7 +193,7 @@ def test_create_backup_shuts_down_copies_and_restarts(fast_worker, monkeypatch):
     assert ["virsh", "dumpxml", "web01", "--migratable"] in virsh.calls
     assert virsh.calls[-1] == ["virsh", "start", "web01"]
     assert ["virsh", "destroy", "web01"] not in virsh.calls
-    assert stream.calls == [["qemu-img", "convert", "-p", "-O", "qcow2", "-c", "/var/lib/virtuality/images/web01.qcow2", str(fast_worker["backups"] / "web01" / operation["backup_id"] / "vda.qcow2")]]
+    assert stream.calls == [["qemu-img", "convert", "-p", "-O", "qcow2", "-c", str(core.IMAGES_DIR / "web01.qcow2"), str(fast_worker["backups"] / "web01" / operation["backup_id"] / "vda.qcow2")]]
     path = fast_worker["backups"] / "web01" / operation["backup_id"]
     meta = json.loads((path / "meta.json").read_text())
     assert meta["vm"] == "web01" and meta["note"] == "ночная копия" and meta["disks"][0]["target"] == "vda"

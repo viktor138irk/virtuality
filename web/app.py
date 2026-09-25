@@ -28,7 +28,6 @@ import auth
 import host_profile
 import network_core
 import presenters
-from features import backups, downloads, settings, setup, snapshots
 import update_core
 from network_core import NetworkError
 
@@ -2005,8 +2004,12 @@ def api_health(request: Request):
     return {"system": system_summary(), "host_profile": host_profile.load_host_profile(), "services": {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "web": service_state("virtuality-web.service")}, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "virtuality_nat": network_core.network_context()}
 
 
+# Feature modules register template globals into app.templates, so they are imported once it exists.
+from features import backups, downloads, settings, setup, snapshots, vmops  # noqa: E402
+
 app.include_router(setup.router)
 app.include_router(settings.router)
 app.include_router(snapshots.router)
 app.include_router(backups.router)
 app.include_router(downloads.router)
+app.include_router(vmops.router)

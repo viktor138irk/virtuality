@@ -630,3 +630,28 @@ details.advanced > .advanced-body { padding: 4px 16px 16px; }
 .download-error { color: var(--danger); }
 .catalog-item .meta code { padding: 1px 5px; border-radius: 5px; background: var(--surface-3); font: 12px/1.4 var(--mono); color: var(--text-2); }
 @media (max-width: 640px) { .download-item, .catalog-item { flex-wrap: wrap; } .download-item .grow, .catalog-item .grow { flex-basis: calc(100% - 50px); } }
+
+/* ---------------------------------------------------------- vmops: live load, disks, notes */
+.list > * { min-width: 0; } /* длинное сообщение задачи обрезается, а не растягивает карточку на телефоне */
+.vm-title { color: var(--text-2); font-weight: 500; }
+.vm-meters { display: grid; gap: 3px; margin-top: 6px; max-width: 220px; }
+.vm-meter { display: grid; grid-template-columns: 14px minmax(0, 1fr) 46px; align-items: center; gap: 7px; color: var(--text-3); font-size: 11.5px; }
+.vm-meter .icon-sm { width: 14px; height: 14px; }
+.vm-meter .meter { display: block; margin: 0; height: 5px; }
+.vm-meter b { font-weight: 600; color: var(--text-2); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.load-grid { display: grid; gap: 16px; }
+.load-row { display: grid; gap: 8px; }
+.load-row .row-between { font-size: 13px; }
+.load-row .row-between .subtle { display: inline-flex; align-items: center; gap: 6px; }
+.load-row .meter { margin-top: 0; }
+.disk-resize { display: flex; align-items: center; gap: 8px; flex: none; }
+.disk-resize .input { width: 84px; height: 32px; padding: 0 10px; border-radius: 8px 0 0 8px; font-size: 13px; }
+.disk-resize .addon { padding: 0 9px; border-radius: 0 8px 8px 0; font-size: 12px; }
+.disk-footer { display: block; }
+.disk-footer p { margin: 0; line-height: 1.5; }
+textarea.input { height: auto; min-height: 96px; padding: 9px 12px; resize: vertical; line-height: 1.45; }
+textarea.input:focus { border-color: var(--brand); outline: none; box-shadow: 0 0 0 4px var(--focus); }
+@media (max-width: 640px) {
+  .list-item.disk-item { flex-wrap: wrap; }
+  .disk-resize { width: 100%; justify-content: flex-end; }
+}

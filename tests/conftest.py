@@ -43,6 +43,9 @@ QEMU_IMG_INFO = (FIXTURES / "qemu-img-info.json").read_text()
 # Снимки web01: имя → (состояние, описание); список берётся из fixtures/snapshot-list.txt.
 SNAPSHOTS = {"before-upd": ("shutoff", "Перед обновлением ядра"), "clean": ("running", "Чистая система после установки")}
 
+# Заметки машин для `virsh desc`: имя → (название, описание).
+NOTES = {"web01": ("Сайт компании", "Nginx + база. Бэкап по пятницам.")}
+
 
 def fake_result(stdout: str = "", ok: bool = True, stderr: str = "") -> dict:
     return {"ok": ok, "code": 0 if ok else 1, "stdout": stdout, "stderr": stderr, "cmd": ""}
@@ -70,19 +73,31 @@ def fake_run_cmd(cmd, timeout=12, **_kwargs):
     if cmd[:2] in (["virsh", "snapshot-create-as"], ["virsh", "snapshot-revert"], ["virsh", "snapshot-delete"]):
         return fake_result("Domain snapshot %s created" % option(cmd, "--name"))
     if cmd[:2] == ["virsh", "list"]:
+        if "--title" in cmd:
+            return fake_result((FIXTURES / "list-title.txt").read_text())
         if "--name" in cmd:
-            return fake_result("web01\ndb01\n")
+            return fake_result("web01\ndb01\n" if "--all" in cmd else "web01\n")
         return fake_result(" Id   Name    State\n-----------------------\n 1    web01   running\n -    db01    shut off")
     if cmd[:2] == ["virsh", "dominfo"]:
         return fake_result(DOMINFO) if cmd[-1] in ("web01", "db01") else fake_result(ok=False, stderr="failed to get domain")
     if cmd[:2] == ["virsh", "dumpxml"]:
         return fake_result(DUMPXML_MIGRATABLE if "--migratable" in cmd else DUMPXML)
-    if cmd[:2] == ["virsh", "domblklist"]:
-        return fake_result(DOMBLKLIST_DETAILS)
-    if cmd[:2] == ["qemu-img", "info"]:
-        return fake_result(QEMU_IMG_INFO)
     if cmd[:2] == ["virsh", "domstate"]:
         return fake_result("running")
+    if cmd[:2] == ["virsh", "domblklist"]:
+        import core  # диск лежит в подменённом data_dirs хранилище — иначе панель откажется его увеличивать
+
+        return fake_result((FIXTURES / "domblklist-details.txt").read_text().replace("/var/lib/virtuality/images", str(core.IMAGES_DIR)))
+    if cmd[:2] == ["virsh", "domstats"]:
+        return fake_result((FIXTURES / "domstats.txt").read_text())
+    if cmd[:1] == ["virsh"] and "desc" in cmd[:3]:
+        if any(arg.startswith("--new-desc") for arg in cmd):
+            return fake_result("Domain description updated successfully")
+        vm = cmd[cmd.index("desc") + 1]
+        title, description = NOTES.get(vm, ("", ""))
+        return fake_result(title if "--title" in cmd else description)
+    if cmd[:2] == ["qemu-img", "info"]:
+        return fake_result(QEMU_IMG_INFO)
     if cmd[:2] == ["virsh", "domifaddr"]:
         return fake_result(" Name  MAC address  Protocol  Address\n vnet0 52:54:00:aa:bb:cc ipv4 192.168.100.51/24")
     if cmd[:2] == ["virsh", "domiflist"]:
@@ -141,6 +156,7 @@ def data_dirs(tmp_path, monkeypatch):
         monkeypatch.setattr(module, "OPERATIONS_DIR", dirs["operations"])
     monkeypatch.setattr(core, "BACKUPS_DIR", dirs["backups"])
     monkeypatch.setattr(core, "CONFIG_DIR", dirs["config"])
+    monkeypatch.setattr(core, "STORAGE_DIR", tmp_path)
     monkeypatch.setattr(network_core, "CONFIG_DIR", dirs["config"])
     monkeypatch.setattr(network_core, "NETWORK_DIR", dirs["network"])
     monkeypatch.setattr(network_core, "NFT_DIR", dirs["nft"])

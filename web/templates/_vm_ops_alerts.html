@@ -1,0 +1,6 @@
+{#- Сообщения после действий vmops (пауза, диски, заметки): читаются из адреса страницы. -#}
+{% from "_ui.html" import alert %}
+{% for key in ('ops', 'disk', 'notes') %}
+  {% if request.query_params.get(key ~ '_message') %}{{ alert('success', request.query_params.get(key ~ '_message')) }}{% endif %}
+  {% if request.query_params.get(key ~ '_error') %}{{ alert('danger', request.query_params.get(key ~ '_error')) }}{% endif %}
+{% endfor %}
