@@ -144,7 +144,9 @@ fi
 step "Копируем панель в ${APP_DIR}"
 run_logged "Новая версия скопирована" rsync -a --delete --exclude='__pycache__/' --exclude='.env' "$WEB_DIR/" "${APP_DIR}.new/"
 install -m 0644 "${REPO_DIR}/VERSION" "${APP_DIR}.new/VERSION"
+FRESH_INSTALL=1
 if [[ -d "$APP_DIR" ]]; then
+  FRESH_INSTALL=0
   rm -rf "${APP_DIR}.prev"
   mv "$APP_DIR" "${APP_DIR}.prev"
   ok "Предыдущая версия сохранена в ${APP_DIR}.prev (virtuality-ctl rollback)"
@@ -225,6 +227,8 @@ if [[ -f "$SETUP_STATE_FILE" ]]; then
   ok "Состояние установки уже ведётся"
 elif [[ "${VIRTUALITY_FIRSTBOOT:-0}" == "1" ]]; then
   ok "Прогресс пишет первая загрузка"
+elif [[ "$FRESH_INSTALL" != "1" ]]; then
+  ok "Обновление уже настроенного сервера — мастер не нужен (его можно запустить в Настройках)"
 else
   # A node installed by hand gets the same first-run wizard as one installed from the image.
   printf '{"stage": "done", "message": "", "steps": []}\n' > "$SETUP_STATE_FILE"
