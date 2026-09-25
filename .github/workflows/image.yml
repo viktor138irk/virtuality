@@ -3,6 +3,12 @@ name: Build ISO image
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths:
+      - "image/**"
+      - "scripts/virtuality_firstboot.sh"
+      - "web/requirements.txt"
+      - ".github/workflows/image.yml"
   workflow_dispatch:
     inputs:
       arch:
@@ -13,6 +19,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   iso:
@@ -26,13 +36,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: sudo apt-get update && sudo apt-get install -y xorriso
+      - run: sudo apt-get update && sudo apt-get install -y xorriso python3-yaml
       - uses: actions/cache@v4
         with:
           path: .cache/iso
           key: ubuntu-iso-${{ matrix.arch }}-${{ hashFiles('image/build-iso.sh') }}
           restore-keys: ubuntu-iso-${{ matrix.arch }}-
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - run: make iso ARCH=${{ matrix.arch }}
+      - name: Check ISO boot records
+        run: |
+          iso=$(ls dist/*.iso)
+          xorriso -indev "$iso" -report_el_torito plain 2>/dev/null | tee /dev/stderr | grep -q "UEFI"
+          xorriso -osirrox on -indev "$iso" -extract /autoinstall.yaml autoinstall.yaml -extract /boot/grub/grub.cfg grub.cfg
+          python3 -c "import yaml; d = yaml.safe_load(open('autoinstall.yaml')); assert d['autoinstall']['version'] == 1"
+          grep -q "Install Virtuality" grub.cfg
       # Ubuntu server ISOs are larger than the 2 GB GitHub release asset limit,
       # so images are published as workflow artifacts.
       - uses: actions/upload-artifact@v4
