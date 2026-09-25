@@ -77,7 +77,11 @@ def build_user_data(hostname: str, user: str, password_hash: str, ssh_keys: list
         "  mode: auto",
         "  devices: ['/']",
         "resize_rootfs: true",
-        "package_update: false",
+        # The guest agent lets the panel see the machine's address in any network and shut it down cleanly.
+        "package_update: true",
+        "packages: [qemu-guest-agent]",
+        "runcmd:",
+        "  - [sh, -c, 'systemctl enable --now qemu-guest-agent 2>/dev/null || { rc-update add qemu-guest-agent default && rc-service qemu-guest-agent start; } || true']",
     ]
     return "\n".join(lines) + "\n"
 

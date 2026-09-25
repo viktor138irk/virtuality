@@ -406,15 +406,17 @@ def parse_virsh_list() -> list[dict[str, str]]:
             return []
 
     def ip_from_domifaddr(name: str) -> str:
-        try:
-            result = run_cmd(["virsh", "domifaddr", name], timeout=8)
-            if result.get("ok"):
-                for ip in re.findall(r"\b(\d{1,3}(?:\.\d{1,3}){3})/\d+", result.get("stdout", "")):
-                    ip = clean_ip(ip)
-                    if ip:
-                        return ip
-        except Exception:
-            pass
+        # DHCP lease first (NAT network), then the guest agent (machines in the home network via br0).
+        for extra in ([], ["--source", "agent"]):
+            try:
+                result = run_cmd(["virsh", "domifaddr", name, *extra], timeout=8)
+                if result.get("ok"):
+                    for ip in re.findall(r"\b(\d{1,3}(?:\.\d{1,3}){3})/\d+", result.get("stdout", "")):
+                        ip = clean_ip(ip)
+                        if ip:
+                            return ip
+            except Exception:
+                pass
         return ""
 
     def ip_from_network_core(name: str) -> str:
@@ -1860,6 +1862,9 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
         # Windows 11 refuses to install without a TPM 2.0.
         cmd += ["--tpm", "model=tpm-crb,backend.type=emulator,backend.version=2.0"]
     graphics = ["--graphics", "vnc,listen=127.0.0.1", "--noautoconsole"]
+    if not windows:
+        # Channel for qemu-guest-agent (installed by cloud-init; on ISO installs — by the user or the distro).
+        graphics = ["--channel", "unix,target.type=virtio,target.name=org.qemu.guest_agent.0", *graphics]
 
     seed_file = ""
     login_hint = ""

@@ -27,6 +27,7 @@ def test_user_data_has_user_password_and_keys():
     text = cloudinit.build_user_data("web", "viktor", "$6$abc", ["ssh-ed25519 AAAAC3 me@laptop"])
     assert "hostname: web" in text and "- name: viktor" in text and "passwd: '$6$abc'" in text
     assert "- ssh-ed25519 AAAAC3 me@laptop" in text and "ssh_pwauth: true" in text and "growpart" in text
+    assert "packages: [qemu-guest-agent]" in text and "package_update: true" in text
     assert "ssh_pwauth: false" in cloudinit.build_user_data("web", "viktor", "", ["ssh-ed25519 AAAAC3 me"])
 
 
@@ -120,6 +121,7 @@ def test_windows11_gets_uefi_tpm_sata_and_e1000e(logged_in, data_dirs, monkeypat
     assert cmd[cmd.index("--boot") + 1] == "uefi,cdrom,hd"
     assert "--tpm" in cmd and "backend.version=2.0" in cmd[cmd.index("--tpm") + 1]
     assert "bus=sata" in cmd[cmd.index("--disk") + 1] and "model=e1000e" in cmd[cmd.index("--network") + 1]
+    assert "--channel" not in cmd  # Windows has no guest agent without extra drivers
 
 
 def test_linux_installer_detects_os_and_uses_virtio(logged_in, data_dirs, monkeypatch):
@@ -129,6 +131,7 @@ def test_linux_installer_detects_os_and_uses_virtio(logged_in, data_dirs, monkey
     cmd = captured["cmd"]
     assert cmd[cmd.index("--osinfo") + 1] == "detect=on,require=off" and cmd[cmd.index("--boot") + 1] == "cdrom,hd"
     assert "bus=virtio" in cmd[cmd.index("--disk") + 1] and "model=virtio" in cmd[cmd.index("--network") + 1] and "--tpm" not in cmd
+    assert cmd[cmd.index("--channel") + 1] == "unix,target.type=virtio,target.name=org.qemu.guest_agent.0"
     assert create(logged_in, monkeypatch, iso_form(iso, os_type="bsd"))[0].status_code == 400
 
 
