@@ -1,0 +1,4 @@
+ Type   Device   Target   Source
+------------------------------------------------------------
+ file   disk     vda      /var/lib/virtuality/images/web01.qcow2
+ file   cdrom    sda      -

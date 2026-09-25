@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import conftest  # noqa: E402  (sets sys.path and env)
 
 import app  # noqa: E402
+import core  # noqa: E402
 import host_profile  # noqa: E402
 import network_core  # noqa: E402
 import update_core  # noqa: E402
@@ -23,6 +24,7 @@ def seed(root: Path) -> None:
     for path in dirs.values():
         path.mkdir(parents=True, exist_ok=True)
     app.ISO_DIR, app.IMAGES_DIR, app.DISK_IMAGES_DIR, app.OPERATIONS_DIR = dirs["iso"], dirs["images"], dirs["disk-images"], dirs["operations"]
+    core.ISO_DIR, core.IMAGES_DIR, core.DISK_IMAGES_DIR, core.OPERATIONS_DIR, core.CONFIG_DIR = dirs["iso"], dirs["images"], dirs["disk-images"], dirs["operations"], dirs["config"]
     network_core.CONFIG_DIR, network_core.NETWORK_DIR, network_core.NFT_DIR = dirs["config"], dirs["network"], dirs["nft"]
     network_core.PORT_FORWARDS_FILE = dirs["network"] / "port_forwards.json"
     network_core.NAT_XML_FILE = dirs["network"] / "virtuality-nat.xml"
@@ -32,7 +34,7 @@ def seed(root: Path) -> None:
     host_profile.PROFILE_FILE = dirs["config"] / "host_profile.json"
     update_core.STATE_DIR, update_core.STATE_FILE, update_core.LOG_FILE = dirs["update"], dirs["update"] / "state.json", dirs["update"] / "update.log"
     update_core.SOURCE_DIR = Path(__file__).resolve().parents[1]
-    for module in (app, network_core, host_profile):
+    for module in (app, core, network_core, host_profile, *conftest.feature_modules()):
         module.run_cmd = conftest.fake_run_cmd
     app.auth.verify_password = lambda user, password: True
 
@@ -49,6 +51,17 @@ def seed(root: Path) -> None:
         op_id = str(uuid.uuid4())
         app.write_operation({"id": op_id, "type": "vm_create", "title": title, "status": status, "progress": progress, "message": "Готово" if status == "success" else "qemu-img: 64%" if status == "running" else "virt-install завершился с ошибкой: 1", "created_at": app.utc_now(), "updated_at": app.utc_now(), "created_by": "tester"})
         app.append_operation_log(op_id, "virt-install --name web01 --memory 2048 ...")
+
+    # Идущие скачивания — видны на /iso и /disk-images (в каталоге Ubuntu 26.04 помечена «Скачивается»).
+    for kind, url, catalog_id, title, progress, message, total, done in (
+        ("iso", "https://software-download.microsoft.com/download/pr/windows-server-2025-eval-x64.iso", None, "Скачивание windows-server-2025-eval-x64.iso", 37, "1,9 ГБ из 5,2 ГБ · 24 МБ/с · осталось 2 мин", 5_583_457_280, 2_065_879_193),
+        ("disk", "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img", "ubuntu-26.04", "Скачивание Ubuntu Server 26.04 LTS", 62, "412 МБ из 663 МБ · 31 МБ/с · осталось 8 с", 695_205_888, 431_027_650),
+    ):
+        filename = url.rsplit("/", 1)[-1]
+        target = (dirs["iso"] if kind == "iso" else dirs["disk-images"]) / filename
+        op = core.new_operation("download", title, download_kind=kind, url=url, filename=filename, target_path=str(target), page="/iso" if kind == "iso" else "/disk-images", catalog_id=catalog_id, total_bytes=total, downloaded_bytes=done, cancel_requested=False)
+        core.update_operation(op, status="running", progress=progress, message=message, started_at=core.utc_now())
+        core.append_operation_log(op["id"], f"Ссылка: {url}")
 
 
 if __name__ == "__main__":

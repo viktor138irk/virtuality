@@ -57,6 +57,8 @@ def fake_run_cmd(cmd, timeout=12, **_kwargs):
         return fake_result(":0")
     if cmd[:2] == ["virsh", "pool-list"]:
         return fake_result(" Name  State  Autostart\n---\n virtuality-images  active  yes")
+    if cmd[:2] == ["virsh", "pool-refresh"]:
+        return fake_result(f"Pool {cmd[-1]} refreshed")
     if cmd[:2] == ["virsh", "net-list"]:
         return fake_result(" Name  State  Autostart  Persistent\n---\n virtuality-nat  active  yes  yes")
     if cmd[:2] == ["systemctl", "is-active"]:
@@ -72,9 +74,15 @@ def fake_run_cmd(cmd, timeout=12, **_kwargs):
     return fake_result()
 
 
+def feature_modules():
+    """Загруженные модули web/features/* — им тоже подменяем run_cmd."""
+    return [module for name, module in sys.modules.items() if name.startswith("features.") and hasattr(module, "run_cmd")]
+
+
 @pytest.fixture()
 def data_dirs(tmp_path, monkeypatch):
     import app
+    import core
     import host_profile
     import network_core
     import update_core
@@ -84,6 +92,7 @@ def data_dirs(tmp_path, monkeypatch):
         "images": tmp_path / "images",
         "disk_images": tmp_path / "disk-images",
         "operations": tmp_path / "operations",
+        "backups": tmp_path / "backups",
         "network": tmp_path / "network",
         "config": tmp_path / "config",
         "nft": tmp_path / "nft",
@@ -91,10 +100,13 @@ def data_dirs(tmp_path, monkeypatch):
     }
     for path in dirs.values():
         path.mkdir()
-    monkeypatch.setattr(app, "ISO_DIR", dirs["iso"])
-    monkeypatch.setattr(app, "IMAGES_DIR", dirs["images"])
-    monkeypatch.setattr(app, "DISK_IMAGES_DIR", dirs["disk_images"])
-    monkeypatch.setattr(app, "OPERATIONS_DIR", dirs["operations"])
+    for module in (app, core):
+        monkeypatch.setattr(module, "ISO_DIR", dirs["iso"])
+        monkeypatch.setattr(module, "IMAGES_DIR", dirs["images"])
+        monkeypatch.setattr(module, "DISK_IMAGES_DIR", dirs["disk_images"])
+        monkeypatch.setattr(module, "OPERATIONS_DIR", dirs["operations"])
+    monkeypatch.setattr(core, "BACKUPS_DIR", dirs["backups"])
+    monkeypatch.setattr(core, "CONFIG_DIR", dirs["config"])
     monkeypatch.setattr(network_core, "CONFIG_DIR", dirs["config"])
     monkeypatch.setattr(network_core, "NETWORK_DIR", dirs["network"])
     monkeypatch.setattr(network_core, "NFT_DIR", dirs["nft"])
@@ -108,7 +120,7 @@ def data_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(update_core, "STATE_FILE", dirs["update"] / "state.json")
     monkeypatch.setattr(update_core, "LOG_FILE", dirs["update"] / "update.log")
     monkeypatch.setattr(update_core, "SOURCE_DIR", ROOT)
-    for module in (app, network_core, host_profile):
+    for module in (app, core, network_core, host_profile, *feature_modules()):
         monkeypatch.setattr(module, "run_cmd", fake_run_cmd)
     return dirs
 

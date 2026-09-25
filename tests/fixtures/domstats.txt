@@ -1,0 +1,16 @@
+Domain: 'web01'
+  cpu.time=48123456789
+  cpu.user=30000000000
+  cpu.system=18123456789
+  balloon.current=2097152
+  balloon.maximum=2097152
+  balloon.rss=1534208
+  vcpu.current=2
+  vcpu.maximum=2
+  vcpu.0.state=1
+  vcpu.0.time=24000000000
+  vcpu.0.wait=0
+  vcpu.1.state=1
+  vcpu.1.time=24123456789
+  vcpu.1.wait=0
+

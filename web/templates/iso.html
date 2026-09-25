@@ -3,8 +3,11 @@
 {% set page_title = 'Образы ОС' %}
 
 {% block page_header %}{% include "_images_header.html" %}{% endblock %}
+{% block alerts %}{{ super() }}{% include "_downloads_flash.html" %}{% endblock %}
 
 {% block content %}
+{% set kind = 'iso' %}
+{% include "_downloads_active.html" %}
 <section class="grid grid-main">
   <article class="card">
     <div class="card-header">
@@ -36,6 +39,7 @@
         {{ uploader('/iso/upload', 'iso_file', '.iso', 'Перетащите файл .iso сюда', 'или нажмите, чтобы выбрать на компьютере', '/iso', 'Загрузить') }}
       </div>
     </article>
+    {% include "_downloads_url.html" %}
     <article class="card">
       <div class="card-header"><h2>Где взять образ</h2></div>
       <div class="list">
