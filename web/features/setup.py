@@ -249,7 +249,7 @@ def setup_finish(request: Request):
             return render_step(request, "finish", error=detail, status_code=500)
         final_url = f"https://{host}:{settings.get('VIRTUALITY_TLS_PORT', '8443')}" if changes["VIRTUALITY_TLS"] == "1" else f"http://{host}:{changes['VIRTUALITY_WEB_PORT']}"
         return render(request, "setup_applying.html", {"page_title": "Применяем настройки", "final_url": final_url, "tls": changes["VIRTUALITY_TLS"] == "1"})
-    return redirect_with_message("/", "setup_message", "Сервер настроен. Можно создавать машины.")
+    return redirect_with_message("/", "message", "Сервер настроен. Можно создавать машины.")
 
 
 @router.get("/setup/skip")
@@ -258,7 +258,7 @@ def setup_skip(request: Request):
     if auth:
         return auth
     nodectl.mark_wizard_done()
-    return redirect_with_message("/", "setup_message", "Мастер пропущен. Его можно запустить позже в Настройках.")
+    return redirect_with_message("/", "message", "Мастер пропущен. Его можно запустить позже в Настройках.")
 
 
 @router.post("/setup/restart")

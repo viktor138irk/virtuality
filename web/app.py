@@ -28,7 +28,7 @@ import auth
 import host_profile
 import network_core
 import presenters
-from features import setup
+from features import settings, setup
 import update_core
 from network_core import NetworkError
 
@@ -2022,3 +2022,4 @@ def api_health(request: Request):
 
 
 app.include_router(setup.router)
+app.include_router(settings.router)

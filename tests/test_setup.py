@@ -67,7 +67,7 @@ def test_wizard_steps_render_and_store_choices(logged_in, data_dirs, monkeypatch
 def test_finish_marks_done_without_ctl(logged_in, data_dirs, monkeypatch):
     prepare(data_dirs, monkeypatch)
     response = logged_in.post("/setup/finish", follow_redirects=False)
-    assert response.status_code == 303 and response.headers["location"].startswith("/?setup_message=")
+    assert response.status_code == 303 and response.headers["location"].startswith("/?message=")
     assert nodectl.wizard_done()
 
 

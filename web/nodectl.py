@@ -311,3 +311,8 @@ def power(action: str) -> tuple[bool, str]:
 def backup_config() -> tuple[bool, str]:
     result = ctl("backup-config", timeout=120)
     return result["ok"], cmd_error(result, "Не удалось создать архив настроек") if not result["ok"] else result["stdout"]
+
+
+def support_bundle() -> tuple[bool, str]:
+    result = ctl("support-bundle", timeout=120)
+    return result["ok"], cmd_error(result, "Не удалось собрать отчёт") if not result["ok"] else result["stdout"]

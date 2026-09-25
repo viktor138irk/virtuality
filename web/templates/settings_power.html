@@ -1,0 +1,39 @@
+{% extends "setup_base.html" %}
+{% from "_ui.html" import icon %}
+{% block rail %}{% endblock %}
+{% block step %}
+  <div class="card-header"><div><h2>{{ 'Перезагружаем сервер' if action == 'reboot' else 'Выключаем сервер' }}</h2><p>Машины выключаются корректно, это может занять до нескольких минут.</p></div></div>
+  <div class="card-body stack" data-power="{{ action }}">
+    <div class="row" style="gap:14px"><span class="spinner" style="width:22px;height:22px;color:var(--brand)"></span><strong data-power-status>{{ message }}…</strong></div>
+    <div class="progress indeterminate"><span></span></div>
+    {% if action == 'reboot' %}
+      <p class="subtle small">Когда сервер снова включится, эта страница откроет панель сама. Обычно это занимает 1–2 минуты.</p>
+    {% else %}
+      <p class="subtle small">Чтобы включить сервер снова, нажмите кнопку питания на нём. Эту вкладку можно закрыть.</p>
+    {% endif %}
+  </div>
+  <div class="card-footer"><a class="btn btn-ghost" href="/">На главную</a></div>
+{% endblock %}
+{% block scripts %}
+{% if action == 'reboot' %}
+<script>
+  (function () {
+    var status = document.querySelector('[data-power-status]');
+    var down = false, started = Date.now();
+    function poll() {
+      fetch('/healthz', { cache: 'no-store' }).then(function (r) {
+        if (!r.ok) throw new Error('down');
+        if (down) { status.textContent = 'Сервер снова работает — открываем панель'; setTimeout(function () { location.href = '/'; }, 1000); return; }
+        status.textContent = 'Выключаем машины и перезагружаемся… (' + Math.round((Date.now() - started) / 1000) + ' с)';
+        setTimeout(poll, 3000);
+      }).catch(function () {
+        down = true;
+        status.textContent = 'Сервер перезагружается, ждём… (' + Math.round((Date.now() - started) / 1000) + ' с)';
+        setTimeout(poll, 4000);
+      });
+    }
+    setTimeout(poll, 5000);
+  })();
+</script>
+{% endif %}
+{% endblock %}
