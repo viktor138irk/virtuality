@@ -217,5 +217,5 @@ if __name__ == "__main__":
 
     seed(Path(tempfile.mkdtemp(prefix="virtuality-dev-")))
     # The demo operations are seeded as "running": keep them instead of closing them as orphaned on startup.
-    app.app.router.on_startup.remove(app.close_orphaned_operations)
+    app.app.router.on_startup.clear()
     uvicorn.run(app.app, host="127.0.0.1", port=int(sys.argv[1]) if len(sys.argv) > 1 else 8765, log_level="warning")
