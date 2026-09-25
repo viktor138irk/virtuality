@@ -1,6 +1,7 @@
-{#- Идущие скачивания (операции типа download) с живым прогрессом. Ожидает переменную kind ('iso' | 'disk'). -#}
+{#- Идущие скачивания (операции типа download) с живым прогрессом. Ожидает переменную kind ('iso' | 'disk');
+    страница может заранее положить в dl результат downloads_panel(kind), чтобы не читать операции дважды. -#}
 {% from "_ui.html" import icon %}
-{% set dl = downloads_panel(kind) %}
+{% set dl = dl if dl is defined else downloads_panel(kind) %}
 {% if dl.active %}
 <article class="card downloads" data-downloads>
   <div class="card-header">
@@ -20,7 +21,8 @@
           <div class="meta mt-1" data-dl="message">{{ op.message }}</div>
         </div>
         <a class="btn btn-sm btn-ghost hide-sm" href="/operations/{{ op.id }}">Подробнее</a>
-        <form method="post" action="/downloads/{{ op.id }}/cancel" class="inline-form" data-dl="cancel" data-confirm="Скачивание {{ op.filename }} остановится, а недокачанный файл будет удалён." data-confirm-title="Отменить скачивание?" data-confirm-button="Остановить" data-toast="Скачивание отменено" data-toast-tone="warning">
+        {#- Без data-toast: сервер лишь просит поток остановиться, а итог («Скачивание отменено») покажет опрос ниже. -#}
+        <form method="post" action="/downloads/{{ op.id }}/cancel" class="inline-form" data-dl="cancel" data-confirm="Скачивание {{ op.filename }} остановится, а недокачанный файл будет удалён." data-confirm-title="Отменить скачивание?" data-confirm-button="Остановить">
           <button class="btn btn-sm btn-danger-soft" {% if op.cancel_requested %}disabled{% endif %}>{{ icon('x', 'icon-sm') }}Отменить</button>
         </form>
       </div>
@@ -54,13 +56,19 @@
         if (op.status !== 'success' && op.status !== 'error') return;
         clearInterval(timer);
         progress.classList.remove('indeterminate');
-        progress.classList.add(op.status === 'success' ? 'success' : 'danger');
         cancel.hidden = true;
-        item.dataset.status = op.status;
         if (op.status === 'success') {
+          progress.classList.add('success');
+          item.dataset.status = op.status;
           try { sessionStorage.setItem('virtualityToast', JSON.stringify({ message: op.message || 'Файл скачан', tone: 'success' })); } catch (_) {}
           setTimeout(function () { location.replace(location.pathname); }, 900);
+        } else if (op.cancelled) {
+          // Отмена по просьбе пользователя — не ошибка: предупреждение, без красной строки и красного процента.
+          item.dataset.status = 'cancelled';
+          if (window.vToast) window.vToast(op.message || 'Скачивание отменено', 'warning');
         } else {
+          progress.classList.add('danger');
+          item.dataset.status = op.status;
           message.classList.add('download-error');
           if (window.vToast) window.vToast(op.message || 'Скачивание не удалось', 'danger');
         }

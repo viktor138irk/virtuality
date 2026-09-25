@@ -1,7 +1,7 @@
 {#- Карточка «Скачать по ссылке». Ожидает переменную kind ('iso' | 'disk'). -#}
 {% from "_ui.html" import icon %}
 <article class="card">
-  <div class="card-header"><div><h2>Скачать по ссылке</h2><p>Сервер скачает файл сам — не нужно гонять его через компьютер</p></div></div>
+  <div class="card-header"><div><h2>Скачать по ссылке</h2><p>Сервер скачает файл сам — не нужно сначала загружать его на компьютер</p></div></div>
   <div class="card-body">
     <form method="post" action="/downloads/url" class="stack-sm" data-busy="Проверяем ссылку…">
       <input type="hidden" name="kind" value="{{ kind }}">
