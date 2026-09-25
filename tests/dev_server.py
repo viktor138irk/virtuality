@@ -46,12 +46,34 @@ def demo_run_cmd(cmd, timeout=12, **kwargs):
     return conftest.fake_run_cmd(cmd, timeout, **kwargs)
 
 
+def seed_backups(backups_dir: Path) -> None:
+    """Несколько копий, как после пары недель работы: web01 — три, db01 — одна."""
+    vm_xml = conftest.DUMPXML_MIGRATABLE
+    demo = [
+        ("web01", "20260924-0300", 2_684_354_560, "", [("vda", 6_443_499_520)]),
+        ("web01", "20260917-0300", 2_598_000_000, "", [("vda", 6_300_000_000)]),
+        ("web01", "20260912-1842", 2_412_000_000, "Перед обновлением сайта", [("vda", 6_100_000_000)]),
+        ("db01", "20260921-2215", 9_126_805_504, "После переноса базы", [("vda", 12_884_901_888), ("vdb", 8_589_934_592)]),
+    ]
+    for vm, backup_id, size, note, disks in demo:
+        path = backups_dir / vm / backup_id
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "vm.xml").write_text(vm_xml.replace("web01", vm))
+        for target, _ in disks:
+            with (path / f"{target}.qcow2").open("wb") as handle:
+                handle.truncate(1024 * 1024)
+        meta = {"vm": vm, "created_at": f"{backup_id[:4]}-{backup_id[4:6]}-{backup_id[6:8]} {backup_id[9:11]}:{backup_id[11:]}:00", "disks": [{"target": t, "source": f"/var/lib/virtuality/images/{vm}.qcow2", "size": s} for t, s in disks], "size_bytes": size, "version": "0.11.0", "note": note}
+        (path / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+
 def seed(root: Path) -> None:
-    dirs = {name: root / name for name in ("iso", "images", "disk-images", "operations", "network", "config", "nft", "update")}
+    dirs = {name: root / name for name in ("iso", "images", "disk-images", "backups", "operations", "network", "config", "nft", "update")}
     for path in dirs.values():
         path.mkdir(parents=True, exist_ok=True)
     app.ISO_DIR, app.IMAGES_DIR, app.DISK_IMAGES_DIR, app.OPERATIONS_DIR = dirs["iso"], dirs["images"], dirs["disk-images"], dirs["operations"]
-    core.OPERATIONS_DIR = dirs["operations"]
+    core.ISO_DIR, core.IMAGES_DIR, core.DISK_IMAGES_DIR, core.OPERATIONS_DIR = dirs["iso"], dirs["images"], dirs["disk-images"], dirs["operations"]
+    core.BACKUPS_DIR, core.CONFIG_DIR = dirs["backups"], dirs["config"]
+    seed_backups(dirs["backups"])
     network_core.CONFIG_DIR, network_core.NETWORK_DIR, network_core.NFT_DIR = dirs["config"], dirs["network"], dirs["nft"]
     network_core.PORT_FORWARDS_FILE = dirs["network"] / "port_forwards.json"
     network_core.NAT_XML_FILE = dirs["network"] / "virtuality-nat.xml"
@@ -61,7 +83,7 @@ def seed(root: Path) -> None:
     host_profile.PROFILE_FILE = dirs["config"] / "host_profile.json"
     update_core.STATE_DIR, update_core.STATE_FILE, update_core.LOG_FILE = dirs["update"], dirs["update"] / "state.json", dirs["update"] / "update.log"
     update_core.SOURCE_DIR = Path(__file__).resolve().parents[1]
-    for module in (app, network_core, host_profile, core, *conftest.feature_modules()):
+    for module in (app, core, network_core, host_profile, *conftest.feature_modules()):
         module.run_cmd = demo_run_cmd
     app.auth.verify_password = lambda user, password: True
     import nodectl
@@ -104,6 +126,10 @@ def seed(root: Path) -> None:
     # Идущий снимок машины db01 — видно на /vm/db01/snapshots.
     snap_op = core.new_operation("snapshot_create", "Снимок машины db01", vm_name="db01", snapshot="snap-20260925-1500", vm_running=True)
     core.update_operation(snap_op, status="running", progress=15, message="Сохраняем состояние машины и памяти — она на несколько секунд замрёт…")
+    op_id = str(uuid.uuid4())
+    app.write_operation({"id": op_id, "type": "backup", "title": "Резервная копия web01", "status": "success", "progress": 100, "message": "Резервная копия создана: 2.5 ГБ", "created_at": app.utc_now(), "updated_at": app.utc_now(), "created_by": "tester", "vm_name": "web01", "backup_id": "20260924-0300"})
+    for line in ("Машина работает — отправляем команду выключения.", "Машина выключена.", "Настройки машины сохранены в vm.xml.", "Копируем диск vda (1 из 1): 100%", "Машина запущена снова."):
+        app.append_operation_log(op_id, line)
 
 
 if __name__ == "__main__":

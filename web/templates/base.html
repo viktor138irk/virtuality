@@ -39,6 +39,7 @@
         <div class="nav-section">Ресурсы</div>
         {{ nav_link('/iso', 'disc-3', 'Образы ОС', path.startswith('/iso') or path.startswith('/disk-images')) }}
         {{ nav_link('/network', 'globe', 'Сеть и доступ', path.startswith('/network')) }}
+        {{ nav_link('/backups', 'database', 'Резервные копии', path.startswith('/backups')) }}
 
         <div class="nav-section">Система</div>
         {{ nav_link('/operations', 'list-checks', 'Задачи', path.startswith('/operations')) }}

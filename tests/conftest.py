@@ -36,6 +36,9 @@ DUMPXML = """<domain type='kvm'>
 
 
 FIXTURES = ROOT / "tests" / "fixtures"
+DOMBLKLIST_DETAILS = (FIXTURES / "domblklist-details.txt").read_text()
+DUMPXML_MIGRATABLE = (FIXTURES / "dumpxml-web01.xml").read_text()
+QEMU_IMG_INFO = (FIXTURES / "qemu-img-info.json").read_text()
 
 # Снимки web01: имя → (состояние, описание); список берётся из fixtures/snapshot-list.txt.
 SNAPSHOTS = {"before-upd": ("shutoff", "Перед обновлением ядра"), "clean": ("running", "Чистая система после установки")}
@@ -67,11 +70,17 @@ def fake_run_cmd(cmd, timeout=12, **_kwargs):
     if cmd[:2] in (["virsh", "snapshot-create-as"], ["virsh", "snapshot-revert"], ["virsh", "snapshot-delete"]):
         return fake_result("Domain snapshot %s created" % option(cmd, "--name"))
     if cmd[:2] == ["virsh", "list"]:
+        if "--name" in cmd:
+            return fake_result("web01\ndb01\n")
         return fake_result(" Id   Name    State\n-----------------------\n 1    web01   running\n -    db01    shut off")
     if cmd[:2] == ["virsh", "dominfo"]:
         return fake_result(DOMINFO) if cmd[-1] in ("web01", "db01") else fake_result(ok=False, stderr="failed to get domain")
     if cmd[:2] == ["virsh", "dumpxml"]:
-        return fake_result(DUMPXML)
+        return fake_result(DUMPXML_MIGRATABLE if "--migratable" in cmd else DUMPXML)
+    if cmd[:2] == ["virsh", "domblklist"]:
+        return fake_result(DOMBLKLIST_DETAILS)
+    if cmd[:2] == ["qemu-img", "info"]:
+        return fake_result(QEMU_IMG_INFO)
     if cmd[:2] == ["virsh", "domstate"]:
         return fake_result("running")
     if cmd[:2] == ["virsh", "domifaddr"]:
@@ -114,6 +123,7 @@ def data_dirs(tmp_path, monkeypatch):
         "iso": tmp_path / "iso",
         "images": tmp_path / "images",
         "disk_images": tmp_path / "disk-images",
+        "backups": tmp_path / "backups",
         "operations": tmp_path / "operations",
         "network": tmp_path / "network",
         "config": tmp_path / "config",
@@ -122,11 +132,13 @@ def data_dirs(tmp_path, monkeypatch):
     }
     for path in dirs.values():
         path.mkdir()
-    monkeypatch.setattr(app, "ISO_DIR", dirs["iso"])
-    monkeypatch.setattr(app, "IMAGES_DIR", dirs["images"])
-    monkeypatch.setattr(app, "DISK_IMAGES_DIR", dirs["disk_images"])
-    monkeypatch.setattr(app, "OPERATIONS_DIR", dirs["operations"])
-    monkeypatch.setattr(core, "OPERATIONS_DIR", dirs["operations"])
+    for module in (app, core):
+        monkeypatch.setattr(module, "ISO_DIR", dirs["iso"])
+        monkeypatch.setattr(module, "IMAGES_DIR", dirs["images"])
+        monkeypatch.setattr(module, "DISK_IMAGES_DIR", dirs["disk_images"])
+        monkeypatch.setattr(module, "OPERATIONS_DIR", dirs["operations"])
+    monkeypatch.setattr(core, "BACKUPS_DIR", dirs["backups"])
+    monkeypatch.setattr(core, "CONFIG_DIR", dirs["config"])
     monkeypatch.setattr(network_core, "CONFIG_DIR", dirs["config"])
     monkeypatch.setattr(network_core, "NETWORK_DIR", dirs["network"])
     monkeypatch.setattr(network_core, "NFT_DIR", dirs["nft"])
@@ -140,7 +152,7 @@ def data_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(update_core, "STATE_FILE", dirs["update"] / "state.json")
     monkeypatch.setattr(update_core, "LOG_FILE", dirs["update"] / "update.log")
     monkeypatch.setattr(update_core, "SOURCE_DIR", ROOT)
-    for module in (app, network_core, host_profile, core, *feature_modules()):
+    for module in (app, core, network_core, host_profile, *feature_modules()):
         monkeypatch.setattr(module, "run_cmd", fake_run_cmd)
     return dirs
 
