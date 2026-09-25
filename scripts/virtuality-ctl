@@ -35,6 +35,7 @@ Usage: virtuality-ctl <command> [options]
   bridge <iface> [dhcp|static]  Подключить машины к локальной сети через мост br0 с автооткатом
   bridge-confirm             Подтвердить новую сеть (отменяет автооткат)
   bridge-revert              Вернуть прежнюю сеть
+  storage-use /dev/sdX       Отдать пустой диск под хранилище машин (${DATA_DIR})
   support-bundle [FILE]      Собрать отчёт для поддержки
   uninstall [--purge] [--yes]  Удалить Virtuality (по умолчанию машины и образы остаются)
 EOF
@@ -557,6 +558,41 @@ cmd_bridge_revert() {
   echo "Прежняя сеть восстановлена"
 }
 
+# ---------------------------------------------------------------- storage
+cmd_storage_use() {
+  need_root storage-use
+  local dev="${1:-}"
+  [[ "$dev" =~ ^/dev/[a-zA-Z0-9]+$ ]] || die "usage: virtuality-ctl storage-use /dev/sdX"
+  [[ -b "$dev" ]] || die "$dev не является блочным устройством"
+  local children fstype mounted
+  children="$(lsblk -n -o NAME "$dev" | tail -n +2 | wc -l)"
+  fstype="$(lsblk -n -d -o FSTYPE "$dev")"
+  mounted="$(lsblk -n -o MOUNTPOINT "$dev" | tr -d ' \n')"
+  [[ "$children" -eq 0 && -z "$fstype" && -z "$mounted" ]] || die "на $dev уже есть разделы или данные — используйте только пустой диск"
+  findmnt -n --target "$DATA_DIR" -o SOURCE | grep -q "^${dev}" && die "$dev уже используется"
+  log "storage-use ${dev}: formatting"
+  wipefs -a "$dev" >/dev/null
+  mkfs.ext4 -F -q -L virtuality "$dev" >/dev/null || die "не удалось создать файловую систему"
+  local uuid tmp
+  uuid="$(blkid -s UUID -o value "$dev")"
+  [[ -n "$uuid" ]] || die "не удалось прочитать UUID"
+  tmp="$(mktemp -d)"
+  mount "$dev" "$tmp" || die "не удалось смонтировать диск"
+  mkdir -p "$DATA_DIR"
+  rsync -a "$DATA_DIR"/ "$tmp"/ || { umount "$tmp"; die "не удалось перенести данные"; }
+  umount "$tmp"; rmdir "$tmp"
+  sed -i "\#[[:space:]]${DATA_DIR}[[:space:]]#d" /etc/fstab
+  printf 'UUID=%s %s ext4 defaults,nofail 0 2\n' "$uuid" "$DATA_DIR" >> /etc/fstab
+  systemctl daemon-reload
+  mount "$DATA_DIR" || die "не удалось смонтировать ${DATA_DIR}"
+  chmod 755 "$DATA_DIR"
+  mkdir -p "$DATA_DIR"/{iso,images,disk-images,backups,tmp,network,config}
+  chmod 1777 "$DATA_DIR/tmp"
+  command -v virsh >/dev/null 2>&1 && { virsh pool-refresh virtuality-images >/dev/null 2>&1 || true; virsh pool-refresh virtuality-iso >/dev/null 2>&1 || true; }
+  log "storage-use ${dev}: mounted at ${DATA_DIR}"
+  echo "Диск ${dev} подключён как ${DATA_DIR}"
+}
+
 # ---------------------------------------------------------------- support
 cmd_support_bundle() {
   need_root support-bundle
@@ -658,6 +694,7 @@ case "${1:-}" in
   bridge) shift; cmd_bridge "$@" ;;
   bridge-confirm) cmd_bridge_confirm ;;
   bridge-revert) cmd_bridge_revert ;;
+  storage-use) shift; cmd_storage_use "$@" ;;
   support-bundle) shift; cmd_support_bundle "$@" ;;
   uninstall) shift; cmd_uninstall "$@" ;;
   -h|--help|help|"") usage ;;

@@ -584,3 +584,31 @@ details.advanced > .advanced-body { padding: 4px 16px 16px; }
   .hide-sm { display: none !important; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---------------------------------------------------------- setup wizard */
+.setup-page { background: var(--bg); }
+.setup-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 32px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.setup-top .logo { padding: 0; }
+.setup-main { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 32px; width: 100%; max-width: 1180px; margin: 0 auto; padding: 36px 32px 60px; }
+.setup-rail { display: grid; gap: 4px; align-content: start; position: sticky; top: 24px; }
+.setup-step { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; color: var(--text-3); }
+.setup-step:hover { text-decoration: none; }
+.setup-step[href]:hover { background: var(--surface-3); color: var(--text); }
+.setup-step strong { display: block; font-weight: 600; color: inherit; }
+.setup-step small { display: block; font-size: 12px; }
+.setup-step-num { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 50%; border: 1.5px solid var(--border-strong); font-size: 12.5px; font-weight: 700; }
+.setup-step.active { color: var(--text); }
+.setup-step.active .setup-step-num { border-color: var(--brand); background: var(--brand); color: #fff; box-shadow: 0 0 0 4px var(--brand-soft); }
+.setup-step.done { color: var(--text-2); }
+.setup-step.done .setup-step-num { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+.setup-content { min-width: 0; }
+.setup-card { box-shadow: var(--shadow-md); }
+.setup-card .card-header h2 { font-size: 20px; }
+.setup-card .card-header p { font-size: 14px; color: var(--text-2); margin-top: 4px; }
+@media (max-width: 900px) {
+  .setup-top { padding: 12px 16px; }
+  .setup-main { grid-template-columns: 1fr; padding: 20px 16px 48px; gap: 16px; }
+  .setup-rail { position: static; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+  .setup-step { flex: none; padding: 6px 10px; }
+  .setup-step small { display: none; }
+}

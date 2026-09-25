@@ -1,0 +1,48 @@
+{% extends "setup_base.html" %}
+{% from "_ui.html" import icon, alert %}
+{% block rail %}{% endblock %}
+{% block step %}
+  <div class="card-header"><div><h2>Перенастраиваем сеть</h2><p>Сервер объединяет сетевой порт в мост br0. Это займёт около 20 секунд, страница не перезагружается.</p></div></div>
+  <div class="card-body stack" data-bridge-wait data-confirm-url="{{ confirm_url }}" data-next-url="{{ next_url }}">
+    <div class="row" style="gap:14px"><span class="spinner" style="width:22px;height:22px;color:var(--brand)"></span><strong data-bridge-status>Ждём, пока сервер снова ответит…</strong></div>
+    <div class="progress indeterminate" data-bridge-progress><span></span></div>
+    <div class="alert info">{{ icon('info') }}<div><strong>Если страница так и не оживёт</strong>Ничего страшного: через 2 минуты сервер сам вернёт прежнюю сеть. Обновите страницу и выберите «Отдельная сеть (NAT)» или попробуйте ещё раз.</div></div>
+  </div>
+  <div class="card-footer">
+    <form method="post" action="{{ revert_url }}" style="margin-right:auto"><button class="btn btn-ghost">Отменить и вернуть прежнюю сеть</button></form>
+    <a class="btn btn-primary disabled" href="{{ next_url }}" data-bridge-next>Продолжить{{ icon('arrow-right') }}</a>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var root = document.querySelector('[data-bridge-wait]');
+    var status = document.querySelector('[data-bridge-status]');
+    var next = document.querySelector('[data-bridge-next]');
+    var started = Date.now();
+    var tries = 0;
+    function done(ok, text) {
+      status.textContent = text;
+      document.querySelector('[data-bridge-progress]').classList.remove('indeterminate');
+      document.querySelector('[data-bridge-progress] > span').style.width = '100%';
+      document.querySelector('.spinner').style.display = 'none';
+      if (ok) { next.classList.remove('disabled'); setTimeout(function () { location.href = root.dataset.nextUrl; }, 1500); }
+    }
+    function attempt() {
+      tries += 1;
+      fetch('/healthz', { cache: 'no-store' }).then(function (r) {
+        if (!r.ok) throw new Error('not ready');
+        return fetch(root.dataset.confirmUrl, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data.ok) done(true, 'Сеть работает и подтверждена. Машины будут в вашей домашней сети.');
+        else done(false, data.message || 'Не удалось подтвердить сеть');
+      }).catch(function () {
+        if (Date.now() - started > 150000) { done(false, 'Сервер не отвечает. Через 2 минуты он вернёт прежнюю сеть — обновите страницу.'); return; }
+        status.textContent = 'Ждём, пока сервер снова ответит… (' + Math.round((Date.now() - started) / 1000) + ' с)';
+        setTimeout(attempt, tries < 5 ? 3000 : 5000);
+      });
+    }
+    setTimeout(attempt, 4000);
+  })();
+</script>
+{% endblock %}

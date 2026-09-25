@@ -475,3 +475,46 @@
     flashToast();
   });
 })();
+
+/* Setup wizard: live progress of the first-boot installation. */
+(() => {
+  'use strict';
+  document.addEventListener('DOMContentLoaded', () => {
+    const root = document.querySelector('[data-setup-install]');
+    if (!root) return;
+    const list = root.querySelector('[data-setup-steps]');
+    const log = root.querySelector('[data-setup-log]');
+    const status = document.querySelector('[data-setup-status]');
+    const next = document.querySelector('[data-setup-next]');
+    const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-${name}"></use></svg>`;
+    let announced = root.dataset.installed === '1';
+    async function poll() {
+      try {
+        const response = await fetch('/api/setup/state', { cache: 'no-store' });
+        if (!response.ok) return;
+        const { state } = await response.json();
+        if (state.steps && state.steps.length) {
+          list.innerHTML = state.steps.map((item) => {
+            const tone = item.status === 'done' ? 'success' : item.status === 'error' ? 'danger' : item.status === 'running' ? 'warning' : '';
+            const mark = item.status === 'done' ? icon('circle-check') : item.status === 'error' ? icon('circle-x') : item.status === 'running' ? '<span class="spinner" style="width:18px;height:18px;margin-top:2px"></span>' : icon('circle-dot');
+            const detail = item.status === 'running' && state.message ? `<span>${escapeHtml(state.message)}</span>` : '';
+            return `<div class="check-item ${tone}">${mark}<div><strong>${escapeHtml(item.title)}</strong>${detail}</div></div>`;
+          }).join('');
+        }
+        if (log && state.log_tail) { const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40; log.textContent = state.log_tail; if (atBottom) log.scrollTop = log.scrollHeight; }
+        if (state.installed) {
+          next.classList.remove('disabled');
+          status.textContent = 'Всё установлено';
+          if (!announced) { announced = true; window.vToast && window.vToast('Компоненты установлены'); setTimeout(() => { location.href = root.dataset.next; }, 2000); }
+        } else if (state.stage === 'waiting-network') {
+          status.textContent = 'Ждём подключение к интернету…';
+        } else if (state.stage === 'error') {
+          status.textContent = 'Ошибка установки — повторим автоматически';
+        }
+      } catch (_) {}
+    }
+    poll();
+    setInterval(poll, 3000);
+  });
+})();

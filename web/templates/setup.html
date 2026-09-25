@@ -1,0 +1,241 @@
+{% extends "setup_base.html" %}
+{% from "_ui.html" import icon, badge, alert, meter %}
+
+{% block step %}
+{# ============================================================ install #}
+{% if step == 'install' %}
+  <div class="card-header"><div><h2>Настраиваем сервер</h2><p>Устанавливаются компоненты виртуализации. Обычно это занимает 5–15 минут — можно оставить страницу открытой, дальше всё произойдёт само.</p></div></div>
+  <div class="card-body stack" data-setup-install data-installed="{{ '1' if state.installed else '0' }}" data-next="/setup/welcome">
+    {% if state.stage == 'error' %}
+      {{ alert('danger', state.message or 'Установка остановилась с ошибкой. Она будет повторена автоматически через минуту.', 'Что-то пошло не так') }}
+    {% elif state.stage == 'waiting-network' %}
+      {{ alert('warning', 'Подключите сервер к интернету кабелем или настройте Wi-Fi — установка продолжится сама, ничего нажимать не нужно.', 'Нет доступа в интернет') }}
+    {% endif %}
+    <div class="checklist" data-setup-steps>
+      {% for item in state.steps %}
+        <div class="check-item {{ 'success' if item.status == 'done' else 'danger' if item.status == 'error' else 'warning' if item.status == 'running' else '' }}">
+          {% if item.status == 'done' %}{{ icon('circle-check') }}{% elif item.status == 'error' %}{{ icon('circle-x') }}{% elif item.status == 'running' %}<span class="spinner" style="width:18px;height:18px;margin-top:2px"></span>{% else %}{{ icon('circle-dot') }}{% endif %}
+          <div><strong>{{ item.title }}</strong>{% if item.status == 'running' and state.message %}<span>{{ state.message }}</span>{% endif %}</div>
+        </div>
+      {% else %}
+        <div class="check-item"><span class="spinner" style="width:18px;height:18px"></span><div><strong>Подготовка…</strong></div></div>
+      {% endfor %}
+    </div>
+    <details class="advanced">
+      <summary>{{ icon('terminal', 'icon-sm') }}Что происходит<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+      <div class="advanced-body"><pre class="terminal" style="max-height:260px" data-setup-log>{{ state.log_tail or 'Журнал пока пуст.' }}</pre></div>
+    </details>
+  </div>
+  <div class="card-footer">
+    <span class="subtle small" style="margin-right:auto" data-setup-status>{{ 'Всё установлено' if state.installed else 'Продолжим автоматически, когда установка завершится' }}</span>
+    <a class="btn btn-primary {{ '' if state.installed else 'disabled' }}" href="/setup/welcome" data-setup-next>Продолжить{{ icon('arrow-right') }}</a>
+  </div>
+
+{# ============================================================ welcome #}
+{% elif step == 'welcome' %}
+  <div class="card-header"><div><h2>Добро пожаловать в Virtuality</h2><p>Проверим сервер и зададим время. Дальше — пять коротких шагов.</p></div></div>
+  <form method="post" action="/setup/welcome">
+    <div class="card-body stack">
+      <div class="kv">
+        <div><span>Сервер</span><strong>{{ hardware.hostname }}</strong></div>
+        <div><span>Процессор</span><strong>{{ hardware.cpu_count }} {{ plural(hardware.cpu_count, 'ядро', 'ядра', 'ядер') }}</strong></div>
+        <div><span>Память</span><strong>{{ hardware.mem_total|format_bytes }}</strong></div>
+        <div><span>Свободно для машин</span><strong>{{ hardware.disk_free|format_bytes }}</strong></div>
+      </div>
+      {% if hardware.kvm %}
+        {{ alert('success', 'Аппаратное ускорение включено — машины будут работать быстро.', 'Виртуализация готова') }}
+      {% else %}
+        {{ alert('warning', 'Машины будут работать очень медленно. Перезагрузите сервер, войдите в BIOS/UEFI (обычно клавиша Del или F2) и включите Intel VT-x / AMD-V (может называться SVM Mode или Virtualization Technology). Продолжить можно и без этого.', 'Аппаратное ускорение выключено') }}
+      {% endif %}
+      <div class="field">
+        <label for="timezone">Часовой пояс</label>
+        <select class="select" id="timezone" name="timezone">
+          <optgroup label="Популярные">
+            {% for tz in timezones.popular %}<option value="{{ tz }}" {% if tz == timezones.current %}selected{% endif %}>{{ tz }}</option>{% endfor %}
+          </optgroup>
+          <optgroup label="Все">
+            {% for tz in timezones.all %}<option value="{{ tz }}" {% if tz == timezones.current %}selected{% endif %}>{{ tz }}</option>{% endfor %}
+          </optgroup>
+        </select>
+        <span class="hint">Сейчас на сервере: {{ timezones.current }}. От пояса зависят время в журналах и час ночного обновления.</span>
+      </div>
+    </div>
+    <div class="card-footer"><a class="btn btn-ghost" href="/setup/skip" style="margin-right:auto">Пропустить мастер</a><button class="btn btn-primary">Продолжить{{ icon('arrow-right') }}</button></div>
+  </form>
+
+{# ============================================================ account #}
+{% elif step == 'account' %}
+  <div class="card-header"><div><h2>Администратор</h2><p>В панель входят по имени и паролю пользователя сервера. Пароль нигде не сохраняется.</p></div></div>
+  <form method="post" action="/setup/account">
+    <div class="card-body stack">
+      <div class="upload-file"><span class="list-icon brand">{{ icon('user') }}</span><div class="grow"><strong>{{ auth_user }}</strong><span class="subtle small" style="display:block">Пользователь для входа в панель и по SSH</span></div>{{ badge('Администратор', 'brand', False) }}</div>
+      <details class="advanced" {% if error %}open{% endif %}>
+        <summary>{{ icon('lock', 'icon-sm') }}Сменить пароль<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+        <div class="advanced-body form-grid">
+          <div class="form-row">
+            <div class="field"><label for="password">Новый пароль</label><input class="input" id="password" type="password" name="password" minlength="6" autocomplete="new-password"></div>
+            <div class="field"><label for="password2">Ещё раз</label><input class="input" id="password2" type="password" name="password2" minlength="6" autocomplete="new-password"></div>
+          </div>
+          <span class="hint">Не короче 6 символов. Этот же пароль будет действовать для SSH и консоли сервера.</span>
+        </div>
+      </details>
+      <p class="subtle small">{{ icon('info', 'icon-sm') }} Если пароль забудется, его можно сбросить с монитора и клавиатуры сервера: <code>sudo virtuality-ctl passwd</code>.</p>
+    </div>
+    <div class="card-footer"><a class="btn btn-ghost" href="/setup/welcome" style="margin-right:auto">{{ icon('arrow-left') }}Назад</a><button class="btn btn-primary">Продолжить{{ icon('arrow-right') }}</button></div>
+  </form>
+
+{# ============================================================ access #}
+{% elif step == 'access' %}
+  <div class="card-header"><div><h2>Доступ к панели</h2><p>Как вы будете открывать Virtuality в браузере.</p></div></div>
+  <form method="post" action="/setup/access">
+    <div class="card-body stack">
+      <div class="options" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
+        <label class="option">
+          <input type="radio" name="tls" value="1" {% if tls %}checked{% endif %}>
+          <span class="option-body">
+            <span class="option-top"><span class="option-icon">{{ icon('shield-check') }}</span>{{ badge('Рекомендуем', 'brand', False) }}</span>
+            <span class="option-title">Защищённое соединение (HTTPS)</span>
+            <span class="option-text">Пароль и данные шифруются. Сертификат создаётся на сервере, поэтому браузер один раз спросит, доверять ли ему — это нормально, нажмите «Продолжить».</span>
+          </span>
+        </label>
+        <label class="option">
+          <input type="radio" name="tls" value="0" {% if not tls %}checked{% endif %}>
+          <span class="option-body">
+            <span class="option-top"><span class="option-icon">{{ icon('globe') }}</span><span class="option-check"></span></span>
+            <span class="option-title">Обычное соединение (HTTP)</span>
+            <span class="option-text">Без предупреждений браузера. Подходит только внутри домашней сети, которой вы доверяете.</span>
+          </span>
+        </label>
+      </div>
+      <details class="advanced">
+        <summary>{{ icon('wrench', 'icon-sm') }}Порт панели<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+        <div class="advanced-body form-grid">
+          <div class="field" style="max-width:220px"><label for="port">Порт</label><input class="input" id="port" type="number" name="port" min="1" max="65535" value="{{ port }}"><span class="hint">Стандартный — 8088. Меняйте, только если он занят.</span></div>
+          <p class="subtle small">С HTTPS панель отвечает на порту 8443, а по обычному адресу автоматически перенаправляет на защищённый.</p>
+        </div>
+      </details>
+      <p class="subtle small">{{ icon('info', 'icon-sm') }} Настройки применятся на последнем шаге, после чего панель перезапустится и откроется по новому адресу.</p>
+    </div>
+    <div class="card-footer"><a class="btn btn-ghost" href="/setup/account" style="margin-right:auto">{{ icon('arrow-left') }}Назад</a><button class="btn btn-primary">Продолжить{{ icon('arrow-right') }}</button></div>
+  </form>
+
+{# ============================================================ network #}
+{% elif step == 'network' %}
+  <div class="card-header"><div><h2>Сеть машин</h2><p>Как виртуальные машины будут видны в сети. Это можно изменить позже в разделе «Сеть и доступ».</p></div></div>
+  <form method="post" action="/setup/network">
+    <div class="card-body stack">
+      {% if net.on_bridge %}
+        {{ alert('success', 'Машины будут получать адреса от вашего роутера, как обычные устройства.', 'Сервер уже подключён через мост br0') }}
+      {% elif net.wireless %}
+        {{ alert('info', 'Сервер подключён по Wi-Fi, поэтому машины не могут появиться в домашней сети напрямую — они выйдут в интернет через сервер (NAT). Подключите кабель, если нужен режим домашней сети.') }}
+      {% elif net.is_vps %}
+        {{ alert('info', 'Похоже, это VPS или облачный сервер: у него публичный адрес. Машины будут скрыты за сервером, а нужные сервисы вы откроете наружу в разделе «Сеть и доступ».') }}
+      {% endif %}
+      <div class="options" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
+        <label class="option">
+          <input type="radio" name="mode" value="nat" {% if net.recommended == 'nat' and not net.on_bridge %}checked{% endif %}>
+          <span class="option-body">
+            <span class="option-top"><span class="option-icon">{{ icon('shield-check') }}</span>{% if net.recommended == 'nat' %}{{ badge('Рекомендуем', 'brand', False) }}{% else %}<span class="option-check"></span>{% endif %}</span>
+            <span class="option-title">Отдельная сеть (NAT)</span>
+            <span class="option-text">Машины получают адреса 192.168.100.x и выходят в интернет через сервер. Снаружи их не видно, пока вы сами не откроете доступ. Работает везде.</span>
+          </span>
+        </label>
+        <label class="option">
+          <input type="radio" name="mode" value="bridge" {% if net.recommended == 'bridge' or net.on_bridge %}checked{% endif %} {% if not net.bridge_possible and not net.on_bridge %}disabled{% endif %}>
+          <span class="option-body">
+            <span class="option-top"><span class="option-icon">{{ icon('network') }}</span>{% if net.recommended == 'bridge' %}{{ badge('Рекомендуем', 'brand', False) }}{% else %}<span class="option-check"></span>{% endif %}</span>
+            <span class="option-title">Домашняя сеть (мост)</span>
+            <span class="option-text">Машины становятся устройствами вашей сети: адрес от роутера, видны с телефона и ноутбука, работают Home Assistant, медиасерверы, принтеры.{% if not net.bridge_possible and not net.on_bridge %} Недоступно: {{ 'сервер на Wi-Fi' if net.wireless else 'проводной интерфейс не найден' }}.{% endif %}</span>
+          </span>
+        </label>
+      </div>
+      {% if net.bridge_possible %}
+        <div class="alert info">{{ icon('info') }}<div><strong>Как включается домашняя сеть</strong>Интерфейс {{ net.interface }} ({{ net.address or 'адрес по DHCP' }}) объединится в мост br0 с тем же MAC-адресом, поэтому адрес сервера не изменится. Если панель не ответит в течение 2 минут, сервер сам вернёт прежнюю сеть.</div></div>
+      {% endif %}
+    </div>
+    <div class="card-footer"><a class="btn btn-ghost" href="/setup/access" style="margin-right:auto">{{ icon('arrow-left') }}Назад</a><button class="btn btn-primary" data-busy="Настраиваем сеть…">Продолжить{{ icon('arrow-right') }}</button></div>
+  </form>
+
+{# ============================================================ storage #}
+{% elif step == 'storage' %}
+  <div class="card-header"><div><h2>Хранилище</h2><p>Где будут лежать диски машин, образы и резервные копии.</p></div></div>
+  <form method="post" action="/setup/storage">
+    <div class="card-body stack">
+      <div class="kv">
+        <div><span>Папка</span><strong class="mono">{{ storage.path }}</strong></div>
+        <div><span>Свободно</span><strong>{{ storage.free|format_bytes }} из {{ storage.total|format_bytes }}</strong></div>
+        <div><span>Диск</span><strong>{{ storage.source or 'системный' }}{% if storage.dedicated %} (отдельный){% endif %}</strong></div>
+      </div>
+      {% if storage.spare %}
+        <div class="alert brand">{{ icon('sparkles') }}<div><strong>Найден свободный диск</strong>Его можно отдать под машины целиком: системный диск останется для Ubuntu, а место для машин будет отдельным.</div></div>
+        <div class="options">
+          <label class="option">
+            <input type="radio" name="disk" value="keep" checked>
+            <span class="option-body"><span class="option-top"><span class="option-icon">{{ icon('hard-drive') }}</span><span class="option-check"></span></span><span class="option-title">Оставить как есть</span><span class="option-text">Машины на системном диске: {{ storage.free|format_bytes }} свободно</span></span>
+          </label>
+          {% for disk in storage.spare %}
+            <label class="option">
+              <input type="radio" name="disk" value="{{ disk.path }}">
+              <span class="option-body"><span class="option-top"><span class="option-icon">{{ icon('database') }}</span><span class="option-check"></span></span><span class="option-title">{{ disk.model }} · {{ disk.size|format_bytes }}</span><span class="option-text">{{ disk.path }}{% if disk.tran %} · {{ disk.tran|upper }}{% endif %}. Диск будет отформатирован — все данные на нём пропадут.</span></span>
+            </label>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Свободных дисков не найдено — машины будут храниться на системном диске. Если позже добавите диск, его можно подключить в Настройках.</p>
+      {% endif %}
+    </div>
+    <div class="card-footer"><a class="btn btn-ghost" href="/setup/network" style="margin-right:auto">{{ icon('arrow-left') }}Назад</a><button class="btn btn-primary" data-busy="Готовим диск…">Продолжить{{ icon('arrow-right') }}</button></div>
+  </form>
+
+{# ============================================================ updates #}
+{% elif step == 'updates' %}
+  <div class="card-header"><div><h2>Обновления</h2><p>Virtuality умеет обновляться сама. Машины во время обновления продолжают работать.</p></div></div>
+  <form method="post" action="/setup/updates">
+    <div class="card-body stack">
+      <div class="options" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
+        <label class="option">
+          <input type="radio" name="auto_update" value="1" {% if choices.get('auto_update', settings.VIRTUALITY_AUTO_UPDATE) == '1' %}checked{% endif %}>
+          <span class="option-body"><span class="option-top"><span class="option-icon">{{ icon('refresh-cw') }}</span>{{ badge('Рекомендуем', 'brand', False) }}</span><span class="option-title">Обновлять автоматически</span><span class="option-text">Ночью, около 4 часов по времени сервера. Только выпущенные версии, с проверкой и возможностью отката.</span></span>
+        </label>
+        <label class="option">
+          <input type="radio" name="auto_update" value="0" {% if choices.get('auto_update', settings.VIRTUALITY_AUTO_UPDATE) == '0' %}checked{% endif %}>
+          <span class="option-body"><span class="option-top"><span class="option-icon">{{ icon('wrench') }}</span><span class="option-check"></span></span><span class="option-title">Только вручную</span><span class="option-text">Панель покажет, что вышла новая версия, а обновите вы сами в разделе «Обновления».</span></span>
+        </label>
+      </div>
+      <details class="advanced">
+        <summary>{{ icon('layers', 'icon-sm') }}Канал обновлений<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+        <div class="advanced-body field" style="max-width:360px">
+          <select class="select" name="channel">
+            <option value="stable" {% if choices.get('channel', settings.VIRTUALITY_UPDATE_CHANNEL) == 'stable' %}selected{% endif %}>Стабильный — выпущенные версии</option>
+            <option value="main" {% if choices.get('channel', settings.VIRTUALITY_UPDATE_CHANNEL) == 'main' %}selected{% endif %}>Ранний доступ — все изменения разработчиков</option>
+          </select>
+        </div>
+      </details>
+    </div>
+    <div class="card-footer"><a class="btn btn-ghost" href="/setup/storage" style="margin-right:auto">{{ icon('arrow-left') }}Назад</a><button class="btn btn-primary">Продолжить{{ icon('arrow-right') }}</button></div>
+  </form>
+
+{# ============================================================ finish #}
+{% elif step == 'finish' %}
+  <div class="card-header"><div><h2>Всё готово</h2><p>Проверьте и нажмите «Завершить». {% if restart_needed %}Панель перезапустится и откроется по новому адресу.{% endif %}</p></div></div>
+  <form method="post" action="/setup/finish">
+    <div class="card-body stack">
+      <div class="card" style="box-shadow:none">
+        <div class="summary-row" style="padding:12px 16px"><span>Адрес панели</span><strong class="mono">{{ final_url }}</strong></div>
+        <div class="summary-row" style="padding:12px 16px"><span>Администратор</span><strong>{{ auth_user }}{% if choices.get('password_changed') %} · пароль обновлён{% endif %}</strong></div>
+        <div class="summary-row" style="padding:12px 16px"><span>Защищённое соединение</span><strong>{{ 'Включено (HTTPS)' if choices.get('tls', '1')|string == '1' else 'Выключено' }}</strong></div>
+        <div class="summary-row" style="padding:12px 16px"><span>Сеть машин</span><strong>{{ 'Домашняя сеть (мост br0)' if choices.get('network') == 'bridge' or net.on_bridge else 'Отдельная сеть (NAT)' }}</strong></div>
+        <div class="summary-row" style="padding:12px 16px"><span>Хранилище</span><strong>{{ storage.free|format_bytes }} свободно{% if storage.dedicated %} · отдельный диск{% endif %}</strong></div>
+        <div class="summary-row" style="padding:12px 16px"><span>Обновления</span><strong>{{ 'Автоматически' if choices.get('auto_update', settings.VIRTUALITY_AUTO_UPDATE)|string == '1' else 'Вручную' }}{% if choices.get('channel', settings.VIRTUALITY_UPDATE_CHANNEL) == 'main' %} · ранний доступ{% endif %}</strong></div>
+        <div class="summary-row" style="padding:12px 16px"><span>Часовой пояс</span><strong>{{ timezone }}</strong></div>
+        <div class="summary-row" style="padding:12px 16px"><span>Ускорение</span><strong>{{ 'KVM включён' if hardware.kvm else 'Выключено — машины будут медленными' }}</strong></div>
+      </div>
+      {% if choices.get('tls', '1')|string == '1' %}
+        <div class="alert info">{{ icon('shield-check') }}<div><strong>При первом открытии по HTTPS браузер предупредит о сертификате</strong>Нажмите «Дополнительно» → «Перейти на сайт» (в Chrome) или «Принять риск» (в Firefox). Это происходит один раз.</div></div>
+      {% endif %}
+      <p class="subtle small">Что дальше: загрузите установочный образ или выберите готовую систему из каталога и создайте первую машину. Все настройки можно изменить в разделе «Настройки».</p>
+    </div>
+    <div class="card-footer"><a class="btn btn-ghost" href="/setup/updates" style="margin-right:auto">{{ icon('arrow-left') }}Назад</a><button class="btn btn-primary btn-lg" data-busy="Применяем…">{{ icon('check') }}Завершить настройку</button></div>
+  </form>
+{% endif %}
+{% endblock %}

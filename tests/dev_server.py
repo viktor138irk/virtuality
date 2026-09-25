@@ -4,6 +4,7 @@
     python3 tests/dev_server.py [port]      # login: tester / any password
 """
 import json
+import os
 import sys
 import tempfile
 import uuid
@@ -35,6 +36,24 @@ def seed(root: Path) -> None:
     for module in (app, network_core, host_profile):
         module.run_cmd = conftest.fake_run_cmd
     app.auth.verify_password = lambda user, password: True
+    import nodectl
+
+    nodectl.CONFIG_DIR = dirs["config"]
+    nodectl.SETUP_STATE = dirs["config"] / "setup.json"
+    nodectl.SETUP_DONE = dirs["config"] / "setup_done"
+    nodectl.WIZARD_FILE = dirs["config"] / "wizard.json"
+    stage = os.environ.get("VIRTUALITY_DEV_SETUP", "")
+    if stage:
+        # VIRTUALITY_DEV_SETUP=installing|done shows the setup wizard in the demo.
+        steps = [("panel", "Панель управления", "done"), ("network-wait", "Подключение к интернету", "done"), ("virtualization", "KVM, QEMU и libvirt", "running" if stage == "installing" else "done"), ("tools", "Инструменты диагностики", "pending" if stage == "installing" else "done"), ("finish", "Завершение", "pending" if stage == "installing" else "done")]
+        nodectl.SETUP_STATE.write_text(json.dumps({"stage": "installing" if stage == "installing" else "done", "message": "Устанавливаем qemu-system-x86 (14 из 61)…", "steps": [{"id": i, "title": t, "status": s} for i, t, s in steps]}))
+        nodectl.FIRSTBOOT_LOG = dirs["config"] / "firstboot.log"
+        nodectl.FIRSTBOOT_LOG.write_text("[2026-09-25 14:02:11] [virtuality-firstboot] step 1/4: web panel\n[2026-09-25 14:02:40] [virtuality-firstboot] step 2/4: virtualization node (KVM, libvirt)\nGet:14 http://archive.ubuntu.com/ubuntu resolute/main amd64 qemu-system-x86 amd64 1:10.2.1+ds-1ubuntu3 [9 812 kB]\n")
+        if not nodectl.ctl_available():
+            nodectl.spare_disks = lambda: [{"path": "/dev/sdb", "name": "sdb", "size": 2 * 1024 ** 4, "model": "WD Red 2TB", "tran": "sata"}]
+            nodectl.network_facts = lambda: {"interface": "enp3s0", "gateway": "192.168.1.1", "address": "192.168.1.10", "prefix": 24, "mac": "aa:bb:cc:dd:ee:ff", "wireless": False, "private": True, "is_vps": False, "virt": "none", "bridge_present": False, "on_bridge": False, "recommended": "bridge", "revert_armed": False, "bridge_possible": True}
+            nodectl.hardware_summary = lambda: {"hostname": "home-server", "cpu_model": "Intel Core i5-12400", "cpu_count": 6, "mem_total": 32 * 1024 ** 3, "disk_total": 480 * 1024 ** 3, "disk_free": 401 * 1024 ** 3, "kvm": True}
+            nodectl.set_timezone = lambda tz: (True, tz)
 
     for name, size in (("ubuntu-26.04-live-server-amd64.iso", 3), ("debian-13.7.0-amd64-netinst.iso", 1)):
         with (dirs["iso"] / name).open("wb") as handle:
