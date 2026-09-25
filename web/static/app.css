@@ -295,3 +295,26 @@ body.upload-active .v-nav a, body.upload-active .top-meta a, body.upload-active 
   table { display: block; overflow-x: auto; border-spacing: 0 8px; }
   .icon-action em { display: none; }
 }
+
+
+.resource-mini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-bottom: 10px; }
+.resource-mini-grid div { display: grid; gap: 3px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }
+.resource-mini-grid span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.resource-mini-grid b { font-size: 14px; overflow-wrap: anywhere; }
+.boot-order-list { display: grid; gap: 8px; }
+.boot-order-item { display: flex; align-items: center; gap: 10px; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); cursor: grab; }
+.boot-order-item:active { cursor: grabbing; }
+.boot-order-item.dragging { opacity: .55; border-color: var(--accent); }
+.boot-order-item small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.drag-handle { color: var(--muted); font-weight: 900; }
+@media (max-width: 1180px) { .three { grid-template-columns: 1fr; } .resource-mini-grid { grid-template-columns: 1fr; } }
+
+/* Virtuality live status + toast layer */
+#v-toast-wrap { position: fixed; top: 14px; right: 14px; z-index: 10000; display: grid; gap: 8px; width: min(360px, calc(100vw - 28px)); pointer-events: none; }
+.v-toast { transform: translateY(-8px); opacity: 0; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--text); box-shadow: 0 12px 32px rgba(15,23,42,.18); font-size: 13px; font-weight: 800; transition: .22s ease; }
+.v-toast.show { transform: translateY(0); opacity: 1; }
+.v-toast.ok { border-color: rgba(22,163,74,.28); box-shadow: 0 12px 32px rgba(22,163,74,.16); }
+.v-toast.warn { border-color: rgba(217,119,6,.32); box-shadow: 0 12px 32px rgba(217,119,6,.16); }
+.v-toast.err { border-color: rgba(220,38,38,.32); box-shadow: 0 12px 32px rgba(220,38,38,.16); }
+.live-badge { margin-left: 10px; vertical-align: middle; }
+
