@@ -102,3 +102,41 @@ def test_update_not_offered_when_local_is_newer(tmp_path, monkeypatch, data_dirs
     git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "upstream", cwd=remote)
     git("reset", "-q", "--hard", "origin/main", cwd=local)
     assert update_core.check_updates(fetch=True)["has_update"] is True
+
+
+def test_stable_channel_follows_release_tags(tmp_path, monkeypatch, data_dirs):
+    import subprocess
+
+    def git(*args, cwd):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True, capture_output=True)
+
+    remote, local = tmp_path / "remote", tmp_path / "local"
+    remote.mkdir()
+    git("init", "-q", "-b", "main", cwd=remote)
+    (remote / "VERSION").write_text("0.10.0\n")
+    git("add", "VERSION", cwd=remote)
+    git("commit", "-q", "-m", "0.10.0", cwd=remote)
+    git("clone", "-q", str(remote), str(local), cwd=tmp_path)
+    monkeypatch.setattr(update_core, "SOURCE_DIR", local)
+    monkeypatch.setattr(update_core, "NODE_ENV", tmp_path / "web.env")
+    monkeypatch.delenv("VIRTUALITY_UPDATE_CHANNEL", raising=False)
+    assert update_core.update_channel() == "stable"
+
+    # Work on main without a release: stable follows main until the first tag exists.
+    (remote / "VERSION").write_text("0.11.0\n")
+    git("commit", "-q", "-am", "0.11.0", cwd=remote)
+    data = update_core.check_updates(fetch=True)
+    assert data["has_update"] and data["target"] == "main"
+
+    # With a release tag, stable offers the tag and ignores newer commits on main.
+    git("tag", "v0.11.0", cwd=remote)
+    git("commit", "-q", "--allow-empty", "-m", "work in progress", cwd=remote)
+    data = update_core.check_updates(fetch=True)
+    assert data["channel"] == "stable" and data["target"] == "v0.11.0" and data["latest_version"] == "0.11.0" and data["has_update"]
+    git("checkout", "-q", "v0.11.0", cwd=local)
+    assert update_core.check_updates(fetch=True)["has_update"] is False
+
+    # The early-access channel sees every change on main.
+    (tmp_path / "web.env").write_text("VIRTUALITY_UPDATE_CHANNEL=main\n")
+    data = update_core.check_updates(fetch=True)
+    assert data["channel"] == "main" and data["target"] == "main" and data["has_update"]

@@ -153,7 +153,8 @@ def detect_host_profile() -> dict[str, Any]:
     }
     checks = []
     checks.append({'name': 'Аппаратное ускорение (KVM)', 'ok': data['kvm_device'], 'level': 'ok' if data['kvm_device'] else 'warn', 'hint': 'KVM недоступен. На физическом сервере включи Intel VT-x / AMD-V в BIOS/UEFI; на VPS проверь nested virtualization. Пока доступен медленный QEMU fallback.'})
-    checks.append({'name': 'Поддержка виртуализации процессором', 'ok': virtualization_flags > 0, 'level': 'ok' if virtualization_flags > 0 else 'warn', 'hint': 'CPU-флаги vmx/svm не видны. Для реального сервера это обычно значит, что виртуализация выключена в BIOS/UEFI.'})
+    if not is_arm:  # ARM CPUs have no vmx/svm flags; /dev/kvm above is what matters there
+        checks.append({'name': 'Поддержка виртуализации процессором', 'ok': virtualization_flags > 0, 'level': 'ok' if virtualization_flags > 0 else 'warn', 'hint': 'CPU-флаги vmx/svm не видны. Для реального сервера это обычно значит, что виртуализация выключена в BIOS/UEFI.'})
     if is_arm:
         checks.append({'name': 'Эмулятор ARM64 (QEMU)', 'ok': data['qemu_system_aarch64'], 'level': 'ok' if data['qemu_system_aarch64'] else 'err', 'hint': 'Пакет qemu-system-arm / qemu-system-aarch64.'})
         checks.append({'name': 'Загрузчик UEFI для ARM64', 'ok': data['uefi_aarch64_hint'], 'level': 'ok' if data['uefi_aarch64_hint'] else 'warn', 'hint': 'Пакет qemu-efi-aarch64 или AAVMF.'})

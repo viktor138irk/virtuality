@@ -1,0 +1,60 @@
+{% from "_ui.html" import icon, logo, alert %}
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{ page_title|default('Мастер настройки') }} — Virtuality</title>
+  <script>
+    (function () {
+      var mode = 'system';
+      try { mode = localStorage.getItem('virtualityTheme') || 'system'; } catch (e) {}
+      var dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/app.css?v={{ app_version }}">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235a48f5'/%3E%3Cpath d='M9 10l7 13 7-13' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body class="setup-page">
+  <header class="setup-top">
+    <a class="logo" href="/"><span class="brand-mark">{{ logo() }}</span><span class="brand-name">Virtuality<small>Мастер настройки</small></span></a>
+    <div class="row">
+      <span class="subtle small">{{ user }}</span>
+      <button type="button" class="btn btn-sm btn-icon btn-ghost" data-theme-toggle aria-label="Сменить тему">{{ icon('moon') }}</button>
+    </div>
+  </header>
+  <main class="setup-main">
+    {% block rail %}
+    {% if steps is defined %}
+    <aside class="setup-rail" aria-label="Шаги">
+      {% for item in steps %}
+        {% set idx = loop.index0 %}
+        <a class="setup-step {{ 'done' if idx < step_index else 'active' if idx == step_index else '' }}" {% if idx < step_index or (state.installed and idx <= step_index) %}href="/setup/{{ item.id }}"{% endif %}>
+          <span class="setup-step-num">{% if idx < step_index %}{{ icon('check', 'icon-sm') }}{% else %}{{ loop.index }}{% endif %}</span>
+          <span><strong>{{ item.title }}</strong><small>{{ item.hint }}</small></span>
+        </a>
+      {% endfor %}
+    </aside>
+    {% endif %}
+    {% endblock %}
+    <section class="setup-content">
+      {% if error %}<div class="alerts">{{ alert('danger', error) }}</div>{% endif %}
+      {% if message %}<div class="alerts">{{ alert('success', message) }}</div>{% endif %}
+      <article class="card setup-card">
+        {% block step %}{% endblock %}
+      </article>
+    </section>
+  </main>
+  <dialog class="dialog" id="confirm-dialog">
+    <form method="dialog">
+      <div class="dialog-body"><div class="dialog-icon">{{ icon('triangle-alert', 'icon-lg') }}</div><div><h3 data-confirm-title>Подтвердите действие</h3><p data-confirm-text></p></div></div>
+      <div class="dialog-actions"><button class="btn" value="cancel">Отмена</button><button class="btn btn-danger" type="button" data-confirm-ok>Продолжить</button></div>
+    </form>
+  </dialog>
+  <div id="toasts" aria-live="polite"></div>
+  <script src="/static/panel.js?v={{ app_version }}" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

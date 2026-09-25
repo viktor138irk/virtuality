@@ -29,8 +29,6 @@ OPERATION_STATES = {
 SERVICE_LABELS = {
     "libvirtd": "Виртуализация",
     "virtlogd": "Журналы машин",
-    "cockpit": "Cockpit",
-    "dashboard": "Экран сервера",
     "web": "Панель управления",
 }
 
@@ -242,3 +240,37 @@ def plural(count: int, one: str, few: str, many: str) -> str:
 
 def port_service(port: int) -> str:
     return WELL_KNOWN_PORTS.get(int(port or 0), "")
+
+
+def format_bytes(value: int | float) -> str:
+    value = float(value or 0)
+    for unit in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
+        if value < 1024 or unit == "ТБ":
+            return f"{value:.0f} {unit}" if value >= 10 or unit == "Б" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.0f} ТБ"
+
+
+def parse_virsh_list_titles(text: str) -> dict[str, str]:
+    """`virsh list --all --title` → {имя: название}. Колонки virsh выровнены
+    пробелами, поэтому название берём по смещению колонки Title из заголовка:
+    так не ломаются состояния с пробелом («shut off») и названия из нескольких слов."""
+    lines = (text or "").splitlines()
+    if not lines:
+        return {}
+    header = lines[0]
+    name_col, title_col = re.search(r"\bName\b", header), re.search(r"\bTitle\b", header)
+    if not name_col or not title_col:
+        return {}
+    titles: dict[str, str] = {}
+    for line in lines[1:]:
+        stripped = line.strip()
+        if not stripped or set(stripped) <= {"-"}:
+            continue
+        name_part = line[name_col.start():].split()
+        if not name_part:
+            continue
+        title = line[title_col.start():].strip()
+        if title:
+            titles[name_part[0]] = title
+    return titles

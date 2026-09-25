@@ -1,0 +1,6 @@
+{#- Две маленькие шкалы (процессор, память) в строке машины на обзоре; panel.js заполняет их из /live/stats. -#}
+{% from "_ui.html" import icon %}
+<div class="vm-meters" data-live-stats="{{ vm.name }}" {% if not s.running %}hidden{% endif %}>
+  <span class="vm-meter" title="Процессор">{{ icon('cpu', 'icon-sm') }}<span class="meter" data-stat="cpu-meter"><span data-stat="cpu-bar" style="--value:0%"></span></span><b data-stat="cpu">—</b></span>
+  <span class="vm-meter" title="Память">{{ icon('memory-stick', 'icon-sm') }}<span class="meter" data-stat="mem-meter"><span data-stat="mem-bar" style="--value:0%"></span></span><b data-stat="mem">—</b></span>
+</div>

@@ -1,5 +1,6 @@
 import json
 import re
+import shlex
 import socket
 import subprocess
 import uuid
@@ -9,6 +10,7 @@ from typing import Any
 CONFIG_DIR = Path('/var/lib/virtuality/config')
 NETWORK_DIR = Path('/var/lib/virtuality/network')
 NFT_DIR = Path('/etc/virtuality/nftables')
+UFW_STATE_FILE = NETWORK_DIR / 'ufw_rules.json'
 PORT_FORWARDS_FILE = NETWORK_DIR / 'port_forwards.json'
 NAT_XML_FILE = NETWORK_DIR / 'virtuality-nat.xml'
 NFT_FILE = NFT_DIR / 'virtuality.nft'
@@ -22,6 +24,13 @@ DHCP_END = '192.168.100.200'
 
 class NetworkError(Exception):
     pass
+
+
+def valid_vm_name(name: str) -> bool:
+    """Same rule as core.valid_vm_name (kept here: this module does not import core)."""
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', name or ''):
+        return False
+    return not name.isdigit() and not re.fullmatch(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', name)
 
 
 def run_cmd(cmd: list[str], timeout: int = 12) -> dict[str, Any]:
@@ -175,6 +184,60 @@ def nat_network_xml() -> str:
 """
 
 
+def stable_mac(vm_name: str) -> str:
+    """Locally administered QEMU MAC derived from the machine name (same name → same address)."""
+    import hashlib
+
+    digest = hashlib.sha1(vm_name.encode()).digest()
+    return '52:54:00:' + ':'.join(f'{b:02x}' for b in digest[:3])
+
+
+def nat_reservations() -> list[dict[str, str]]:
+    """DHCP reservations of the NAT network: [{'name', 'mac', 'ip'}]."""
+    result = run_cmd(['virsh', 'net-dumpxml', NETWORK_NAME], timeout=8)
+    if not result['ok']:
+        return []
+    return [
+        {'mac': m.group(1).lower(), 'name': m.group(2), 'ip': m.group(3)}
+        for m in re.finditer(r"<host\s+mac='([^']+)'\s+name='([^']+)'\s+ip='([^']+)'\s*/>", result['stdout'])
+    ]
+
+
+def _net_update(action: str, host_xml: str) -> dict[str, Any]:
+    base = ['virsh', 'net-update', NETWORK_NAME, action, 'ip-dhcp-host', host_xml]
+    result = run_cmd(base + ['--live', '--config'], timeout=15)
+    if not result['ok'] and 'not active' in (result['stderr'] + result['stdout']).lower():
+        result = run_cmd(base + ['--config'], timeout=15)
+    return result
+
+
+def reserve_nat_address(vm_name: str, mac: str) -> str | None:
+    """Pin the machine to one NAT address for its whole life; None when libvirt refused."""
+    if not valid_vm_name(vm_name):
+        return None
+    reservations = nat_reservations()
+    for item in reservations:
+        if item['name'] == vm_name:
+            if item['mac'] != mac.lower():
+                _net_update('modify', f"<host mac='{mac}' name='{vm_name}' ip='{item['ip']}'/>")
+            return item['ip']
+    taken = {item['ip'] for item in reservations}
+    leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
+    taken.update(re.findall(r'\b(192\.168\.100\.\d+)/', leases['stdout'] if leases['ok'] else ''))
+    start, end = int(DHCP_START.rsplit('.', 1)[1]), int(DHCP_END.rsplit('.', 1)[1])
+    free = next((f'192.168.100.{last}' for last in range(start, end + 1) if f'192.168.100.{last}' not in taken), None)
+    if not free:
+        return None
+    result = _net_update('add-last', f"<host mac='{mac}' name='{vm_name}' ip='{free}'/>")
+    return free if result['ok'] else None
+
+
+def release_nat_address(vm_name: str) -> None:
+    for item in nat_reservations():
+        if item['name'] == vm_name:
+            _net_update('delete', f"<host mac='{item['mac']}' name='{item['name']}' ip='{item['ip']}'/>")
+
+
 def libvirt_network_info() -> dict[str, Any]:
     info = run_cmd(['virsh', 'net-info', NETWORK_NAME], timeout=8)
     leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
@@ -304,13 +367,16 @@ def resolve_vm_ip(vm_name: str) -> str | None:
         if match:
             return match.group(1)
 
+    macs = set(vm_mac_addresses(vm_name))
+    if not macs:
+        # Without the machine's MAC any lease would be a guess — possibly another machine's address.
+        return None
     leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
     if not leases['ok']:
         return None
-    macs = set(vm_mac_addresses(vm_name))
     for line in leases['stdout'].splitlines():
         low = line.lower()
-        if macs and not any(mac in low for mac in macs):
+        if not any(mac in low for mac in macs):
             continue
         match = re.search(r'\b(192\.168\.100\.\d+|\d+\.\d+\.\d+\.\d+)/\d+', line)
         if match:
@@ -327,7 +393,7 @@ def tcp_connect_check(host: str, port: int, timeout: float = 2.0) -> dict[str, A
 
 
 def add_port_forward(vm_name: str, guest_ip: str, external_port: Any, guest_port: Any, protocol: str, note: str = '') -> dict[str, Any]:
-    if not vm_name or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', vm_name):
+    if not valid_vm_name(vm_name):
         raise NetworkError('Некорректное имя VM')
     if guest_ip == 'auto':
         resolved_ip = resolve_vm_ip(vm_name)
@@ -415,6 +481,25 @@ def render_nft_rules() -> str:
     return '\n'.join(lines) + '\n'
 
 
+def ufw_rules_for(items: list[dict[str, Any]], ext: str) -> list[list[str]]:
+    rules: list[list[str]] = []
+    for raw_item in items:
+        item = normalize_forward(raw_item)
+        guest_port = iptables_port_value(item['guest_port_start'], item['guest_port_end'])
+        external_port = iptables_port_value(item['external_port_start'], item['external_port_end'])
+        rules.append(['route', 'allow', 'in', 'on', ext, 'out', 'on', forward_guest_interface(item), 'to', item['guest_ip'], 'port', guest_port, 'proto', item['protocol']])
+        rules.append(['allow', f"{external_port}/{item['protocol']}"])
+    return rules
+
+
+def load_ufw_state() -> list[list[str]]:
+    try:
+        data = json.loads(UFW_STATE_FILE.read_text())
+        return [list(map(str, rule)) for rule in data] if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
 def apply_ufw_route_rules(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ext = external_interface()
     results: list[dict[str, Any]] = []
@@ -423,20 +508,16 @@ def apply_ufw_route_rules(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     status = run_cmd(['ufw', 'status'], timeout=8)
     if 'Status: active' not in status['stdout']:
         return results
-    for raw_item in items:
-        item = normalize_forward(raw_item)
-        guest_port = iptables_port_value(item['guest_port_start'], item['guest_port_end'])
-        external_port = iptables_port_value(item['external_port_start'], item['external_port_end'])
-        cmd = [
-            'ufw', 'route', 'allow',
-            'in', 'on', ext,
-            'out', 'on', forward_guest_interface(item),
-            'to', item['guest_ip'],
-            'port', guest_port,
-            'proto', item['protocol'],
-        ]
-        results.append(run_cmd(cmd, timeout=15))
-        results.append(run_cmd(['ufw', 'allow', f"{external_port}/{item['protocol']}"], timeout=15))
+    wanted = ufw_rules_for(items, ext)
+    # Rules of forwards that were removed (or moved to another port) are deleted; ufw only keeps what is still wanted.
+    for rule in load_ufw_state():
+        if rule not in wanted:
+            delete = ['ufw', 'route', 'delete', *rule[1:]] if rule[0] == 'route' else ['ufw', 'delete', *rule]
+            results.append(run_cmd(delete, timeout=15))
+    for rule in wanted:
+        results.append(run_cmd(['ufw', *rule], timeout=15))
+    ensure_dirs()
+    UFW_STATE_FILE.write_text(json.dumps(wanted))
     run_cmd(['ufw', 'reload'], timeout=20)
     return results
 
@@ -456,11 +537,28 @@ def ensure_iptables_rule(cmd: list[str]) -> dict[str, Any]:
     return run_cmd(cmd, timeout=10)
 
 
+IPTABLES_TAG = ['-m', 'comment', '--comment', 'virtuality-forward']
+
+
+def clear_iptables_fallback() -> None:
+    """Delete every rule this module added earlier (they carry the virtuality-forward comment)."""
+    for table, chains in (('filter', ['FORWARD']), ('nat', ['PREROUTING', 'POSTROUTING'])):
+        for chain in chains:
+            listing = run_cmd(['iptables', '-t', table, '-S', chain], timeout=8)
+            if not listing['ok']:
+                continue
+            for line in listing['stdout'].splitlines():
+                if 'virtuality-forward' not in line or not line.startswith('-A '):
+                    continue
+                run_cmd(['iptables', '-t', table, '-D', *shlex.split(line)[1:]], timeout=8)
+
+
 def apply_iptables_fallback(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ext = external_interface()
     results: list[dict[str, Any]] = []
     if not run_cmd(['sh', '-lc', 'command -v iptables >/dev/null 2>&1'], timeout=5)['ok']:
         return results
+    clear_iptables_fallback()
     for raw_item in items:
         item = normalize_forward(raw_item)
         proto = item['protocol']
@@ -470,11 +568,11 @@ def apply_iptables_fallback(items: list[dict[str, Any]]) -> list[dict[str, Any]]
         guest_to_port = iptables_dnat_port_value(item['guest_port_start'], item['guest_port_end'])
         guest_to = f"{guest_ip}:{guest_to_port}"
         guest_iface = forward_guest_interface(item)
-        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', ext, '-o', guest_iface, '-p', proto, '-d', guest_ip, '-m', proto, '--dport', guest_port, '-j', 'ACCEPT']))
-        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', guest_iface, '-o', ext, '-s', guest_ip, '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', '-j', 'ACCEPT']))
-        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', ext, '-p', proto, '-m', proto, '--dport', external_port, '-j', 'DNAT', '--to-destination', guest_to]))
-        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-d', guest_ip, '-o', guest_iface, '-j', 'MASQUERADE']))
-    results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-s', NAT_SUBNET, '-o', ext, '-j', 'MASQUERADE']))
+        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', ext, '-o', guest_iface, '-p', proto, '-d', guest_ip, '-m', proto, '--dport', guest_port, *IPTABLES_TAG, '-j', 'ACCEPT']))
+        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', guest_iface, '-o', ext, '-s', guest_ip, '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', *IPTABLES_TAG, '-j', 'ACCEPT']))
+        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', ext, '-p', proto, '-m', proto, '--dport', external_port, *IPTABLES_TAG, '-j', 'DNAT', '--to-destination', guest_to]))
+        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-d', guest_ip, '-o', guest_iface, *IPTABLES_TAG, '-j', 'MASQUERADE']))
+    results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-s', NAT_SUBNET, '-o', ext, *IPTABLES_TAG, '-j', 'MASQUERADE']))
     return results
 
 
@@ -523,7 +621,7 @@ def find_matching_forward(forwards: list[dict[str, Any]], vm_name: str, external
 
 
 def diagnose_public_access(vm_name: str, external_port: int, guest_port: int, protocol: str = 'tcp') -> dict[str, Any]:
-    if not vm_name or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', vm_name):
+    if not valid_vm_name(vm_name):
         raise NetworkError('Некорректное имя VM')
     if not valid_port(external_port) or not valid_port(guest_port):
         raise NetworkError('Порт должен быть от 1 до 65535')

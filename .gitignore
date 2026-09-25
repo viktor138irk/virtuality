@@ -94,3 +94,6 @@ composer.lock
 
 # Offline Python wheels bundled into system images
 wheels/
+
+# рабочие копии агентов и локальные настройки Claude Code
+.claude/

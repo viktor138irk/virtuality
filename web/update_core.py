@@ -12,6 +12,8 @@ STATE_FILE = STATE_DIR / 'state.json'
 LOG_FILE = Path('/var/log/virtuality/update.log')
 DEFAULT_BRANCH = os.environ.get('VIRTUALITY_UPDATE_BRANCH', 'main')
 REMOTE = os.environ.get('VIRTUALITY_UPDATE_REMOTE', 'origin')
+NODE_ENV = Path(os.environ.get('VIRTUALITY_NODE_ENV', '/var/lib/virtuality/config/web.env'))
+CHANNELS = {'stable': 'Стабильный — выпущенные версии', 'main': 'Ранний доступ — все изменения'}
 
 
 class UpdateError(Exception):
@@ -69,8 +71,37 @@ def current_commit() -> str:
     return result['stdout'] if result['ok'] else ''
 
 
-def latest_commit() -> str:
-    result = run_cmd(['git', 'rev-parse', f'{REMOTE}/{DEFAULT_BRANCH}'], cwd=SOURCE_DIR, timeout=10)
+def update_channel() -> str:
+    """stable: the latest release tag vX.Y.Z; main: every change on the main branch."""
+    value = os.environ.get('VIRTUALITY_UPDATE_CHANNEL', '')
+    if not value:
+        try:
+            for line in NODE_ENV.read_text().splitlines():
+                if line.startswith('VIRTUALITY_UPDATE_CHANNEL='):
+                    value = line.split('=', 1)[1].strip().strip('"').strip("'")
+        except OSError:
+            pass
+    return value if value in CHANNELS else 'stable'
+
+
+def latest_release_tag() -> str:
+    result = run_cmd(['git', 'tag', '--list', 'v[0-9]*', '--sort=-v:refname'], cwd=SOURCE_DIR, timeout=10)
+    tags = [tag for tag in result['stdout'].split() if all(part.isdigit() for part in tag[1:].split('.'))] if result['ok'] else []
+    return tags[0] if tags else ''
+
+
+def target_ref(channel: str | None = None) -> str:
+    """Git ref the node updates to. Until the first release is tagged, stable follows the main branch."""
+    channel = channel or update_channel()
+    if channel == 'stable':
+        tag = latest_release_tag()
+        if tag:
+            return f'refs/tags/{tag}'
+    return f'{REMOTE}/{DEFAULT_BRANCH}'
+
+
+def latest_commit(ref: str | None = None) -> str:
+    result = run_cmd(['git', 'rev-parse', f'{ref or target_ref()}^{{commit}}'], cwd=SOURCE_DIR, timeout=10)
     return result['stdout'] if result['ok'] else ''
 
 
@@ -91,8 +122,8 @@ def current_version() -> str:
     return local_file_text('VERSION') or '0.0.0'
 
 
-def latest_version() -> str:
-    value = file_from_git(f'{REMOTE}/{DEFAULT_BRANCH}', 'VERSION').strip()
+def latest_version(ref: str | None = None) -> str:
+    value = file_from_git(ref or target_ref(), 'VERSION').strip()
     return value or current_version()
 
 
@@ -169,13 +200,15 @@ def check_updates(fetch: bool = True) -> dict[str, Any]:
 
     fetch_result = {'ok': True, 'stdout': '', 'stderr': '', 'cmd': 'skip'}
     if fetch:
-        fetch_result = run_cmd(['git', 'fetch', '--quiet', REMOTE, DEFAULT_BRANCH], cwd=SOURCE_DIR, timeout=60)
+        fetch_result = run_cmd(['git', 'fetch', '--quiet', '--tags', '--force', REMOTE, DEFAULT_BRANCH], cwd=SOURCE_DIR, timeout=60)
 
+    channel = update_channel()
+    ref = target_ref(channel)
     local_commit = current_commit()
-    remote_commit = latest_commit()
+    remote_commit = latest_commit(ref)
     local_version = current_version()
-    remote_version = latest_version()
-    manifest = load_manifest(f'{REMOTE}/{DEFAULT_BRANCH}')
+    remote_version = latest_version(ref)
+    manifest = load_manifest(ref)
     missed = missing_versions(local_version, remote_version, manifest)
     commits = git_log_between(local_commit, remote_commit)
     has_update = bool(local_commit and remote_commit and local_commit != remote_commit and is_ancestor(local_commit, remote_commit))
@@ -185,6 +218,9 @@ def check_updates(fetch: bool = True) -> dict[str, Any]:
         'source_dir': str(SOURCE_DIR),
         'remote': REMOTE,
         'branch': DEFAULT_BRANCH,
+        'channel': channel,
+        'channel_label': CHANNELS[channel],
+        'target': ref.removeprefix('refs/tags/').removeprefix(f'{REMOTE}/'),
         'fetch_ok': fetch_result['ok'],
         'fetch_error': fetch_result['stderr'] or fetch_result['stdout'],
         'current_commit': local_commit,
@@ -230,6 +266,6 @@ def start_update() -> dict[str, Any]:
         # Run outside virtuality-web's cgroup: the update restarts virtuality-web,
         # which would otherwise kill the update script before it finishes.
         unit = f"virtuality-update-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        cmd = ['systemd-run', '--unit', unit, '--collect', '--quiet', f'--setenv=VIRTUALITY_SOURCE_DIR={SOURCE_DIR}', f'--working-directory={SOURCE_DIR}'] + cmd
+        cmd = ['systemd-run', '--unit', unit, '--collect', '--quiet', f'--setenv=VIRTUALITY_SOURCE_DIR={SOURCE_DIR}', f'--setenv=VIRTUALITY_UPDATE_CHANNEL={update_channel()}', f'--working-directory={SOURCE_DIR}'] + cmd
     subprocess.Popen(cmd, cwd=str(SOURCE_DIR), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     return data

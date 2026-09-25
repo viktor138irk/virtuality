@@ -2,6 +2,7 @@
 {% from "_ui.html" import icon, badge, vm_badge, op_badge, meter, alert %}
 {% set page_title = 'Обзор' %}
 {% set running = vms|selectattr('state', 'in', ['running', 'idle', 'blocked'])|list|length %}
+{% set titles = vmops_titles() if vms else {} %}
 
 {% block page_header %}
 <div class="page-header">
@@ -26,6 +27,7 @@
   {% if profile.virtualization_warning %}
     {{ alert('warning', 'Машины будут работать медленно. Включите аппаратную виртуализацию (Intel VT-x / AMD-V) в настройках BIOS сервера.', 'Аппаратное ускорение недоступно') }}
   {% endif %}
+  {% include "_vm_ops_alerts.html" %}
 {% endblock %}
 
 {% block content %}
@@ -69,17 +71,20 @@
           <span class="vm-avatar {{ 'on' if s.running else '' }}">{{ icon('monitor') }}<span class="status-dot {{ s.tone }}" data-live="dot"></span></span>
           <span style="min-width:0">
             <span class="vm-name truncate" style="display:block">{{ vm.name }}</span>
-            <span class="vm-sub"><span data-live="ip">{{ vm.ip if vm.ip and vm.ip != '—' else ('IP появится после запуска' if not s.running else 'Получает адрес…') }}</span></span>
+            <span class="vm-sub">{% if titles.get(vm.name) %}<span class="vm-title">{{ titles[vm.name] }}</span> · {% endif %}<span data-live="ip">{{ vm.ip if vm.ip and vm.ip != '—' else ('IP появится после запуска' if not s.running else 'Получает адрес…') }}</span></span>
           </span>
         </a>
         <div class="vm-col">
           <div class="vm-cell-label">Ресурсы</div>
           <div class="vm-cell-value">{{ vm.vcpus or '—' }} {{ plural(vm.vcpus or 0, 'ядро', 'ядра', 'ядер') }} · {{ vm.memory_mb|format_mb }}</div>
+          {% include "_vm_live_meters.html" %}
         </div>
         <div class="vm-col">{{ vm_badge(vm.state) }}</div>
         <div class="vm-actions">
           {% if s.running %}
             <a class="btn btn-sm" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">{{ icon('monitor', 'icon-sm') }}<span class="btn-label">Экран</span></a>
+          {% elif vm.state == 'paused' %}
+            <form method="post" action="/vm/{{ vm.name }}/ops/resume" class="inline-form" data-toast="Машина {{ vm.name }} продолжает работу"><input type="hidden" name="next" value="/"><button class="btn btn-sm">{{ icon('play', 'icon-sm') }}<span class="btn-label">Продолжить</span></button></form>
           {% else %}
             <form method="post" action="/vm/{{ vm.name }}/start" class="inline-form" data-toast="Машина {{ vm.name }} запускается"><button class="btn btn-sm">{{ icon('play', 'icon-sm') }}<span class="btn-label">Запустить</span></button></form>
           {% endif %}
@@ -87,13 +92,14 @@
             <summary class="btn btn-sm btn-icon btn-ghost" aria-label="Действия">{{ icon('ellipsis') }}</summary>
             <div class="menu-list">
               <a class="menu-item" href="/vm/{{ vm.name }}">{{ icon('settings') }}Открыть настройки</a>
+              {% set ops_name, ops_state, ops_next, ops_hints = vm.name, vm.state, '/', false %}{% include "_vm_ops_menu.html" %}
               {% if s.running %}
                 <a class="menu-item" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">{{ icon('monitor') }}Открыть экран</a>
                 <form method="post" action="/vm/{{ vm.name }}/reboot" data-toast="Машина {{ vm.name }} перезагружается"><button class="menu-item">{{ icon('rotate-cw') }}Перезагрузить</button></form>
                 <form method="post" action="/vm/{{ vm.name }}/shutdown" data-toast="Машина {{ vm.name }} выключается"><button class="menu-item">{{ icon('power') }}Выключить</button></form>
                 <div class="menu-sep"></div>
                 <form method="post" action="/vm/{{ vm.name }}/destroy" data-confirm="Машина будет выключена сразу, как при отключении питания. Несохранённые данные внутри неё пропадут." data-confirm-title="Выключить {{ vm.name }} принудительно?" data-confirm-button="Выключить" data-toast="Машина {{ vm.name }} выключена" data-toast-tone="warning"><button class="menu-item danger">{{ icon('zap') }}Выключить принудительно</button></form>
-              {% else %}
+              {% elif vm.state != 'paused' %}
                 <form method="post" action="/vm/{{ vm.name }}/start" data-toast="Машина {{ vm.name }} запускается"><button class="menu-item">{{ icon('play') }}Запустить</button></form>
                 <div class="menu-sep"></div>
                 <form method="post" action="/vm/{{ vm.name }}/delete" data-confirm="Машина и все её диски будут удалены без возможности восстановления." data-confirm-title="Удалить {{ vm.name }}?" data-confirm-button="Удалить навсегда" data-toast="Машина {{ vm.name }} удалена" data-toast-tone="warning"><button class="menu-item danger">{{ icon('trash-2') }}Удалить машину</button></form>

@@ -1,0 +1,36 @@
+{#- Карточка «Каталог готовых систем» для страницы /disk-images; страница может заранее положить в dl результат downloads_panel('disk'). -#}
+{% from "_ui.html" import icon, badge %}
+{% set dl = dl if dl is defined else downloads_panel('disk') %}
+<article class="card">
+  <div class="card-header">
+    <div><h2>Каталог готовых систем</h2><p>Официальные образы, подходящие этому серверу. Скачаем на сервер и проверим контрольную сумму — останется только создать машину.</p></div>
+  </div>
+  {% if dl.catalog %}
+    <div class="list">
+      {% for item in dl.catalog %}
+        <div class="list-item catalog-item">
+          <span class="list-icon {{ 'success' if item.status == 'ready' else 'info' if item.status == 'downloading' else 'brand' }}">{{ icon('circle-check' if item.status == 'ready' else 'download' if item.status == 'downloading' else 'box') }}</span>
+          <div class="grow">
+            <div class="row" style="gap:8px">
+              <span class="title">{{ item.title }}</span>
+              {% if item.recommended %}{{ badge('Рекомендуем', 'brand', dot=False) }}{% endif %}
+              {% if item.status == 'ready' %}{{ badge('Загружен', 'success') }}{% elif item.status == 'downloading' %}{{ badge('Скачивается', 'info') }}{% endif %}
+            </div>
+            <div class="meta">{{ item.hint }}{% if item.login %} · вход: <code>{{ item.login }}</code>{% endif %}</div>
+          </div>
+          {% if item.status == 'ready' %}
+            <a class="btn btn-sm btn-primary" href="/vm/create?image={{ item.ready_file|urlencode }}">{{ icon('plus', 'icon-sm') }}Создать машину</a>
+          {% elif item.status == 'downloading' %}
+            <a class="btn btn-sm btn-ghost" href="/operations/{{ item.operation_id }}">Прогресс{{ icon('chevron-right', 'icon-sm') }}</a>
+          {% else %}
+            <form method="post" action="/downloads/catalog/{{ item.id }}" class="inline-form" data-busy="Запускаем…">
+              <button type="submit" class="btn btn-sm">{{ icon('download', 'icon-sm') }}Скачать</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card-body"><p class="muted">Подходящих этому серверу готовых образов в каталоге нет. Можно скачать образ по ссылке или загрузить с компьютера.</p></div>
+  {% endif %}
+</article>

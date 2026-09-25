@@ -1,0 +1,18 @@
+{% from "_ui.html" import icon, badge %}
+{#- Строки списка копий. Ожидает: rows (список копий), back (куда вернуться после удаления). -#}
+{% for b in rows %}
+  <div class="list-item">
+    <span class="list-icon {{ 'brand' if b.complete else 'danger' }}">{{ icon('database' if b.complete else 'triangle-alert') }}</span>
+    <div class="grow">
+      <div class="title">{{ b.created_label }}{% if b.note %} <span class="tag" style="margin-left:6px">{{ b.note }}</span>{% endif %}</div>
+      <div class="meta">{{ b.size }} · {{ b.disk_count }} {{ plural(b.disk_count, 'диск', 'диска', 'дисков') }}{% if b.version %} · Virtuality {{ b.version }}{% endif %}{% if not b.complete %} · <span style="color:var(--danger)">не хватает файлов</span>{% endif %}</div>
+    </div>
+    {% if b.complete %}
+      <a class="btn btn-sm" href="/backups/{{ b.vm }}/{{ b.id }}/restore">{{ icon('rotate-cw', 'icon-sm') }}<span class="hide-sm">Восстановить</span></a>
+    {% endif %}
+    <form method="post" action="/backups/{{ b.vm }}/{{ b.id }}/delete" class="inline-form" data-confirm="Копия машины {{ b.vm }} от {{ b.created_label }} ({{ b.size }}) будет удалена. Сама машина не пострадает." data-confirm-title="Удалить копию?" data-confirm-button="Удалить">
+      <input type="hidden" name="next" value="{{ back }}">
+      <button class="btn btn-sm btn-icon btn-ghost" aria-label="Удалить копию" title="Удалить копию">{{ icon('trash-2', 'icon-sm') }}</button>
+    </form>
+  </div>
+{% endfor %}

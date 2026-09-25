@@ -7,8 +7,11 @@ STATE_FILE="${STATE_DIR}/state.json"
 LOG_FILE="/var/log/virtuality/update.log"
 REMOTE="${VIRTUALITY_UPDATE_REMOTE:-origin}"
 BRANCH="${VIRTUALITY_UPDATE_BRANCH:-main}"
-REPO_ZIP_URL="${VIRTUALITY_UPDATE_ZIP_URL:-https://github.com/viktor138irk/virtuality/archive/refs/heads/${BRANCH}.zip}"
 TMP_DIR="${STATE_DIR}/tmp"
+# shellcheck source=scripts/update_target.sh
+. "$(dirname "${BASH_SOURCE[0]}")/update_target.sh"
+resolve_update_target
+REPO_ZIP_URL="${VIRTUALITY_UPDATE_ZIP_URL:-$TARGET_ZIP_URL}"
 
 mkdir -p "$STATE_DIR" "$TMP_DIR" "$(dirname "$LOG_FILE")"
 
@@ -48,7 +51,7 @@ try_run() {
 
 fetch_zip_update() {
   local zip_file extract_dir extracted_root
-  zip_file="${TMP_DIR}/virtuality-${BRANCH}.zip"
+  zip_file="${TMP_DIR}/virtuality-${TARGET_LABEL}.zip"
   extract_dir="${TMP_DIR}/zip-update"
   rm -rf "$zip_file" "$extract_dir"
   mkdir -p "$extract_dir"
@@ -127,9 +130,10 @@ GIT_UPDATED=0
 if [ -d "$SOURCE_DIR/.git" ]; then
   cd "$SOURCE_DIR" || exit 1
   write_state "running" "Получаем изменения из GitHub через git"
-  if try_run git fetch "$REMOTE" "$BRANCH"; then
-    TARGET_REF="${REMOTE}/${BRANCH}"
-    TARGET_COMMIT="$(git rev-parse "$TARGET_REF" 2>/dev/null || true)"
+  if try_run git fetch --tags --force "$REMOTE" "$BRANCH"; then
+    resolve_update_target
+    log "channel: ${UPDATE_CHANNEL}, target: ${TARGET_LABEL}"
+    TARGET_COMMIT="$(git rev-parse "${TARGET_REF}^{commit}" 2>/dev/null || true)"
     if [ -n "$TARGET_COMMIT" ]; then
       LOCAL_STATUS="$(git status --porcelain 2>/dev/null || true)"
       if [ -n "$LOCAL_STATUS" ]; then
@@ -137,8 +141,8 @@ if [ -d "$SOURCE_DIR/.git" ]; then
         printf '%s\n' "$LOCAL_STATUS" >> "$LOG_FILE"
       fi
       write_state "running" "Синхронизируем исходники с GitHub через git reset"
-      log "Deploy mode: git reset --hard $TARGET_REF"
-      if try_run git reset --hard "$TARGET_REF" && try_run git clean -fd; then
+      log "Deploy mode: git checkout -B ${BRANCH} ${TARGET_LABEL}"
+      if try_run git checkout -q -f -B "$BRANCH" "$TARGET_COMMIT" && try_run git clean -fd; then
         GIT_UPDATED=1
       else
         log "git reset/clean failed, ZIP fallback will be used"

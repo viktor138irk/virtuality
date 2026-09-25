@@ -39,12 +39,14 @@
         <div class="nav-section">Ресурсы</div>
         {{ nav_link('/iso', 'disc-3', 'Образы ОС', path.startswith('/iso') or path.startswith('/disk-images')) }}
         {{ nav_link('/network', 'globe', 'Сеть и доступ', path.startswith('/network')) }}
+        {{ nav_link('/backups', 'database', 'Резервные копии', path.startswith('/backups')) }}
 
         <div class="nav-section">Система</div>
         {{ nav_link('/operations', 'list-checks', 'Задачи', path.startswith('/operations')) }}
         {{ nav_link('/logs', 'scroll-text', 'Журналы', path.startswith('/logs')) }}
         {{ nav_link('/update', 'refresh-cw', 'Обновления', path.startswith('/update'), '<span class="nav-dot" title="Доступно обновление"></span>' if notice.has_update else '') }}
         {{ nav_link('/host', 'server', 'Сервер', path.startswith('/host')) }}
+        {{ nav_link('/settings', 'settings', 'Настройки', path.startswith('/settings')) }}
         {{ nav_link('/help', 'circle-help', 'Помощь', path.startswith('/help')) }}
       </nav>
 
@@ -69,7 +71,8 @@
 
       <main class="content">
         {% block page_header %}{% endblock %}
-        <div class="alerts">{% block alerts %}{% if error %}{{ alert('danger', error) }}{% endif %}{% endblock %}</div>
+        {% set flash_error = error or request.query_params.get('error') %}{% set flash_message = message or request.query_params.get('message') %}
+        <div class="alerts">{% block alerts %}{% if flash_error %}{{ alert('danger', flash_error) }}{% endif %}{% if flash_message %}{{ alert('success', flash_message) }}{% endif %}{% endblock %}</div>
         {% block content %}{% endblock %}
       </main>
     </div>

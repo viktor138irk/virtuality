@@ -1,0 +1,17 @@
+<network connections='2'>
+  <name>virtuality-nat</name>
+  <uuid>6c1b3c1e-1111-2222-3333-444444444444</uuid>
+  <forward mode='nat'>
+    <nat>
+      <port start='1024' end='65535'/>
+    </nat>
+  </forward>
+  <bridge name='virbr100' stp='on' delay='0'/>
+  <mac address='52:54:00:12:34:56'/>
+  <ip address='192.168.100.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.100.50' end='192.168.100.200'/>
+      <host mac='52:54:00:aa:bb:cc' name='web01' ip='192.168.100.51'/>
+    </dhcp>
+  </ip>
+</network>

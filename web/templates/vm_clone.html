@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, vm_badge, alert %}
+{% set page_title = 'Клонировать ' ~ vm_name %}
+{% set st = state|vm_state %}
+
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <div class="eyebrow"><a href="/vm/{{ vm_name }}">{{ icon('arrow-left', 'icon-sm') }} {{ vm_name }}</a></div>
+    <div class="title-row"><h1>Клонировать {{ vm_name }}</h1><span data-live-vm="{{ vm_name }}" data-running="{{ '1' if st.running else '0' }}" data-reload-on-change>{{ vm_badge(state, 'lg') }}</span></div>
+    <p class="lead">Точная копия машины: те же диски, процессор и память. У копии будет своё имя и свой сетевой адрес.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block alerts %}
+  {% if error %}{{ alert('danger', error) }}{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="grid grid-main">
+  <div class="stack">
+    <article class="card">
+      <div class="card-header"><div><h2>Новая машина</h2><p>Копия появится в списке машин выключенной</p></div></div>
+      {% if blockers %}
+        <div class="card-body stack-sm" style="padding-bottom:0">
+          {% if 'running' in blockers %}
+            <div class="alert warning" role="status">{{ icon('triangle-alert') }}<div><strong>Сначала выключите машину</strong>Диски копируются только у выключенной машины, иначе копия может получиться повреждённой.</div>
+              {% if st.running %}<form method="post" action="/vm/{{ vm_name }}/shutdown" class="alert-action" data-toast="Машина выключается — это может занять до минуты"><button class="btn btn-sm">{{ icon('power', 'icon-sm') }}Выключить</button></form>{% endif %}
+            </div>
+          {% endif %}
+          {% if 'saved' in blockers %}{{ alert('warning', 'Машина в спящем режиме, её память сохранена на диске. Запустите машину и выключите её обычным образом — тогда копия будет целой.', 'Сначала разбудите машину') }}{% endif %}
+          {% if 'space' in blockers %}{{ alert('danger', 'Копии нужно ' ~ needed_text ~ ', а свободно только ' ~ free_text ~ '. Удалите ненужные машины или образы.', 'Не хватает места на сервере') }}{% endif %}
+          {% if 'no_disks' in blockers %}{{ alert('danger', 'У машины нет дисков, которые можно скопировать.') }}{% endif %}
+          {% if 'busy' in blockers %}{{ alert('info', 'Эта машина уже клонируется. Дождитесь окончания в разделе «Задачи».') }}{% endif %}
+        </div>
+      {% endif %}
+      <form method="post" action="/vm/{{ vm_name }}/clone/start" data-busy="Запускаем…">
+        <div class="card-body form-grid">
+          <div class="field">
+            <label for="new_name">Имя копии</label>
+            <input class="input" id="new_name" name="new_name" value="{{ new_name }}" required pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{1,62}" maxlength="63" autocomplete="off" {% if blockers %}disabled{% endif %}>
+            <span class="hint">Латинские буквы, цифры, точка, дефис и подчёркивание. Например: {{ suggested }}</span>
+          </div>
+          <div class="kv">
+            <div style="grid-column: span 2"><span>Что скопируется</span><strong>{% for d in disks %}{{ d.name }}{% if d.size_text %} · {{ d.size_text }}{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</strong></div>
+            <div><span>Нужно места</span><strong>{{ needed_text }}</strong></div>
+            <div><span>Свободно на сервере</span><strong>{{ free_text }}</strong></div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <span class="subtle small" style="margin-right:auto">Занимает от минуты до часа — зависит от размера дисков</span>
+          <a class="btn" href="/vm/{{ vm_name }}">Отмена</a>
+          <button class="btn btn-primary" type="submit" {% if blockers %}disabled{% endif %}>{{ icon('copy') }}Клонировать</button>
+        </div>
+      </form>
+    </article>
+  </div>
+
+  <aside class="stack">
+    <article class="card">
+      <div class="card-header"><h2>Как это работает</h2></div>
+      <div class="list">
+        <div class="list-item"><span class="list-icon brand">{{ icon('hard-drive') }}</span><div class="grow"><div class="title">Диски копируются целиком</div><div class="meta">Внутри копии те же система, программы и пароли.</div></div></div>
+        <div class="list-item"><span class="list-icon">{{ icon('network') }}</span><div class="grow"><div class="title">Свой сетевой адрес</div><div class="meta">Копия получит новый MAC-адрес, а IP появится после запуска.</div></div></div>
+        <div class="list-item"><span class="list-icon">{{ icon('monitor') }}</span><div class="grow"><div class="title">Смените имя компьютера</div><div class="meta">Внутри системы копия называется как оригинал. Переименуйте её после первого запуска, чтобы не путаться.</div></div></div>
+        <div class="list-item"><span class="list-icon">{{ icon('layers') }}</span><div class="grow"><div class="title">Снимки не копируются</div><div class="meta">В копию попадает только текущее состояние дисков.</div></div></div>
+      </div>
+    </article>
+  </aside>
+</section>
+{% endblock %}

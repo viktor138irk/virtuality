@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, alert %}
+{% set page_title = 'Восстановить ' ~ backup.vm %}
+
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <div class="eyebrow"><a href="/backups">{{ icon('arrow-left', 'icon-sm') }} Резервные копии</a></div>
+    <h1>Восстановить машину из копии</h1>
+    <p class="lead">Копия машины <strong>{{ backup.vm }}</strong> от {{ backup.created_label }}{% if backup.note %} — «{{ backup.note }}»{% endif %}.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block alerts %}
+  {% if error %}{{ alert('danger', error) }}{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="grid grid-main">
+  <article class="card">
+    <form method="post" action="/backups/{{ backup.vm }}/{{ backup.id }}/restore" data-busy="Запускаем…" {% if exists %}data-confirm="Машина {{ name }} будет удалена вместе со всеми её дисками и заменена копией от {{ backup.created_label }}. Отменить это будет нельзя." data-confirm-title="Заменить машину {{ name }}?" data-confirm-button="Заменить и восстановить"{% endif %}>
+      <div class="card-body form-grid">
+        <div class="field">
+          <label for="name">Название восстановленной машины</label>
+          <input class="input" id="name" type="text" name="name" value="{{ name }}" pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]{1,62}" autocomplete="off" required>
+          <span class="hint">Оставьте как есть, чтобы вернуть машину {{ backup.vm }}, или введите новое название — получится вторая независимая машина.</span>
+        </div>
+
+        {% if exists %}
+          <div class="alert warning">{{ icon('triangle-alert') }}<div><strong>Машина {{ name }} уже есть на сервере</strong>Чтобы восстановить копию под этим названием, существующую машину придётся удалить вместе с её дисками. Если хотите сохранить обе — укажите другое название.</div></div>
+          <label class="check danger">
+            <input type="checkbox" name="replace" value="1" required>
+            <span><strong>Заменить существующую машину {{ name }}</strong><span>Когда диски копии будут распакованы, она будет выключена и удалена вместе с дисками, а на её место встанет копия.</span></span>
+          </label>
+        {% else %}
+          <input type="hidden" name="replace" value="">
+        {% endif %}
+
+        <div class="kv" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+          <div><span>Дисков в копии</span><strong>{{ backup.disk_count }} · {{ backup.size }}</strong></div>
+          <div><span>Понадобится места</span><strong>около {{ need }}</strong></div>
+          <div><span>Свободно</span><strong>{{ free }}</strong></div>
+        </div>
+      </div>
+      <div class="card-footer">
+        <a class="btn" href="/backups">Отмена</a>
+        <button type="submit" class="btn {{ 'btn-danger' if exists else 'btn-primary' }}">{{ icon('rotate-cw') }}{{ 'Заменить и восстановить' if exists else 'Восстановить' }}</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="stack">
+    <article class="card">
+      <div class="card-header"><h2>Что будет сделано</h2></div>
+      <div class="checklist">
+        {% if exists %}
+          {% set steps = [
+            ('Диски копируются обратно', 'В папку ' ~ images_dir ~ ', рядом со старой машиной — распаковка занимает несколько минут.'),
+            ('Старая машина удаляется только после распаковки', 'Если копирование сорвётся, машина ' ~ name ~ ' останется как была.'),
+            ('Настройки применяются заново', 'Процессор, память, сеть и порядок загрузки — как на момент копии.'),
+            ('Сетевые адреса сохраняются', 'Машина получит прежние MAC-адреса и идентификатор, поэтому система внутри не заметит подмены.'),
+            ('Машина остаётся выключенной', 'Проверьте настройки и запустите её сами.'),
+          ] %}
+        {% else %}
+          {% set steps = [
+            ('Диски копируются обратно', 'В папку ' ~ images_dir ~ ' — распаковка занимает несколько минут.'),
+            ('Настройки применяются заново', 'Процессор, память, сеть и порядок загрузки — как на момент копии.'),
+            ('Сетевые адреса выдаются новые', 'Чтобы восстановленная машина не конфликтовала с оригиналом. IP-адрес внутри может измениться.'),
+            ('Машина остаётся выключенной', 'Проверьте настройки и запустите её сами.'),
+          ] %}
+        {% endif %}
+        {% for title, text in steps %}
+          <div class="check-item success">{{ icon('circle-check') }}<div><strong>{{ title }}</strong><span>{{ text }}</span></div></div>
+        {% endfor %}
+      </div>
+    </article>
+    <article class="card">
+      <div class="card-body stack-sm">
+        <div class="row">{{ icon('info') }}<h3>Копия не пострадает</h3></div>
+        <p class="muted small">Восстанавливать из одной копии можно сколько угодно раз — файлы копии остаются на месте.</p>
+      </div>
+    </article>
+  </aside>
+</section>
+{% endblock %}

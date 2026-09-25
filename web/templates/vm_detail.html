@@ -21,12 +21,15 @@
     {% if s.running %}
       <a class="btn btn-primary" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">{{ icon('monitor') }}Открыть экран</a>
       <form method="post" action="/vm/{{ vm.name }}/shutdown" class="inline-form" data-toast="Машина выключается — это может занять до минуты"><button class="btn">{{ icon('power') }}Выключить</button></form>
+    {% elif s.raw == 'paused' %}
+      <form method="post" action="/vm/{{ vm.name }}/ops/resume" class="inline-form" data-toast="Машина продолжает работу"><button class="btn btn-primary">{{ icon('play') }}Продолжить</button></form>
     {% else %}
       <form method="post" action="/vm/{{ vm.name }}/start" class="inline-form" data-toast="Машина запускается"><button class="btn btn-primary">{{ icon('play') }}Запустить</button></form>
     {% endif %}
     <details class="menu">
       <summary class="btn btn-icon" aria-label="Другие действия">{{ icon('ellipsis') }}</summary>
       <div class="menu-list">
+        {% set ops_name, ops_state, ops_next, ops_hints = vm.name, s.raw, '/vm/' ~ vm.name, true %}{% include "_vm_ops_menu.html" %}
         {% if s.running %}
           <form method="post" action="/vm/{{ vm.name }}/reboot" data-toast="Машина перезагружается"><button class="menu-item">{{ icon('rotate-cw') }}<span>Перезагрузить<small>Мягкая перезагрузка системы</small></span></button></form>
           <form method="post" action="/vm/{{ vm.name }}/destroy" data-confirm="Машина будет выключена сразу, как при отключении питания. Несохранённые данные внутри неё пропадут." data-confirm-title="Выключить принудительно?" data-confirm-button="Выключить" data-toast="Машина выключена" data-toast-tone="warning"><button class="menu-item danger">{{ icon('zap') }}<span>Выключить принудительно<small>Если система зависла</small></span></button></form>
@@ -40,12 +43,15 @@
 {% endblock %}
 
 {% block alerts %}
+  {% if request.query_params.get('error') %}{{ alert('danger', request.query_params.get('error')) }}{% endif %}
+  {% if request.query_params.get('message') %}{{ alert('success', request.query_params.get('message')) }}{% endif %}
   {% for key in ('resource', 'iso', 'boot') %}
     {% set msg = {'resource': resource_message, 'iso': iso_message, 'boot': boot_message}[key] %}
     {% set err = {'resource': resource_error, 'iso': iso_error, 'boot': boot_error}[key] %}
     {% if msg %}{{ alert('success', msg) }}{% endif %}
     {% if err %}{{ alert('danger', err) }}{% endif %}
   {% endfor %}
+  {% include "_vm_ops_alerts.html" %}
 {% endblock %}
 
 {% block content %}
@@ -53,6 +59,8 @@
   <button type="button" data-tab="overview" role="tab">{{ icon('layout-dashboard', 'icon-sm') }}Обзор</button>
   <button type="button" data-tab="resources" role="tab">{{ icon('cpu', 'icon-sm') }}Ресурсы</button>
   <button type="button" data-tab="storage" role="tab">{{ icon('hard-drive', 'icon-sm') }}Диски и загрузка</button>
+  <a href="/vm/{{ vm.name }}/snapshots">{{ icon('camera', 'icon-sm') }}Снимки</a>
+  <a href="/vm/{{ vm.name }}/backups" role="tab">{{ icon('database', 'icon-sm') }}Резервные копии</a>
   <button type="button" data-tab="expert" role="tab">{{ icon('terminal', 'icon-sm') }}Для специалистов</button>
 </nav>
 
@@ -94,6 +102,7 @@
   </div>
 
   <div class="stack">
+    {% include "_vm_ops_cards.html" %}
     <article class="card">
       <div class="card-body stack-sm">
         <form method="post" action="/vm/{{ vm.name }}/{{ 'autostart-disable' if vm.autostart_enabled else 'autostart' }}" class="switch-row" data-no-busy data-toast="{{ 'Автозапуск выключен' if vm.autostart_enabled else 'Машина будет запускаться вместе с сервером' }}">
@@ -137,17 +146,6 @@
             <span class="hint">1024 МБ = 1 ГБ</span>
           </div>
         </div>
-        <details class="advanced">
-          <summary>{{ icon('wrench', 'icon-sm') }}Архитектура процессора<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
-          <div class="advanced-body field">
-            <select class="select" name="guest_arch" {% if not rs.is_shutoff %}disabled{% endif %}>
-              <option value="keep">Не менять — {{ rs.arch|default('неизвестно') }}</option>
-              <option value="x86_64">x86_64 — обычные ПК и серверы</option>
-              <option value="aarch64">ARM64 — образы для Raspberry Pi и ARM-серверов</option>
-            </select>
-            <span class="hint">Меняйте, только если точно знаете, зачем: система внутри может перестать загружаться.</span>
-          </div>
-        </details>
       </div>
       <div class="card-footer"><button type="submit" class="btn btn-primary" {% if not rs.is_shutoff %}disabled{% endif %}>Сохранить</button></div>
     </form>
@@ -198,16 +196,7 @@
     </div>
   </article>
 
-  <article class="card">
-    <div class="card-header"><h2>Диски</h2></div>
-    <div class="list">
-      {% for disk in vm.disk_list %}
-        <div class="list-item"><span class="list-icon">{{ icon('disc-3' if disk.is_cdrom else 'hard-drive') }}</span><div class="grow"><div class="title truncate">{{ disk.name }}</div><div class="meta">{{ disk.label }} · {{ disk.target }}</div></div></div>
-      {% else %}
-        <div class="list-item subtle">Дисков не найдено</div>
-      {% endfor %}
-    </div>
-  </article>
+  {% include "_vm_disks.html" %}
 
   <article class="card">
     <div class="card-header"><h2>Сетевые карты</h2></div>

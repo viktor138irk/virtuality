@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, alert %}
+{% set page_title = 'Настройки' %}
+
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <h1>Настройки</h1>
+    <p class="lead">Доступ к панели, сеть машин, хранилище и обновления. Всё то же, что спрашивал мастер настройки, — можно поменять в любой момент.</p>
+  </div>
+  <div class="page-actions">
+    <form method="post" action="/setup/restart" data-confirm="Мастер проведёт вас по всем шагам заново. Текущие машины и настройки не пострадают." data-confirm-title="Запустить мастер настройки?" data-confirm-button="Запустить" data-confirm-tone="brand"><button class="btn">{{ icon('sparkles', 'icon-sm') }}Мастер настройки</button></form>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if not ctl %}
+  {{ alert('warning', 'Команда virtuality-ctl не найдена, поэтому изменения применить нельзя. Переустановите панель: sudo bash scripts/install_web_panel.sh', 'Панель установлена без virtuality-ctl') }}
+{% endif %}
+<section class="grid grid-main" style="margin-top:{{ '16px' if not ctl else '0' }}">
+  <div class="stack">
+
+    {# ------------------------------------------------ access #}
+    <article class="card" id="access">
+      <div class="card-header"><div><h2>Доступ к панели</h2><p>Сейчас панель открывается по адресу <a class="mono" href="{{ panel_url }}">{{ panel_url }}</a></p></div>{{ badge('HTTPS' if tls else 'HTTP', 'success' if tls else 'warning') }}</div>
+      <form method="post" action="/settings/access" data-confirm="Панель перезапустится и откроется по новому адресу. Машины продолжат работать." data-confirm-title="Применить настройки доступа?" data-confirm-button="Применить" data-confirm-tone="brand">
+        <div class="card-body stack">
+          <div class="options" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">
+            <label class="option">
+              <input type="radio" name="tls" value="1" {% if tls %}checked{% endif %}>
+              <span class="option-body"><span class="option-top"><span class="option-icon">{{ icon('shield-check') }}</span>{{ badge('Рекомендуем', 'brand', False) }}</span><span class="option-title">Защищённое соединение (HTTPS)</span><span class="option-text">Пароль и данные шифруются. Браузер один раз предупредит о сертификате — это нормально.</span></span>
+            </label>
+            <label class="option">
+              <input type="radio" name="tls" value="0" {% if not tls %}checked{% endif %}>
+              <span class="option-body"><span class="option-top"><span class="option-icon">{{ icon('globe') }}</span><span class="option-check"></span></span><span class="option-title">Обычное соединение (HTTP)</span><span class="option-text">Без предупреждений браузера. Только внутри домашней сети.</span></span>
+            </label>
+          </div>
+          <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+            <div class="field"><label for="port">Порт HTTP</label><input class="input" id="port" type="number" name="port" min="1" max="65535" value="{{ port }}"><span class="hint">Стандартный — 8088. С HTTPS панель отвечает на {{ tls_port }}, а этот порт перенаправляет на защищённый.</span></div>
+          </div>
+        </div>
+        <div class="card-footer"><button class="btn btn-primary" {% if not ctl %}disabled{% endif %}>Применить</button></div>
+      </form>
+    </article>
+
+    {# ------------------------------------------------ password #}
+    <article class="card" id="password">
+      <div class="card-header"><div><h2>Пароль</h2><p>Вход в панель — по пользователю <strong>{{ auth_user }}</strong> и его паролю Linux. Смена пароля здесь меняет его и для SSH.</p></div></div>
+      <form method="post" action="/settings/password">
+        <div class="card-body form-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+          <div class="field"><label for="password">Новый пароль</label><input class="input" id="password" type="password" name="password" minlength="6" autocomplete="new-password" required></div>
+          <div class="field"><label for="password2">Ещё раз</label><input class="input" id="password2" type="password" name="password2" minlength="6" autocomplete="new-password" required></div>
+        </div>
+        <div class="card-footer"><button class="btn" {% if not ctl %}disabled{% endif %}>{{ icon('lock', 'icon-sm') }}Сменить пароль</button></div>
+      </form>
+    </article>
+
+    {# ------------------------------------------------ network #}
+    <article class="card" id="network">
+      <div class="card-header"><div><h2>Сеть машин</h2><p>{% if net.on_bridge %}Машины подключены к вашей локальной сети через мост br0 — роутер выдаёт им адреса как обычным устройствам.{% else %}Машины живут в отдельной сети NAT: у них есть интернет, а доступ снаружи открывается в разделе «Сеть и доступ».{% endif %}</p></div>{{ badge('Локальная сеть' if net.on_bridge else 'NAT', 'success' if net.on_bridge else 'info') }}</div>
+      <div class="card-body stack">
+        <div class="kv">
+          <div><span>Интерфейс</span><strong class="mono">{{ net.interface or '—' }}</strong></div>
+          <div><span>Адрес сервера</span><strong class="mono">{{ net.address or '—' }}{% if net.prefix %}/{{ net.prefix }}{% endif %}</strong></div>
+          <div><span>Шлюз</span><strong class="mono">{{ net.gateway or '—' }}</strong></div>
+        </div>
+        {% if net.revert_armed %}
+          {{ alert('warning', 'Мост включён, но ещё не подтверждён. Если не подтвердить, через 2 минуты сеть вернётся к прежней.', 'Ожидается подтверждение сети') }}
+        {% endif %}
+      </div>
+      <div class="card-footer" style="gap:8px;flex-wrap:wrap">
+        {% if net.on_bridge %}
+          <form method="post" action="/settings/network/revert" data-confirm="Сервер вернётся к прежней сети, машины перестанут быть видны в локальной сети. Их можно будет подключить к сети NAT." data-confirm-title="Вернуть прежнюю сеть?" data-confirm-button="Вернуть"><button class="btn" {% if not ctl %}disabled{% endif %}>{{ icon('rotate-cw', 'icon-sm') }}Вернуть прежнюю сеть</button></form>
+        {% else %}
+          <form method="post" action="/settings/network"><input type="hidden" name="mode" value="nat"><button class="btn">{{ icon('refresh-cw', 'icon-sm') }}Проверить сеть NAT</button></form>
+          <form method="post" action="/settings/network" data-confirm="Сетевой порт {{ net.interface }} будет объединён в мост br0, панель на ~20 секунд перестанет отвечать. Если что-то пойдёт не так, сервер сам вернёт прежнюю сеть через 2 минуты." data-confirm-title="Подключить машины к локальной сети?" data-confirm-button="Подключить" data-confirm-tone="brand"><input type="hidden" name="mode" value="bridge"><button class="btn btn-primary" {% if not (ctl and net.bridge_possible) %}disabled title="{{ 'Wi-Fi или не найден проводной интерфейс' if not net.bridge_possible else '' }}"{% endif %}>{{ icon('network', 'icon-sm') }}Подключить к локальной сети</button></form>
+        {% endif %}
+      </div>
+    </article>
+
+    {# ------------------------------------------------ storage #}
+    <article class="card" id="storage">
+      <div class="card-header"><div><h2>Хранилище</h2><p>Диски машин, образы и резервные копии лежат в <span class="mono">{{ storage.path }}</span>.</p></div>{{ badge('Отдельный диск' if storage.dedicated else 'Системный диск', 'success' if storage.dedicated else 'neutral') }}</div>
+      <div class="card-body stack">
+        <div class="kv">
+          <div><span>Свободно</span><strong>{{ storage.free|format_bytes }} из {{ storage.total|format_bytes }}</strong></div>
+          <div><span>Устройство</span><strong class="mono">{{ storage.source or '—' }}</strong></div>
+        </div>
+        {% if storage.spare %}
+          <form method="post" action="/settings/storage" class="stack" data-confirm="Выбранный диск будет отформатирован — все данные на нём пропадут. Текущие машины и образы переедут на него автоматически." data-confirm-title="Отдать диск под машины?" data-confirm-button="Форматировать и подключить">
+            <div class="options">
+              {% for disk in storage.spare %}
+                <label class="option">
+                  <input type="radio" name="disk" value="{{ disk.path }}" {% if loop.first %}checked{% endif %}>
+                  <span class="option-body"><span class="option-top"><span class="option-icon">{{ icon('database') }}</span><span class="option-check"></span></span><span class="option-title">{{ disk.model }} · {{ disk.size|format_bytes }}</span><span class="option-text">{{ disk.path }}{% if disk.tran %} · {{ disk.tran|upper }}{% endif %}. Пустой диск, данных на нём нет.</span></span>
+                </label>
+              {% endfor %}
+            </div>
+            <div><button class="btn" {% if not ctl %}disabled{% endif %} data-busy="Готовим диск…">{{ icon('hard-drive', 'icon-sm') }}Использовать этот диск для машин</button></div>
+          </form>
+        {% else %}
+          <p class="muted">Свободных дисков не найдено. Подключите пустой диск от 16 ГБ — он появится здесь.</p>
+        {% endif %}
+      </div>
+    </article>
+  </div>
+
+  <aside class="stack">
+    {# ------------------------------------------------ time #}
+    <article class="card" id="time">
+      <div class="card-header"><div><h2>Время</h2><p>Часовой пояс сервера — по нему показываются журналы и задачи.</p></div></div>
+      <form method="post" action="/settings/timezone">
+        <div class="card-body field">
+          <label for="timezone">Часовой пояс</label>
+          <select class="select" id="timezone" name="timezone">
+            <optgroup label="Популярные">
+              {% for tz in timezones.popular %}<option value="{{ tz }}" {% if tz == timezones.current %}selected{% endif %}>{{ tz }}</option>{% endfor %}
+            </optgroup>
+            <optgroup label="Все">
+              {% for tz in timezones.all %}<option value="{{ tz }}" {% if tz == timezones.current %}selected{% endif %}>{{ tz }}</option>{% endfor %}
+            </optgroup>
+          </select>
+          <span class="hint">Сейчас: {{ timezones.current }}</span>
+        </div>
+        <div class="card-footer"><button class="btn" {% if not ctl %}disabled{% endif %}>Сохранить</button></div>
+      </form>
+    </article>
+
+    {# ------------------------------------------------ updates #}
+    <article class="card" id="updates">
+      <div class="card-header"><div><h2>Обновления</h2><p>Машины во время обновления продолжают работать.</p></div>{{ badge('Авто' if auto_update else 'Вручную', 'success' if auto_update else 'neutral') }}</div>
+      <form method="post" action="/settings/updates">
+        <div class="card-body stack">
+          <label class="switch-row" style="cursor:pointer">
+            <span class="switch-text"><strong>Обновлять автоматически</strong><span>Ночью, около 4 часов по времени сервера</span></span>
+            <input type="checkbox" name="auto_update" value="1" {% if auto_update %}checked{% endif %} style="width:20px;height:20px;accent-color:var(--brand)">
+          </label>
+          <div class="field">
+            <label for="channel">Канал</label>
+            <select class="select" id="channel" name="channel">
+              <option value="stable" {% if channel == 'stable' %}selected{% endif %}>Стабильный — выпущенные версии</option>
+              <option value="main" {% if channel == 'main' %}selected{% endif %}>Ранний доступ — все изменения</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-footer"><a class="btn btn-ghost btn-sm" href="/update" style="margin-right:auto">Проверить обновления</a><button class="btn" {% if not ctl %}disabled{% endif %}>Сохранить</button></div>
+      </form>
+    </article>
+
+    {# ------------------------------------------------ server #}
+    <article class="card" id="server">
+      <div class="card-header"><div><h2>Сервер</h2><p>{{ hardware.hostname }} · Virtuality {{ version }}</p></div></div>
+      <div class="card-body stack-sm">
+        <form method="post" action="/settings/backup-config"><button class="btn" style="width:100%;justify-content:flex-start" {% if not ctl %}disabled{% endif %}>{{ icon('download', 'icon-sm') }}Скачать архив настроек</button></form>
+        <form method="post" action="/settings/support-bundle"><button class="btn" style="width:100%;justify-content:flex-start" {% if not ctl %}disabled{% endif %}>{{ icon('package', 'icon-sm') }}Отчёт для поддержки</button></form>
+        <p class="subtle small">Архив — настройки ноды и описания машин и сети, чтобы восстановить их на новом сервере. Отчёт — журналы и состояние для помощи при проблемах.</p>
+        <div class="row" style="gap:8px;margin-top:6px">
+          <form method="post" action="/settings/power" class="grow" data-confirm="Машины будут корректно выключены, сервер перезагрузится и снова запустит их. Панель будет недоступна пару минут." data-confirm-title="Перезагрузить сервер?" data-confirm-button="Перезагрузить"><input type="hidden" name="action" value="reboot"><button class="btn" style="width:100%" {% if not ctl %}disabled{% endif %}>{{ icon('rotate-cw', 'icon-sm') }}Перезагрузить</button></form>
+          <form method="post" action="/settings/power" class="grow" data-confirm="Машины будут корректно выключены, сервер выключится. Включить его можно будет только кнопкой питания." data-confirm-title="Выключить сервер?" data-confirm-button="Выключить"><input type="hidden" name="action" value="poweroff"><button class="btn btn-danger" style="width:100%" {% if not ctl %}disabled{% endif %}>{{ icon('power', 'icon-sm') }}Выключить</button></form>
+        </div>
+      </div>
+    </article>
+
+    <details class="advanced">
+      <summary>{{ icon('terminal', 'icon-sm') }}Для терминала<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+      <div class="advanced-body stack-sm">
+        <p class="subtle small">Всё то же самое доступно командой <code>sudo virtuality-ctl</code>: <code>status</code>, <code>set VIRTUALITY_TLS=1</code>, <code>passwd</code>, <code>timezone</code>, <code>bridge</code>, <code>storage-use</code>, <code>backup-config</code>, <code>uninstall</code>.</p>
+        <p class="subtle small">Исходники: <span class="mono">{{ source_dir }}</span></p>
+      </div>
+    </details>
+  </aside>
+</section>
+{% endblock %}

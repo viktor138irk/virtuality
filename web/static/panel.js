@@ -67,6 +67,8 @@
       const raw = sessionStorage.getItem('virtualityToast');
       if (!raw) return;
       sessionStorage.removeItem('virtualityToast');
+      // The toast was queued when the form was submitted; if the page came back with an error, the action failed.
+      if (document.querySelector('.alert.danger') || /(^|[?&_])error=/.test(location.search)) return;
       const data = JSON.parse(raw);
       toast(data.message, data.tone);
     } catch (_) {}
@@ -194,6 +196,41 @@
   function wireLive() {
     if (!$('[data-live-vm]')) return;
     setInterval(refreshLive, 5000);
+  }
+
+  /* ---------------------------------------------------- live VM load (CPU / RAM meters) */
+  const levelTone = (pct) => (pct >= 90 ? 'danger' : pct >= 75 ? 'warning' : 'success');
+  const formatMb = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(mb >= 10240 ? 0 : 1)} ГБ` : `${Math.round(mb)} МБ`);
+  function applyStatMeter(root, key, pct, label) {
+    const bar = $(`[data-stat="${key}-bar"]`, root);
+    const meter = $(`[data-stat="${key}-meter"]`, root);
+    const text = $(`[data-stat="${key}"]`, root);
+    if (bar) bar.style.setProperty('--value', `${pct == null ? 0 : Math.round(pct)}%`);
+    if (meter) meter.className = `meter ${pct == null ? '' : levelTone(pct)}`;
+    if (text) text.textContent = label;
+  }
+  async function refreshStats() {
+    if (document.hidden) return;
+    try {
+      const response = await fetch('/live/stats', { cache: 'no-store', headers: { Accept: 'application/json' } });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!payload.ok) return;
+      $$('[data-live-stats]').forEach((root) => {
+        const stat = payload.stats[root.dataset.liveStats];
+        root.hidden = !stat;
+        if (!stat) return;
+        const cpu = stat.cpu_pct == null ? null : Math.round(stat.cpu_pct);
+        const memPct = stat.mem_total_mb ? Math.min(100, Math.round((stat.mem_used_mb / stat.mem_total_mb) * 100)) : null;
+        applyStatMeter(root, 'cpu', cpu, cpu == null ? '…' : `${cpu}%`);
+        applyStatMeter(root, 'mem', memPct, stat.mem_total_mb ? (root.classList.contains('vm-meters') ? `${memPct}%` : `${formatMb(stat.mem_used_mb)} из ${formatMb(stat.mem_total_mb)}`) : '—');
+      });
+    } catch (_) {}
+  }
+  function wireStats() {
+    if (!$('[data-live-stats]')) return;
+    refreshStats();
+    setInterval(refreshStats, 5000);
   }
 
   /* ---------------------------------------------------- uploads */
@@ -408,8 +445,17 @@
       });
       $$('[data-visible-when]', form).forEach((el) => {
         const [key, expected] = el.dataset.visibleWhen.split('=');
-        el.hidden = value(key) !== expected;
+        const target = field(key);
+        const current = target instanceof HTMLInputElement && target.type === 'checkbox' ? (target.checked ? target.value : '0') : value(key);
+        el.hidden = current !== expected;
       });
+      // Default login of the chosen cloud image (ubuntu, debian, …) until the user types a name.
+      const login = field('ci_user');
+      if (login && login.dataset.autoLogin === '1') {
+        const image = field('disk_image_path');
+        const option = image && image.selectedIndex >= 0 ? image.options[image.selectedIndex] : null;
+        login.value = option?.dataset.login || 'admin';
+      }
       const preset = value('preset');
       const custom = preset === 'custom';
       const presetInput = $(`input[name=preset][value="${preset}"]`, form);
@@ -424,13 +470,13 @@
       setSummary('source', source === 'disk_image' ? optionText(field('disk_image_path')) : optionText(field('iso_path')));
       setSummary('cpu', `${value('vcpus')} ${Number(value('vcpus')) === 1 ? 'ядро' : 'ядра'}`);
       setSummary('memory', memory >= 1024 ? `${+(memory / 1024).toFixed(1)} ГБ` : `${memory} МБ`);
-      setSummary('disk', source === 'disk_image' ? 'из образа' : `${value('disk_size')} ГБ`);
+      setSummary('disk', `${value('disk_size')} ГБ`);
       setSummary('network', value('network_mode') === 'bridge' ? 'Локальная сеть' : 'Автоматически (NAT)');
       const hasSource = source === 'disk_image' ? form.dataset.hasDisks === '1' : form.dataset.hasIsos === '1';
       $$('[data-create-button]').forEach((btn) => { btn.disabled = !hasSource || !value('name'); });
       $$('[data-missing-source]').forEach((el) => { el.hidden = hasSource || el.dataset.missingSource !== source; });
     }
-    form.addEventListener('input', sync);
+    form.addEventListener('input', (event) => { if (event.target.name === 'ci_user') event.target.dataset.autoLogin = event.target.value ? '0' : '1'; sync(); });
     form.addEventListener('change', sync);
     sync();
   }
@@ -466,6 +512,7 @@
     wireTabs();
     wireCopy();
     wireLive();
+    wireStats();
     $$('form[data-uploader]').forEach(wireUploader);
     wireOperation();
     wireLogs();
@@ -473,5 +520,48 @@
     wireWizard();
     wireBootOrder();
     flashToast();
+  });
+})();
+
+/* Setup wizard: live progress of the first-boot installation. */
+(() => {
+  'use strict';
+  document.addEventListener('DOMContentLoaded', () => {
+    const root = document.querySelector('[data-setup-install]');
+    if (!root) return;
+    const list = root.querySelector('[data-setup-steps]');
+    const log = root.querySelector('[data-setup-log]');
+    const status = document.querySelector('[data-setup-status]');
+    const next = document.querySelector('[data-setup-next]');
+    const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-${name}"></use></svg>`;
+    let announced = root.dataset.installed === '1';
+    async function poll() {
+      try {
+        const response = await fetch('/api/setup/state', { cache: 'no-store' });
+        if (!response.ok) return;
+        const { state } = await response.json();
+        if (state.steps && state.steps.length) {
+          list.innerHTML = state.steps.map((item) => {
+            const tone = item.status === 'done' ? 'success' : item.status === 'error' ? 'danger' : item.status === 'running' ? 'warning' : '';
+            const mark = item.status === 'done' ? icon('circle-check') : item.status === 'error' ? icon('circle-x') : item.status === 'running' ? '<span class="spinner" style="width:18px;height:18px;margin-top:2px"></span>' : icon('circle-dot');
+            const detail = item.status === 'running' && state.message ? `<span>${escapeHtml(state.message)}</span>` : '';
+            return `<div class="check-item ${tone}">${mark}<div><strong>${escapeHtml(item.title)}</strong>${detail}</div></div>`;
+          }).join('');
+        }
+        if (log && state.log_tail) { const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40; log.textContent = state.log_tail; if (atBottom) log.scrollTop = log.scrollHeight; }
+        if (state.installed) {
+          next.classList.remove('disabled');
+          status.textContent = 'Всё установлено';
+          if (!announced) { announced = true; window.vToast && window.vToast('Компоненты установлены'); setTimeout(() => { location.href = root.dataset.next; }, 2000); }
+        } else if (state.stage === 'waiting-network') {
+          status.textContent = 'Ждём подключение к интернету…';
+        } else if (state.stage === 'error') {
+          status.textContent = 'Ошибка установки — повторим автоматически';
+        }
+      } catch (_) {}
+    }
+    poll();
+    setInterval(poll, 3000);
   });
 })();

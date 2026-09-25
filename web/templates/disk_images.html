@@ -3,9 +3,15 @@
 {% set page_title = 'Готовые системы' %}
 
 {% block page_header %}{% include "_images_header.html" %}{% endblock %}
+{% block alerts %}{{ super() }}{% include "_downloads_flash.html" %}{% endblock %}
 
 {% block content %}
+{% set kind = 'disk' %}
+{% set dl = downloads_panel(kind) %}
+{% include "_downloads_active.html" %}
 <section class="grid grid-main">
+  <div class="stack">
+  {% include "_downloads_catalog.html" %}
   <article class="card">
     <div class="card-header"><div><h2>Готовые системы</h2><p>Образы уже установленных систем — машина запускается сразу, без установки</p></div></div>
     {% if images %}
@@ -22,9 +28,10 @@
         {% endfor %}
       </div>
     {% else %}
-      {{ empty('hard-drive', 'Готовых образов пока нет', 'Подойдут облачные образы Ubuntu и Debian, образы для Raspberry Pi, диски других систем виртуализации.') }}
+      {{ empty('hard-drive', 'Готовых образов пока нет', 'Выберите систему в каталоге выше — или загрузите свой образ: облачные Ubuntu и Debian, образы для Raspberry Pi, диски других систем виртуализации.') }}
     {% endif %}
   </article>
+  </div>
 
   <aside class="stack">
     <article class="card">
@@ -33,6 +40,7 @@
         {{ uploader('/disk-images/upload', 'image_file', '.qcow2,.img,.raw,.img.xz,.zip,.tar.gz,.tgz', 'Перетащите файл образа сюда', '.qcow2, .img, .raw, а также архивы .img.xz, .zip, .tar.gz', '/disk-images', 'Загрузить') }}
       </div>
     </article>
+    {% include "_downloads_url.html" %}
     <article class="card">
       <div class="card-body stack-sm">
         <div class="row">{{ icon('sparkles') }}<h3>Всё делается автоматически</h3></div>

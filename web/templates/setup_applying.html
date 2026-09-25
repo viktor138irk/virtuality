@@ -1,0 +1,30 @@
+{% extends "setup_base.html" %}
+{% from "_ui.html" import icon, alert %}
+{% block rail %}{% endblock %}
+{% block step %}
+  <div class="card-header"><div><h2>Применяем настройки</h2><p>Панель перезапускается — это занимает несколько секунд.</p></div></div>
+  <div class="card-body stack" data-applying data-url="{{ final_url }}">
+    <div class="row" style="gap:14px"><span class="spinner" style="width:22px;height:22px;color:var(--brand)"></span><strong data-applying-status>Перезапускаем панель…</strong></div>
+    <div class="progress indeterminate"><span></span></div>
+    <div class="kv"><div><span>Новый адрес панели</span><strong class="mono"><a href="{{ final_url }}">{{ final_url }}</a></strong></div></div>
+    {% if tls %}
+      <div class="alert info">{{ icon('shield-check') }}<div><strong>Браузер предупредит о сертификате</strong>Сертификат создан этим сервером, поэтому браузер его не знает. Нажмите «Дополнительно» → «Перейти на сайт» (Chrome) или «Принять риск и продолжить» (Firefox). Дальше предупреждение не появится.</div></div>
+    {% endif %}
+    <p class="subtle small">Сохраните новый адрес в закладки. Если страница не открылась сама через 15 секунд, перейдите по ссылке выше.</p>
+  </div>
+  <div class="card-footer"><a class="btn btn-primary btn-lg" href="{{ final_url }}">Открыть панель{{ icon('arrow-right') }}</a></div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var url = document.querySelector('[data-applying]').dataset.url;
+    var status = document.querySelector('[data-applying-status]');
+    var left = 8;
+    var timer = setInterval(function () {
+      left -= 1;
+      status.textContent = 'Открываем панель по новому адресу через ' + left + ' с…';
+      if (left <= 0) { clearInterval(timer); location.href = url; }
+    }, 1000);
+  })();
+</script>
+{% endblock %}

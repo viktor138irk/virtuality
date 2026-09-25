@@ -1,0 +1,9 @@
+Name:           clean
+Domain:         web01
+Current:        yes
+State:          running
+Location:       internal
+Parent:         -
+Children:       1
+Descendants:    1
+Metadata:       yes
