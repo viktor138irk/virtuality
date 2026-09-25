@@ -1,48 +1,37 @@
+{% from "_ui.html" import icon, logo, vm_badge %}
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Консоль {{ vm.name }} — {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
+  <title>Экран {{ vm.name }} — Virtuality</title>
+  <link rel="stylesheet" href="/static/app.css?v={{ app_version }}">
 </head>
-<body class="console-body">
-  <div class="console-window">
-    <header class="console-topbar">
-      <div class="console-title">
-        <strong>{{ vm.name }}</strong>
-        <span>VNC {{ console.display }}{% if console.port %} · port {{ console.port }}{% endif %}</span>
+<body class="console-page">
+  <header class="console-bar">
+    <div class="row">
+      <span class="brand-mark" style="width:28px;height:28px;border-radius:8px">{{ logo() }}</span>
+      <strong>{{ vm.name }}</strong>
+      {{ vm_badge(vm.info.state) }}
+    </div>
+    <div class="row">
+      <span class="small" style="color:#8b95a7">Чтобы вернуть курсор, нажмите Ctrl+Alt</span>
+      <a class="btn btn-sm" href="/vm/{{ vm.name }}">{{ icon('settings', 'icon-sm') }}Настройки машины</a>
+    </div>
+  </header>
+  {% if console.url %}
+    <iframe class="console-frame" src="{{ console.url }}" allowfullscreen title="Экран машины {{ vm.name }}"></iframe>
+  {% else %}
+    <main style="flex:1;display:grid;place-items:center;padding:24px">
+      <div class="card" style="max-width:480px;background:#11141b;border-color:#232935">
+        <div class="empty">
+          <div class="empty-art">{{ icon('monitor', 'icon-xl') }}</div>
+          <h3 style="color:#edf0f6">Экран недоступен</h3>
+          <p style="color:#a9b1c2">{% if not console.has_novnc %}На сервере не установлен компонент noVNC. Переустановите панель: <code>sudo bash scripts/install_web_panel.sh</code>{% else %}Машина выключена или ещё загружается. Запустите её и обновите страницу.{% endif %}</p>
+          <div class="row"><a class="btn btn-primary" href="/vm/{{ vm.name }}">К машине</a><button class="btn" onclick="location.reload()">Обновить</button></div>
+        </div>
       </div>
-      <div class="console-actions">
-        <span class="status {{ 'ok' if console.url else 'err' }}">{{ 'connected ready' if console.url else 'not ready' }}</span>
-        <a class="link-pill" href="/vm/{{ vm.name }}">VM</a>
-        <a class="link-pill" href="/">Дашборд</a>
-      </div>
-    </header>
-
-    {% if console.url %}
-      <main class="console-main">
-        <iframe class="console-frame-full" src="{{ console.url }}" allowfullscreen></iframe>
-      </main>
-    {% else %}
-      <main class="console-main console-error-wrap">
-        <section class="card console-error-card">
-          <div class="card-head">
-            <h2>Консоль пока недоступна</h2>
-            <span class="status err">not ready</span>
-          </div>
-          <div class="services">
-            <div class="service-row"><span>noVNC path</span><span>{{ console.novnc_dir }}</span></div>
-            <div class="service-row"><span>VNC display</span><span>{{ console.display }}</span></div>
-            <div class="service-row"><span>VNC port</span><span>{{ console.port or 'not available' }}</span></div>
-            <div class="service-row"><span>VM IP</span><span>{{ vm.ip }}</span></div>
-          </div>
-          <div class="notice top-space">
-            Проверь, что VM запущена, у неё есть VNC display, а пакет novnc установлен. После обновления web-панели установщик должен поставить novnc автоматически.
-          </div>
-        </section>
-      </main>
-    {% endif %}
-  </div>
+    </main>
+  {% endif %}
 </body>
 </html>

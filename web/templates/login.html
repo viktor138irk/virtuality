@@ -1,43 +1,72 @@
+{% from "_ui.html" import icon, logo, alert %}
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ app_name }} Login</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Вход — Virtuality</title>
   <script>
-    document.documentElement.dataset.theme = localStorage.getItem('virtualityTheme') || 'neon';
+    (function () {
+      var mode = 'system';
+      try { mode = localStorage.getItem('virtualityTheme') || 'system'; } catch (e) {}
+      var dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
   </script>
-  <link rel="stylesheet" href="/static/app.css">
-  <link rel="stylesheet" href="/static/themes.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ app_version }}">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235a48f5'/%3E%3Cpath d='M9 10l7 13 7-13' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
-<body class="auth-body">
-  <main class="auth-shell">
-    <section class="auth-card">
-      <div class="brand auth-brand">Virtuality</div>
-      <p class="muted">Вход в панель управления виртуализацией</p>
-
-      {% if not configured %}
-        <div class="alert danger">Панель ещё не настроена. Повтори установку веб-панели.</div>
-      {% endif %}
-
-      {% if error %}
-        <div class="alert danger">{{ error }}</div>
-      {% endif %}
-
-      <form method="post" action="/login" class="auth-form">
-        <label>
-          <span>Linux-пользователь</span>
-          <input type="text" name="username" value="{{ auth_user }}" autocomplete="username" required>
-        </label>
-        <label>
-          <span>Пароль</span>
-          <input type="password" name="password" autocomplete="current-password" required autofocus>
-        </label>
-        <button type="submit" class="primary wide">Войти</button>
-      </form>
-
-      <p class="muted small-note">Используется пароль системного пользователя Linux. Пароль не хранится в Virtuality.</p>
+<body>
+  <div class="auth">
+    <section class="auth-hero">
+      <div class="logo">
+        <span class="brand-mark">{{ logo() }}</span>
+        <span class="brand-name">Virtuality<small>Платформа виртуализации</small></span>
+      </div>
+      <div>
+        <h1>Ваши серверы.<br><span>Под полным контролем.</span></h1>
+        <p>Создавайте виртуальные машины, открывайте к ним доступ из интернета и следите за состоянием сервера — всё в одном окне, без командной строки.</p>
+        <div class="auth-features">
+          <div class="auth-feature"><span class="icon-wrap">{{ icon('zap') }}</span>Новая машина за пару минут</div>
+          <div class="auth-feature"><span class="icon-wrap">{{ icon('monitor') }}</span>Экран машины прямо в браузере</div>
+          <div class="auth-feature"><span class="icon-wrap">{{ icon('shield-check') }}</span>Работает на вашем железе, данные у вас</div>
+        </div>
+      </div>
+      <div class="auth-foot">Virtuality {{ app_version }} · KVM · QEMU · libvirt</div>
     </section>
-  </main>
+
+    <section class="auth-panel">
+      <form method="post" action="/login" class="auth-form stack">
+        <div class="logo auth-mobile-brand">
+          <span class="brand-mark">{{ logo() }}</span>
+          <span class="brand-name">Virtuality<small>Платформа виртуализации</small></span>
+        </div>
+        <div>
+          <h2>Вход в панель</h2>
+          <p>Используйте имя и пароль пользователя этого сервера.</p>
+        </div>
+
+        {% if not configured %}
+          {{ alert('warning', 'Панель ещё не настроена. Запустите установку web-панели повторно.') }}
+        {% endif %}
+        {% if error %}
+          {{ alert('danger', error) }}
+        {% endif %}
+
+        <div class="field">
+          <label for="username">Имя пользователя</label>
+          <input class="input" id="username" type="text" name="username" value="{{ auth_user }}" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+        </div>
+        <div class="field">
+          <label for="password">Пароль</label>
+          <input class="input" id="password" type="password" name="password" autocomplete="current-password" required autofocus>
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg btn-block">Войти{{ icon('arrow-right') }}</button>
+        <p class="subtle small">{{ icon('lock', 'icon-sm') }} Пароль проверяется системой сервера и нигде не сохраняется.</p>
+      </form>
+    </section>
+  </div>
+  <script src="/static/panel.js?v={{ app_version }}" defer></script>
 </body>
 </html>

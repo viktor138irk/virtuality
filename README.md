@@ -4,7 +4,7 @@
 
 Цель проекта — собрать понятную, компактную и расширяемую систему для управления виртуальными машинами, ISO-образами, NAT/bridge-сетью, пробросом портов, диагностикой, web-console/noVNC, backup/snapshot-функциями и будущей кластеризацией.
 
-> Текущий статус: ранняя стадия разработки. Уже есть one-command установка, автоопределение профиля хоста, web-панель, авторизация через Linux-пользователя, ISO-менеджер, создание VM из интерфейса, журнал операций, NAT Router для VPS/ARM edge nodes и port forwarding.
+> Текущий статус: версия 0.10 — код панели покрыт тестами, есть установочный ISO-образ. Уже есть one-command установка, автоопределение профиля хоста, web-панель, авторизация через Linux-пользователя, ISO-менеджер, создание VM из интерфейса, журнал операций, NAT Router для VPS/ARM edge nodes и port forwarding.
 
 ---
 
@@ -32,6 +32,29 @@ generic-arm64          # другая ARM64-плата
 ```
 
 Для ARM64-плат правильный сценарий — **ARM64-гости**, NAT-сеть и позже cloud-image/cloud-init шаблоны. x86_64 ISO на Raspberry/Orange Pi не являются целевым режимом.
+
+![Обзор](docs/screenshots/dashboard.png)
+
+| Мастер создания машины | Страница машины |
+|---|---|
+| ![Создание машины](docs/screenshots/create.png) | ![Машина](docs/screenshots/vm.png) |
+
+| Сеть и доступ | Тёмная тема |
+|---|---|
+| ![Сеть](docs/screenshots/network.png) | ![Тёмная тема](docs/screenshots/dashboard-dark.png) |
+
+---
+
+## Установка с ISO-образа
+
+Для установки на «голое» железо собирается загрузочный ISO на базе чистого Ubuntu Server 26.04 LTS: установщик спрашивает только сеть, диск и пользователя, а при первой загрузке нода настраивается сама.
+
+```bash
+make iso               # dist/virtuality-<версия>-ubuntu-26.04-amd64.iso
+make iso ARCH=arm64
+```
+
+Подробно: [`docs/IMAGE.md`](docs/IMAGE.md).
 
 ---
 
@@ -125,7 +148,7 @@ CPU: 2 ядра с Intel VT-x / AMD-V
 RAM: 4 GB
 /: минимум 8 GB свободно
 /var/lib: минимум 20 GB свободно
-OS: Ubuntu Server 24.04 LTS / Debian-like с apt
+OS: Ubuntu Server 26.04 / 24.04 LTS или Debian 13
 Network: один проводной интерфейс
 ```
 
@@ -136,7 +159,7 @@ CPU: 4+ ядра
 RAM: 16+ GB
 Storage: 100+ GB SSD/NVMe под /var/lib/virtuality
 Network: 1 Gbit/s+
-OS: Ubuntu Server 24.04 LTS
+OS: Ubuntu Server 26.04 LTS
 ```
 
 ARM64 edge nodes:
@@ -186,6 +209,8 @@ curl -fsSL https://raw.githubusercontent.com/viktor138irk/virtuality/main/instal
 /var/lib/virtuality/backups             # backups
 /var/log/virtuality                     # логи установки и диагностики
 /var/log/virtuality/operations          # JSON/log фоновых операций
+/var/lib/virtuality/config/web.env      # настройки ноды: порт, пользователь, автообновление
+/var/lib/virtuality/disk-images         # загруженные образы дисков
 /etc/virtuality/nftables/virtuality.nft # nftables-правила Virtuality
 ```
 
@@ -375,12 +400,16 @@ sudo virsh pool-refresh virtuality-iso
 
 ## Обновление
 
+Из web-панели: раздел `/update`. Вручную:
+
 ```bash
 cd /opt/virtuality/source
 sudo git pull
 sudo bash scripts/install_web_panel.sh
 sudo systemctl restart virtuality-web
 ```
+
+Порт панели, пользователь и режим автообновления сохраняются в `/var/lib/virtuality/config/web.env` и не сбрасываются при обновлениях.
 
 Полная повторная установка компонентов ноды:
 
@@ -389,6 +418,45 @@ cd /opt/virtuality/source
 sudo bash install_virtuality_node.sh
 sudo bash scripts/install_web_panel.sh
 ```
+
+---
+
+## Продакшен-настройки
+
+Настройки ноды — `/var/lib/virtuality/config/web.env`:
+
+```text
+VIRTUALITY_WEB_PORT=8088        # порт панели
+VIRTUALITY_WEB_HOST=0.0.0.0     # 127.0.0.1, если панель стоит за reverse proxy
+VIRTUALITY_AUTH_USER=admin      # Linux-пользователь для входа
+VIRTUALITY_AUTO_UPDATE=1        # 0 — отключить ночное автообновление с GitHub
+VIRTUALITY_COOKIE_SECURE=0      # 1 — cookie только по HTTPS (за reverse proxy с TLS)
+```
+
+После изменения: `cd /opt/virtuality/source && sudo bash scripts/install_web_panel.sh`. Любой параметр можно передать и переменной окружения при установке, например `VIRTUALITY_AUTO_UPDATE=0`.
+
+Рекомендации:
+
+- для продакшена отключите автообновление (`VIRTUALITY_AUTO_UPDATE=0`) и обновляйтесь вручную через `/update` после проверки версии;
+- открывайте панель наружу только через HTTPS reverse proxy (nginx/Caddy) с `VIRTUALITY_WEB_HOST=127.0.0.1` и `VIRTUALITY_COOKIE_SECURE=1`;
+- reverse proxy должен передавать исходный `Host` (nginx: `proxy_set_header Host $host;`, для noVNC-консоли ещё `Upgrade`/`Connection`), иначе панель отклонит POST-запросы как cross-origin;
+- мониторинг: `GET /healthz` без авторизации возвращает `{"ok": true, "version": "..."}`;
+- после 5 неверных паролей вход с этого адреса блокируется на 5 минут; сессия живёт 12 часов;
+- правила проброса портов восстанавливаются после перезагрузки сервисом `virtuality-network.service`.
+
+---
+
+## Разработка
+
+```bash
+pip install -r web/requirements.txt -r requirements-dev.txt
+make check                       # pyflakes + shellcheck + pytest
+python3 tests/dev_server.py      # панель на http://127.0.0.1:8765 с имитацией virsh, вход: любой пароль
+```
+
+Интерфейс: шаблоны `web/templates` (общий каркас `base.html`, компоненты `_ui.html`), стили `web/static/app.css` (светлая и тёмная темы на CSS-переменных), поведение `web/static/panel.js`. Шрифт Inter и иконки Lucide лежат в `web/static` — панель работает без доступа в интернет.
+
+Код панели лежит в `web/` целиком и устанавливается как есть. Патчить `app.py` во время установки больше не нужно: изменения вносятся прямо в `web/` и покрываются тестами в `tests/`. GitHub Actions запускает проверки на Python 3.11–3.13 и собирает ISO по тегу `v*`.
 
 ---
 
@@ -416,14 +484,13 @@ journalctl -u virtuality-web -f
 
 - ARM64 cloud-image templates;
 - cloud-init для быстрых VM;
-- web-console/noVNC;
 - управление storage pools;
 - backup/snapshot manager;
 - сетевой менеджер bridge/VLAN;
 - роли и права пользователей;
 - журнал событий;
-- автообновление;
-- кластеризация.
+- кластеризация;
+- готовые образы для Raspberry Pi / Orange Pi 5.
 
 ---
 

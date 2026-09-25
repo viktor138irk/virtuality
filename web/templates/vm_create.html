@@ -1,203 +1,171 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Создать VM — {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  {% set disk_images_available = disk_images is defined and disk_images %}
-  {% set disk_feature_available = disk_images is defined %}
-  <div class="v-layout">
-    {% include "_sidebar.html" %}
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, alert %}
+{% set page_title = 'Новая машина' %}
+{% set source = form.source_type|default('iso') %}
+{% set preset_match = namespace(id='custom') %}
+{% for p in vm_presets %}{% if p.vcpus|string == form.vcpus|string and p.memory|string == form.memory|string and p.disk_size|string == form.disk_size|string %}{% set preset_match.id = p.id %}{% endif %}{% endfor %}
 
-    <main class="v-main">
-      <header class="v-topbar">
-        <div>
-          <div class="v-title">Создать VM</div>
-          <div class="v-subtitle">Новая виртуальная машина через libvirt / virt-install</div>
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <div class="eyebrow"><a href="/">{{ icon('arrow-left', 'icon-sm') }} Все машины</a></div>
+    <h1>Новая виртуальная машина</h1>
+    <p class="lead">Заполните три шага — всё остальное Virtuality настроит сам.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<form method="post" action="/vm/create" class="grid grid-main" data-wizard data-has-isos="{{ '1' if isos else '0' }}" data-has-disks="{{ '1' if disk_images else '0' }}">
+  <div class="stack">
+    <article class="card step-card">
+      <div class="step-head"><span class="step-num">1</span><div><h2>Название и система</h2><p>Как назовём машину и что на неё установить</p></div></div>
+      <div class="step-body form-grid">
+        <div class="field">
+          <label for="name">Название машины</label>
+          <input class="input" id="name" type="text" name="name" value="{{ form.name or '' }}" placeholder="например, web-server" pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]{1,62}" autocomplete="off" required>
+          <span class="hint">Латинские буквы, цифры, точка, дефис. От 2 до 63 символов.</span>
         </div>
-        <div class="top-meta">
-          <span>user: {{ user }}</span>
-          <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+
+        <div class="options" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+          <label class="option">
+            <input type="radio" name="source_type" value="iso" {% if source != 'disk_image' %}checked{% endif %}>
+            <span class="option-body">
+              <span class="option-top"><span class="option-icon">{{ icon('disc-3') }}</span><span class="option-check"></span></span>
+              <span class="option-title">Установить с диска</span>
+              <span class="option-text">Установочный образ .iso — как установка на обычный компьютер</span>
+            </span>
+          </label>
+          <label class="option">
+            <input type="radio" name="source_type" value="disk_image" {% if source == 'disk_image' %}checked{% endif %}>
+            <span class="option-body">
+              <span class="option-top"><span class="option-icon">{{ icon('hard-drive') }}</span><span class="option-check"></span></span>
+              <span class="option-title">Готовая система</span>
+              <span class="option-text">Образ уже установленной системы: .qcow2, .img, .raw</span>
+            </span>
+          </label>
         </div>
-      </header>
 
-      {% if error %}
-        <div class="alert danger">{{ error }}</div>
-      {% endif %}
+        <div class="field" data-show-when="source_type=iso">
+          <label for="iso_path">Установочный образ</label>
+          {% if isos %}
+            <select class="select" id="iso_path" name="iso_path">
+              {% for iso in isos %}<option value="{{ iso.path }}" data-label="{{ iso.name }}" {% if form.iso_path == iso.path %}selected{% endif %}>{{ iso.name }} · {{ iso.size }}</option>{% endfor %}
+            </select>
+            <span class="hint">Нужен другой? <a href="/iso">Загрузите образ</a>.</span>
+          {% endif %}
+        </div>
+        <div class="field" data-show-when="source_type=disk_image">
+          <label for="disk_image_path">Образ системы</label>
+          {% if disk_images %}
+            <select class="select" id="disk_image_path" name="disk_image_path">
+              {% for image in disk_images %}<option value="{{ image.path }}" data-label="{{ image.name }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.name }} · {{ image.size }}</option>{% endfor %}
+            </select>
+            <span class="hint">Образ будет скопирован — оригинал останется для других машин.</span>
+          {% endif %}
+        </div>
+        <div class="alert warning" data-missing-source="iso" hidden>{{ icon('triangle-alert') }}<div><strong>Нет установочных образов</strong>Загрузите .iso с системой, например Ubuntu или Debian.</div><a class="btn btn-sm alert-action" href="/iso">Загрузить</a></div>
+        <div class="alert warning" data-missing-source="disk_image" hidden>{{ icon('triangle-alert') }}<div><strong>Нет готовых образов</strong>Загрузите образ системы в формате .qcow2, .img или архив.</div><a class="btn btn-sm alert-action" href="/disk-images">Загрузить</a></div>
+      </div>
+    </article>
 
-      <section class="grid two">
-        <article class="card">
-          <div class="card-head">
-            <h2>Параметры</h2>
-            <span class="pill">VM wizard</span>
-          </div>
-
-          <form method="post" action="/vm/create" class="form-grid">
-            <label>
-              <span>Имя VM</span>
-              <input type="text" name="name" value="{{ form.name or '' }}" placeholder="ubuntu-test" required>
+    <article class="card step-card">
+      <div class="step-head"><span class="step-num">2</span><div><h2>Мощность</h2><p>Сколько ресурсов сервера выделить машине. Можно поменять позже.</p></div></div>
+      <div class="step-body form-grid">
+        <div class="options options-4">
+          {% for p in vm_presets %}
+            <label class="option">
+              <input type="radio" name="preset" value="{{ p.id }}" data-vcpus="{{ p.vcpus }}" data-memory="{{ p.memory }}" data-disk="{{ p.disk_size }}" {% if preset_match.id == p.id %}checked{% endif %}>
+              <span class="option-body">
+                <span class="option-top"><span class="option-title">{{ p.title }}</span><span class="option-check"></span></span>
+                <span class="option-text">{{ p.hint }}</span>
+                <span class="option-specs"><span class="tag">{{ p.vcpus }} {{ plural(p.vcpus, 'ядро', 'ядра', 'ядер') }}</span><span class="tag">{{ (p.memory / 1024)|int }} ГБ ОЗУ</span><span class="tag">{{ p.disk_size }} ГБ</span></span>
+              </span>
             </label>
+          {% endfor %}
+          <label class="option">
+            <input type="radio" name="preset" value="custom" {% if preset_match.id == 'custom' %}checked{% endif %}>
+            <span class="option-body">
+              <span class="option-top"><span class="option-title">Своя</span><span class="option-check"></span></span>
+              <span class="option-text">Задать вручную</span>
+              <span class="option-specs"><span class="tag">{{ icon('settings', 'icon-sm') }}Точная настройка</span></span>
+            </span>
+          </label>
+        </div>
+        <div class="form-row-3" data-custom-resources data-visible-when="preset=custom">
+          <div class="field"><label for="vcpus">Ядра</label><input class="input" id="vcpus" type="number" name="vcpus" min="1" max="128" value="{{ form.vcpus }}" required></div>
+          <div class="field"><label for="memory">Память, МБ</label><input class="input" id="memory" type="number" name="memory" min="512" max="262144" step="256" value="{{ form.memory }}" required></div>
+          <div class="field" data-show-when="source_type=iso"><label for="disk_size">Диск, ГБ</label><input class="input" id="disk_size" type="number" name="disk_size" min="4" max="4096" value="{{ form.disk_size }}" required></div>
+        </div>
+        {% if profile.virtualization_warning %}{{ alert('warning', 'На этом сервере нет аппаратного ускорения — машины будут заметно медленнее.') }}{% endif %}
+      </div>
+    </article>
 
+    <article class="card step-card">
+      <div class="step-head"><span class="step-num">3</span><div><h2>Сеть</h2><p>Как машина будет выходить в интернет</p></div></div>
+      <div class="step-body form-grid">
+        <div class="options" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+          <label class="option">
+            <input type="radio" name="network_mode" value="nat" {% if form.network_mode != 'bridge' %}checked{% endif %}>
+            <span class="option-body">
+              <span class="option-top"><span class="option-icon">{{ icon('shield-check') }}</span>{{ badge('Рекомендуем', 'brand', False) }}</span>
+              <span class="option-title">Автоматически</span>
+              <span class="option-text">Машина получит адрес сама и выйдет в интернет через сервер. Снаружи её не видно, пока вы не откроете доступ.</span>
+            </span>
+          </label>
+          <label class="option">
+            <input type="radio" name="network_mode" value="bridge" {% if form.network_mode == 'bridge' %}checked{% endif %} {% if not profile.bridge_available %}disabled{% endif %}>
+            <span class="option-body">
+              <span class="option-top"><span class="option-icon">{{ icon('network') }}</span><span class="option-check"></span></span>
+              <span class="option-title">В локальной сети</span>
+              <span class="option-text">{% if profile.bridge_available %}Машина станет отдельным устройством в вашей сети и получит адрес от роутера.{% else %}Недоступно: на сервере не настроен сетевой мост br0.{% endif %}</span>
+            </span>
+          </label>
+        </div>
+
+        <details class="advanced">
+          <summary>{{ icon('wrench', 'icon-sm') }}Дополнительные настройки<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+          <div class="advanced-body form-grid">
             <div class="form-row">
-              <label>
-                <span>Источник VM</span>
-                <select id="source-type" name="source_type" required>
-                  <option value="iso" {% if form.source_type|default('iso') != 'disk_image' %}selected{% endif %}>ISO-установщик</option>
-                  {% if disk_feature_available %}
-                    <option value="disk_image" {% if form.source_type|default('iso') == 'disk_image' %}selected{% endif %}>Готовый диск .img / .raw / .qcow2</option>
-                  {% endif %}
+              <div class="field">
+                <label for="guest_arch">Архитектура</label>
+                <select class="select" id="guest_arch" name="guest_arch">
+                  {% for arch in arch_options %}<option value="{{ arch.value }}" {% if form.guest_arch == arch.value %}selected{% endif %}>{{ arch.label }}</option>{% endfor %}
                 </select>
-              </label>
-              <label>
-                <span>Архитектура VM</span>
-                <select name="guest_arch" required>
-                  {% if arch_options is defined and arch_options %}
-                    {% for arch in arch_options %}
-                      <option value="{{ arch.value }}" {% if form.guest_arch == arch.value %}selected{% endif %}>{{ arch.label }}</option>
-                    {% endfor %}
-                  {% else %}
-                    <option value="x86_64" {% if form.guest_arch|default('x86_64') == 'x86_64' %}selected{% endif %}>x86_64 / amd64</option>
-                    <option value="aarch64" {% if form.guest_arch|default('x86_64') == 'aarch64' %}selected{% endif %}>ARM64 / aarch64</option>
-                  {% endif %}
+              </div>
+              <div class="field">
+                <label for="boot_order">Порядок загрузки</label>
+                <select class="select" id="boot_order" name="boot_order">
+                  {% for opt in boot_options %}<option value="{{ opt.value }}" {% if form.boot_order == opt.value %}selected{% endif %}>{{ opt.label }}</option>{% endfor %}
                 </select>
-              </label>
+              </div>
             </div>
-
-            <div class="form-row">
-              <label>
-                <span>RAM, MB</span>
-                <input type="number" name="memory" min="512" max="262144" step="512" value="{{ form.memory }}" required>
-              </label>
-              <label>
-                <span>CPU</span>
-                <input type="number" name="vcpus" min="1" max="128" value="{{ form.vcpus }}" required>
-              </label>
-            </div>
-
-            <label id="disk-size-row">
-              <span>Диск, GB</span>
-              <input type="number" name="disk_size" min="4" max="4096" value="{{ form.disk_size }}" required>
-            </label>
-
-            <label id="iso-source-row">
-              <span id="source-image-label">ISO образ</span>
-              <select name="iso_path" {% if isos %}required{% endif %}>
-                {% for iso in isos %}
-                  <option value="{{ iso.path }}" {% if form.iso_path == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
-                {% endfor %}
-              </select>
-            </label>
-
-            {% if disk_feature_available %}
-            <div id="disk-image-source-row" class="form-subcard">
-              <label>
-                <span id="disk-image-label">Готовый образ диска</span>
-                <select name="disk_image_path">
-                  {% for image in disk_images %}
-                    <option value="{{ image.path }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.name }} — {{ image.size }} — {{ image.format }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <label class="check-row">
-                <input type="checkbox" name="replace_existing_disk" value="1" {% if form.replace_existing_disk == '1' %}checked{% endif %}>
-                <span>Заменить существующий диск VM, если остался после неудачной установки</span>
-              </label>
-              <div class="muted small-note">Опция нужна, если предыдущая попытка создания VM оборвалась и оставила хвост в /var/lib/virtuality/images.</div>
-            </div>
-            {% endif %}
-
-            <label>
-              <span>Режим сети</span>
-              <select name="network_mode" required>
-                <option value="nat" {% if form.network_mode != 'bridge' %}selected{% endif %}>VPS NAT Router — virtuality-nat</option>
-                <option value="bridge" {% if form.network_mode == 'bridge' %}selected{% endif %}>Bridge — br0 / локальная сеть</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Bridge для режима Bridge</span>
-              <input type="text" name="bridge" value="{{ form.bridge }}" placeholder="br0">
-            </label>
-
-            <div id="source-mode-notice" class="notice">
-              Для обычных ISO выбирай x86_64 на ПК/VPS. Для Raspberry/Orange Pi образов обычно нужен ARM64/aarch64 и источник “Готовый диск”.
-            </div>
-
-            <button id="create-vm-button" type="submit" class="primary wide">Создать виртуальную машину</button>
-            {% if not isos %}
-              <div id="iso-missing-warning" class="alert danger">Для режима ISO сначала загрузи ISO-образ в ISO-менеджере.</div>
-            {% endif %}
-            {% if disk_feature_available and not disk_images %}
-              <div id="disk-image-missing-warning" class="alert danger">Для режима готового диска сначала загрузи .img, .raw или .qcow2 в разделе «Диски».</div>
-            {% endif %}
-          </form>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>Архитектура и источник</h2>
-            <a class="link-pill" href="/disk-images">Открыть диски</a>
-          </div>
-          <div class="quick-actions">
-            <div class="big-action static">
-              <strong>x86_64 / amd64</strong>
-              <span>Обычные ПК, серверы, большинство VPS и стандартные Ubuntu/Debian ISO.</span>
-            </div>
-            <div class="big-action static">
-              <strong>ARM64 / aarch64</strong>
-              <span>На x86-хосте работает как QEMU-эмуляция из готового диска .img/.qcow2. Это медленно, но честно.</span>
-            </div>
-            <div class="big-action static">
-              <strong>Готовый диск</strong>
-              <span>Опция показывается только если backend передал список готовых образов. Так форма не уходит в поломанное состояние.</span>
+            <div class="field">
+              <label for="bridge">Сетевой мост для режима «В локальной сети»</label>
+              <input class="input" id="bridge" type="text" name="bridge" value="{{ form.bridge or 'br0' }}" placeholder="br0">
             </div>
           </div>
-          <pre>ISO x86: virt-install --arch x86_64 --cdrom ubuntu.iso
-IMG ARM: qemu-img convert -O qcow2 image.img VM.qcow2
-         virsh define /tmp/virtuality-VM-arm64.xml && virsh start VM</pre>
-        </article>
-      </section>
-    </main>
+        </details>
+      </div>
+    </article>
   </div>
 
-  <script>
-    const sourceType = document.getElementById('source-type');
-    const isoRow = document.getElementById('iso-source-row');
-    const diskImageRow = document.getElementById('disk-image-source-row');
-    const diskSizeRow = document.getElementById('disk-size-row');
-    const sourceImageLabel = document.getElementById('source-image-label');
-    const diskImageLabel = document.getElementById('disk-image-label');
-    const sourceModeNotice = document.getElementById('source-mode-notice');
-    const isoWarning = document.getElementById('iso-missing-warning');
-    const diskWarning = document.getElementById('disk-image-missing-warning');
-    const createButton = document.getElementById('create-vm-button');
-    const hasIsos = {{ 'true' if isos else 'false' }};
-    const diskFeatureAvailable = {{ 'true' if disk_feature_available else 'false' }};
-    const hasDiskImages = {{ 'true' if disk_images_available else 'false' }};
-
-    function refreshSourceUI() {
-      const isDisk = diskFeatureAvailable && sourceType.value === 'disk_image';
-      isoRow.style.display = isDisk ? 'none' : 'grid';
-      if (diskImageRow) diskImageRow.style.display = isDisk ? 'grid' : 'none';
-      sourceImageLabel.textContent = isDisk ? 'Готовый образ диска' : 'ISO образ';
-      if (diskImageLabel) diskImageLabel.textContent = 'Готовый образ диска';
-      diskSizeRow.style.opacity = isDisk ? '.45' : '1';
-      diskSizeRow.querySelector('span').textContent = isDisk ? 'Диск, GB — не используется при импорте' : 'Диск, GB';
-      sourceModeNotice.textContent = isDisk
-        ? 'Выбран источник “Готовый диск”: Virtuality импортирует .img/.raw/.qcow2 в новый qcow2-диск VM. Поле “Диск, GB” не используется.'
-        : 'Выбран источник “ISO-установщик”: Virtuality создаст новый диск указанного размера и запустит установку с ISO.';
-      if (isoWarning) isoWarning.style.display = !isDisk && !hasIsos ? 'block' : 'none';
-      if (diskWarning) diskWarning.style.display = isDisk && !hasDiskImages ? 'block' : 'none';
-      createButton.disabled = isDisk ? !hasDiskImages : !hasIsos;
-    }
-
-    sourceType.addEventListener('change', refreshSourceUI);
-    refreshSourceUI();
-  </script>
-  <script src="/static/panel.js" defer></script>
-</body>
-</html>
+  <aside class="summary">
+    <article class="card">
+      <div class="card-header"><h2>Итого</h2></div>
+      <div class="card-body" style="padding-top:8px;padding-bottom:8px">
+        <div class="summary-row"><span>Название</span><strong data-summary="name">—</strong></div>
+        <div class="summary-row"><span>Система</span><strong data-summary="source">—</strong></div>
+        <div class="summary-row"><span>Процессор</span><strong data-summary="cpu">—</strong></div>
+        <div class="summary-row"><span>Память</span><strong data-summary="memory">—</strong></div>
+        <div class="summary-row"><span>Диск</span><strong data-summary="disk">—</strong></div>
+        <div class="summary-row"><span>Сеть</span><strong data-summary="network">—</strong></div>
+      </div>
+      <div class="card-footer" style="display:grid">
+        <button type="submit" class="btn btn-primary btn-lg btn-block" data-create-button data-busy="Создаём машину…">{{ icon('zap') }}Создать машину</button>
+        <p class="subtle small" style="text-align:center">Вы увидите прогресс, а затем сможете открыть экран машины</p>
+      </div>
+    </article>
+  </aside>
+</form>
+{% endblock %}

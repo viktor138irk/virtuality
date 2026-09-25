@@ -91,3 +91,6 @@ composer.lock
 # System files
 *.pid
 *.sock
+
+# Offline Python wheels bundled into system images
+wheels/

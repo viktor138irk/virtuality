@@ -7,6 +7,7 @@ from typing import Any
 
 PROFILE_FILE = Path('/var/lib/virtuality/config/host_profile.json')
 DEFAULT_BRIDGE = 'br0'
+PROFILE_SCHEMA = 3
 
 
 def run_cmd(cmd: list[str], timeout: int = 5) -> dict[str, Any]:
@@ -34,9 +35,12 @@ def detect_board_model() -> str:
         if value:
             return value
     cpuinfo = read_text('/proc/cpuinfo')
-    for line in cpuinfo.splitlines():
-        if line.lower().startswith(('model', 'hardware')) and ':' in line:
-            return line.split(':', 1)[1].strip()
+    for prefix in ('model name', 'hardware', 'model'):
+        for line in cpuinfo.splitlines():
+            key, _, value = line.partition(':')
+            value = value.strip()
+            if key.strip().lower() == prefix and value and not value.isdigit():
+                return value
     return 'unknown'
 
 
@@ -70,7 +74,7 @@ def classify_profile(arch: str, model: str) -> dict[str, str]:
         if 'raspberry pi' in low:
             return {
                 'profile': 'raspberry-arm64',
-                'label': 'Raspberry Pi ARM64 Edge Node',
+                'label': 'Raspberry Pi (ARM64)',
                 'recommended_network': 'nat',
                 'recommended_guest_arch': 'aarch64',
                 'recommended_vm_mode': 'arm64-cloud-image',
@@ -78,21 +82,21 @@ def classify_profile(arch: str, model: str) -> dict[str, str]:
         if 'orange pi 5' in low or 'orangepi 5' in low or 'rk3588' in low or 'rockchip' in low:
             return {
                 'profile': 'orangepi5-arm64',
-                'label': 'Orange Pi 5 ARM64 Edge Node',
+                'label': 'Orange Pi 5 (ARM64)',
                 'recommended_network': 'nat',
                 'recommended_guest_arch': 'aarch64',
                 'recommended_vm_mode': 'arm64-cloud-image',
             }
         return {
             'profile': 'generic-arm64',
-            'label': 'Generic ARM64 Edge Node',
+            'label': 'ARM64-сервер',
             'recommended_network': 'nat',
             'recommended_guest_arch': 'aarch64',
             'recommended_vm_mode': 'arm64-cloud-image',
         }
     return {
         'profile': 'x86_64',
-        'label': 'x86_64 KVM/QEMU Node',
+        'label': 'Сервер x86_64',
         'recommended_network': 'bridge',
         'recommended_guest_arch': 'x86_64',
         'recommended_vm_mode': 'x86_64-iso',
@@ -148,17 +152,18 @@ def detect_host_profile() -> dict[str, Any]:
         ]),
     }
     checks = []
-    checks.append({'name': '/dev/kvm', 'ok': data['kvm_device'], 'level': 'ok' if data['kvm_device'] else 'warn', 'hint': 'KVM недоступен. На физическом сервере включи Intel VT-x / AMD-V в BIOS/UEFI; на VPS проверь nested virtualization. Пока доступен медленный QEMU fallback.'})
-    checks.append({'name': 'CPU vmx/svm', 'ok': virtualization_flags > 0, 'level': 'ok' if virtualization_flags > 0 else 'warn', 'hint': 'CPU-флаги vmx/svm не видны. Для реального сервера это обычно значит, что виртуализация выключена в BIOS/UEFI.'})
+    checks.append({'name': 'Аппаратное ускорение (KVM)', 'ok': data['kvm_device'], 'level': 'ok' if data['kvm_device'] else 'warn', 'hint': 'KVM недоступен. На физическом сервере включи Intel VT-x / AMD-V в BIOS/UEFI; на VPS проверь nested virtualization. Пока доступен медленный QEMU fallback.'})
+    checks.append({'name': 'Поддержка виртуализации процессором', 'ok': virtualization_flags > 0, 'level': 'ok' if virtualization_flags > 0 else 'warn', 'hint': 'CPU-флаги vmx/svm не видны. Для реального сервера это обычно значит, что виртуализация выключена в BIOS/UEFI.'})
     if is_arm:
-        checks.append({'name': 'qemu-system-aarch64', 'ok': data['qemu_system_aarch64'], 'level': 'ok' if data['qemu_system_aarch64'] else 'err', 'hint': 'Пакет qemu-system-arm / qemu-system-aarch64.'})
-        checks.append({'name': 'AArch64 UEFI', 'ok': data['uefi_aarch64_hint'], 'level': 'ok' if data['uefi_aarch64_hint'] else 'warn', 'hint': 'Пакет qemu-efi-aarch64 или AAVMF.'})
+        checks.append({'name': 'Эмулятор ARM64 (QEMU)', 'ok': data['qemu_system_aarch64'], 'level': 'ok' if data['qemu_system_aarch64'] else 'err', 'hint': 'Пакет qemu-system-arm / qemu-system-aarch64.'})
+        checks.append({'name': 'Загрузчик UEFI для ARM64', 'ok': data['uefi_aarch64_hint'], 'level': 'ok' if data['uefi_aarch64_hint'] else 'warn', 'hint': 'Пакет qemu-efi-aarch64 или AAVMF.'})
     else:
-        checks.append({'name': 'qemu-system-x86_64', 'ok': data['qemu_system_x86_64'], 'level': 'ok' if data['qemu_system_x86_64'] else 'err', 'hint': 'Пакет qemu-system-x86.'})
-    checks.append({'name': 'virt-install', 'ok': data['virt_install'], 'level': 'ok' if data['virt_install'] else 'err', 'hint': 'Пакет virtinst.'})
-    checks.append({'name': 'nftables', 'ok': data['nft'], 'level': 'ok' if data['nft'] else 'err', 'hint': 'Пакет nftables для NAT port forwarding.'})
-    checks.append({'name': f'bridge {DEFAULT_BRIDGE}', 'ok': bridge_available, 'level': 'ok' if bridge_available else 'warn', 'hint': 'Если br0 отсутствует, Virtuality будет использовать VPS NAT Router / virtuality-nat.'})
+        checks.append({'name': 'Эмулятор x86_64 (QEMU)', 'ok': data['qemu_system_x86_64'], 'level': 'ok' if data['qemu_system_x86_64'] else 'err', 'hint': 'Пакет qemu-system-x86.'})
+    checks.append({'name': 'Создание машин (virt-install)', 'ok': data['virt_install'], 'level': 'ok' if data['virt_install'] else 'err', 'hint': 'Пакет virtinst.'})
+    checks.append({'name': 'Брандмауэр nftables', 'ok': data['nft'], 'level': 'ok' if data['nft'] else 'err', 'hint': 'Пакет nftables для NAT port forwarding.'})
+    checks.append({'name': f'Сетевой мост {DEFAULT_BRIDGE}', 'ok': bridge_available, 'level': 'ok' if bridge_available else 'warn', 'hint': 'Если br0 отсутствует, Virtuality будет использовать VPS NAT Router / virtuality-nat.'})
     data['checks'] = checks
+    data['schema'] = PROFILE_SCHEMA
     data['ready'] = data['virt_install'] and (data['qemu_system_aarch64'] if is_arm else data['qemu_system_x86_64']) and data['nft']
     return data
 
@@ -172,7 +177,7 @@ def load_host_profile() -> dict[str, Any]:
     if PROFILE_FILE.exists():
         try:
             profile = json.loads(PROFILE_FILE.read_text())
-            if 'bridge_available' not in profile or 'virtualization_mode' not in profile or any('level' not in item for item in profile.get('checks', [])):
+            if profile.get('schema') != PROFILE_SCHEMA or 'bridge_available' not in profile or 'virtualization_mode' not in profile or any('level' not in item for item in profile.get('checks', [])):
                 profile = detect_host_profile()
                 save_host_profile(profile)
             return profile

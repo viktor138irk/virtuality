@@ -1,0 +1,31 @@
+#cloud-config
+# Virtuality installer configuration for Ubuntu Server 24.04 (subiquity autoinstall).
+# build-iso.sh puts this file at /autoinstall.yaml on the ISO.
+# @@VARIABLES@@ are substituted at build time.
+autoinstall:
+  version: 1
+  # The installer asks only for these screens; everything else is automated.
+  interactive-sections:
+@@INTERACTIVE_SECTIONS@@
+  locale: @@LOCALE@@
+  keyboard:
+    layout: @@KEYBOARD@@
+  timezone: @@TIMEZONE@@
+  source:
+    id: ubuntu-server
+  ssh:
+    install-server: true
+    allow-pw: true
+@@IDENTITY@@
+  storage:
+    layout:
+      name: lvm
+      sizing-policy: all
+  late-commands:
+    - mkdir -p /target/opt/virtuality /target/etc/virtuality
+    - cp -a /cdrom/virtuality/source /target/opt/virtuality/source
+    - chown -R root:root /target/opt/virtuality
+    - chmod -R u+w /target/opt/virtuality/source
+    - cp /cdrom/virtuality/image.env /target/etc/virtuality/image.env
+    - cp /cdrom/virtuality/virtuality-firstboot.service /target/etc/systemd/system/virtuality-firstboot.service
+    - curtin in-target --target=/target -- systemctl enable virtuality-firstboot.service

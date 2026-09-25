@@ -11,15 +11,52 @@ VENV_DIR="/opt/virtuality/venv"
 SERVICE_FILE="/etc/systemd/system/virtuality-web.service"
 AUTO_UPDATE_SERVICE_FILE="/etc/systemd/system/virtuality-auto-update.service"
 AUTO_UPDATE_TIMER_FILE="/etc/systemd/system/virtuality-auto-update.timer"
-PORT="${VIRTUALITY_WEB_PORT:-8088}"
-AUTH_USER="${VIRTUALITY_AUTH_USER:-${SUDO_USER:-viktor}}"
+NETWORK_SERVICE_FILE="/etc/systemd/system/virtuality-network.service"
 LOG_DIR="/var/log/virtuality"
 LOG_FILE="${LOG_DIR}/install_web_panel_$(date +%Y%m%d_%H%M%S).log"
 PROFILE_DIR="/var/lib/virtuality/config"
 PROFILE_FILE="${PROFILE_DIR}/host_profile.json"
 SESSION_SECRET_FILE="${PROFILE_DIR}/session_secret"
+NODE_CONFIG_FILE="${PROFILE_DIR}/web.env"
 UPLOAD_TMP_DIR="/var/lib/virtuality/tmp"
+WHEELS_DIR="${VIRTUALITY_WHEELS_DIR:-${REPO_DIR}/wheels}"
 TOTAL_STEPS=13
+export DEBIAN_FRONTEND=noninteractive
+
+# Settings survive updates: explicit env > saved node config > previous install > defaults.
+saved_setting() {
+  local key="$1"
+  [[ -f "$NODE_CONFIG_FILE" ]] || return 0
+  sed -n "s/^${key}=//p" "$NODE_CONFIG_FILE" | tail -n1 | tr -d "\"'"
+}
+legacy_auth_user() {
+  if [[ -f "${APP_DIR}/.env" ]]; then
+    sed -n 's/^VIRTUALITY_AUTH_USER=//p' "${APP_DIR}/.env" | tail -n1
+  fi
+}
+legacy_port() {
+  if [[ -f "$SERVICE_FILE" ]]; then
+    sed -n 's/.*--port \([0-9][0-9]*\).*/\1/p' "$SERVICE_FILE" | tail -n1
+  fi
+}
+first_human_user() {
+  getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/ {print $1; exit}'
+}
+
+PORT="${VIRTUALITY_WEB_PORT:-$(saved_setting VIRTUALITY_WEB_PORT)}"
+PORT="${PORT:-$(legacy_port)}"
+PORT="${PORT:-8088}"
+AUTH_USER="${VIRTUALITY_AUTH_USER:-$(saved_setting VIRTUALITY_AUTH_USER)}"
+AUTH_USER="${AUTH_USER:-$(legacy_auth_user)}"
+AUTH_USER="${AUTH_USER:-${SUDO_USER:-}}"
+AUTH_USER="${AUTH_USER:-$(first_human_user)}"
+AUTH_USER="${AUTH_USER:-root}"
+AUTO_UPDATE="${VIRTUALITY_AUTO_UPDATE:-$(saved_setting VIRTUALITY_AUTO_UPDATE)}"
+AUTO_UPDATE="${AUTO_UPDATE:-1}"
+WEB_HOST="${VIRTUALITY_WEB_HOST:-$(saved_setting VIRTUALITY_WEB_HOST)}"
+WEB_HOST="${WEB_HOST:-0.0.0.0}"
+COOKIE_SECURE="${VIRTUALITY_COOKIE_SECURE:-$(saved_setting VIRTUALITY_COOKIE_SECURE)}"
+COOKIE_SECURE="${COOKIE_SECURE:-0}"
 CURRENT_STEP=0
 
 ESC="\033"
@@ -73,16 +110,6 @@ run_logged() {
   else
     fail "$description"
   fi
-}
-
-restore_canonical_templates() {
-  local templates=("_sidebar.html" "dashboard.html" "vm_create.html" "vm_detail.html" "iso.html" "disk_images.html" "operations.html" "operation_detail.html" "host.html" "network.html" "logs.html" "update.html")
-  local name=""
-  for name in "${templates[@]}"; do
-    if [[ -f "${WEB_DIR}/templates/${name}" ]]; then
-      cp "${WEB_DIR}/templates/${name}" "${APP_DIR}/templates/${name}"
-    fi
-  done
 }
 
 service_state() { systemctl is-active "$1" 2>/dev/null || echo "inactive"; }
@@ -166,114 +193,8 @@ fi
 
 step "Копируем web-панель в /opt/virtuality"
 run_logged "Создана директория /opt/virtuality" mkdir -p /opt/virtuality
-run_logged "Файлы панели синхронизированы в $APP_DIR" rsync -a --delete "$WEB_DIR/" "$APP_DIR/"
-if [[ -f "${REPO_DIR}/scripts/patch_web_console.py" ]]; then
-  run_logged "noVNC web-console patch применён" python3 "${REPO_DIR}/scripts/patch_web_console.py" "${APP_DIR}/app.py"
-else
-  warn "patch_web_console.py не найден, noVNC console patch пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_upload_compat.py" ]]; then
-  run_logged "upload compatibility patch применён" python3 "${REPO_DIR}/scripts/patch_upload_compat.py" "${APP_DIR}/app.py"
-else
-  warn "patch_upload_compat.py не найден, совместимость загрузки файлов пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_upload_navigation_guard.py" ]]; then
-  run_logged "upload navigation guard patch применён" python3 "${REPO_DIR}/scripts/patch_upload_navigation_guard.py" "${APP_DIR}/app.py"
-else
-  warn "patch_upload_navigation_guard.py не найден, защита загрузок от переходов пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_disk_images.py" ]]; then
-  run_logged "disk images patch применён" python3 "${REPO_DIR}/scripts/patch_disk_images.py" "${APP_DIR}/app.py"
-else
-  warn "patch_disk_images.py не найден, менеджер дисковых образов пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_vm_boot_order.py" ]]; then
-  run_logged "VM boot order patch применён" python3 "${REPO_DIR}/scripts/patch_vm_boot_order.py" "${APP_DIR}/app.py"
-else
-  warn "patch_vm_boot_order.py не найден, порядок загрузки VM пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_boot_order.py" ]]; then
-  run_logged "existing VM boot order patch применён" python3 "${REPO_DIR}/scripts/patch_existing_vm_boot_order.py" "${APP_DIR}/app.py"
-else
-  warn "patch_existing_vm_boot_order.py не найден, порядок загрузки существующих VM пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_resources.py" ]]; then
-  run_logged "existing VM resources patch применён" python3 "${REPO_DIR}/scripts/patch_existing_vm_resources.py" "${APP_DIR}/app.py"
-else
-  warn "patch_existing_vm_resources.py не найден, ресурсы существующих VM пропущены"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_existing_vm_iso_mount.py" ]]; then
-  run_logged "existing VM ISO mount patch применён" python3 "${REPO_DIR}/scripts/patch_existing_vm_iso_mount.py" "${APP_DIR}/app.py"
-else
-  warn "patch_existing_vm_iso_mount.py не найден, монтирование ISO в VM пропущено"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_vm_detail_resource_layout.py" ]]; then
-  run_logged "VM detail resource layout patch применён" python3 "${REPO_DIR}/scripts/patch_vm_detail_resource_layout.py" "${APP_DIR}/app.py"
-else
-  warn "patch_vm_detail_resource_layout.py не найден, раскладка ресурсов VM пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_remove_legacy_boot_order_card.py" ]]; then
-  run_logged "legacy boot order cleanup patch применён" python3 "${REPO_DIR}/scripts/patch_remove_legacy_boot_order_card.py" "${APP_DIR}/app.py"
-else
-  warn "patch_remove_legacy_boot_order_card.py не найден, удаление старого блока порядка загрузки пропущено"
-fi
-run_logged "Канонические шаблоны панели восстановлены после VM-патчей" restore_canonical_templates
-if [[ -f "${REPO_DIR}/scripts/patch_disk_archives.py" ]]; then
-  run_logged "disk archive import patch применён" python3 "${REPO_DIR}/scripts/patch_disk_archives.py" "${APP_DIR}/app.py"
-else
-  warn "patch_disk_archives.py не найден, импорт архивов дисков пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_dhcp_leases_empty.py" ]]; then
-  run_logged "DHCP leases empty-state patch применён" python3 "${REPO_DIR}/scripts/patch_dhcp_leases_empty.py" "${APP_DIR}/app.py"
-else
-  warn "patch_dhcp_leases_empty.py не найден, диагностика DHCP leases пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_network_diagnostics.py" ]]; then
-  run_logged "network diagnostics patch применён" python3 "${REPO_DIR}/scripts/patch_network_diagnostics.py" "${APP_DIR}/app.py"
-else
-  warn "patch_network_diagnostics.py не найден, диагностика сети пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_network_ranges.py" ]]; then
-  run_logged "network port ranges patch применён" python3 "${REPO_DIR}/scripts/patch_network_ranges.py" "${APP_DIR}/app.py"
-else
-  warn "patch_network_ranges.py не найден, поддержка диапазонов портов пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_network_bridge_forwards.py" ]]; then
-  run_logged "network bridge forward patch применён" python3 "${REPO_DIR}/scripts/patch_network_bridge_forwards.py" "${APP_DIR}/app.py"
-else
-  warn "patch_network_bridge_forwards.py не найден, проброс bridge/static VM пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_network_nat_errors.py" ]]; then
-  run_logged "network NAT error patch применён" python3 "${REPO_DIR}/scripts/patch_network_nat_errors.py" "${APP_DIR}/app.py"
-else
-  warn "patch_network_nat_errors.py не найден, безопасные ошибки NAT пропущены"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_logs_center.py" ]]; then
-  run_logged "logs center patch применён" python3 "${REPO_DIR}/scripts/patch_logs_center.py" "${APP_DIR}/app.py"
-else
-  warn "patch_logs_center.py не найден, центр журналов пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_vm_network_guard.py" ]]; then
-  run_logged "VM network guard patch применён" python3 "${REPO_DIR}/scripts/patch_vm_network_guard.py" "${APP_DIR}/app.py"
-else
-  warn "patch_vm_network_guard.py не найден, защита от отсутствующего bridge пропущена"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_update_center.py" ]]; then
-  run_logged "update center patch применён" python3 "${REPO_DIR}/scripts/patch_update_center.py" "${APP_DIR}/app.py"
-else
-  warn "patch_update_center.py не найден, центр обновлений пропущен"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_live_status.py" ]]; then
-  run_logged "live status patch применён" python3 "${REPO_DIR}/scripts/patch_live_status.py" "${APP_DIR}/app.py"
-else
-  warn "patch_live_status.py не найден, live-статусы пропущены"
-fi
-if [[ -f "${REPO_DIR}/scripts/patch_vm_autostart.py" ]]; then
-  run_logged "VM autostart patch применён" python3 "${REPO_DIR}/scripts/patch_vm_autostart.py" "${APP_DIR}/app.py"
-else
-  warn "patch_vm_autostart.py не найден, нормализация автозапуска VM пропущена"
-fi
-run_logged "Канонические шаблоны панели финально восстановлены" restore_canonical_templates
+run_logged "Файлы панели синхронизированы в $APP_DIR" rsync -a --delete --exclude='__pycache__/' --exclude='.env' "$WEB_DIR/" "$APP_DIR/"
+run_logged "Версия панели записана" install -m 0644 "${REPO_DIR}/VERSION" "${APP_DIR}/VERSION"
 run_logged "Конфиг профиля доступен web-панели" mkdir -p "$PROFILE_DIR"
 if [[ -f "$PROFILE_FILE" ]]; then
   ok "Профиль уже сохранён: $PROFILE_FILE"
@@ -291,9 +212,20 @@ else
   chmod 600 "$SESSION_SECRET_FILE"
   ok "Создан постоянный session secret: $SESSION_SECRET_FILE"
 fi
+cat > "$NODE_CONFIG_FILE" <<EOF
+# Virtuality node settings. Edit and re-run: sudo bash scripts/install_web_panel.sh
+VIRTUALITY_WEB_PORT=${PORT}
+VIRTUALITY_WEB_HOST=${WEB_HOST}
+VIRTUALITY_AUTH_USER=${AUTH_USER}
+VIRTUALITY_AUTO_UPDATE=${AUTO_UPDATE}
+VIRTUALITY_COOKIE_SECURE=${COOKIE_SECURE}
+EOF
+chmod 644 "$NODE_CONFIG_FILE"
+ok "Настройки ноды сохранены: $NODE_CONFIG_FILE"
 cat > "${APP_DIR}/.env" <<EOF
 VIRTUALITY_AUTH_USER=${AUTH_USER}
 VIRTUALITY_SESSION_SECRET=${SESSION_SECRET}
+VIRTUALITY_COOKIE_SECURE=${COOKIE_SECURE}
 TMPDIR=${UPLOAD_TMP_DIR}
 TEMP=${UPLOAD_TMP_DIR}
 TMP=${UPLOAD_TMP_DIR}
@@ -304,15 +236,24 @@ ok "Временный каталог загрузок: ${UPLOAD_TMP_DIR}"
 ok "Вход будет по Linux-пользователю: ${AUTH_USER}"
 
 step "Создаём Python virtualenv"
-if [[ -d "$VENV_DIR" ]]; then
+if [[ -x "$VENV_DIR/bin/python" ]] && "$VENV_DIR/bin/python" -c 'import sys' >/dev/null 2>&1; then
   warn "Virtualenv уже существует, будет переиспользован: $VENV_DIR"
 else
+  if [[ -d "$VENV_DIR" ]]; then
+    warn "Virtualenv повреждён (например, после обновления Python), пересоздаём"
+    rm -rf -- "${VENV_DIR:?}"
+  fi
   run_logged "Virtualenv создан: $VENV_DIR" python3 -m venv "$VENV_DIR"
 fi
 
 step "Устанавливаем Python-зависимости"
-run_logged "pip обновлён" "$VENV_DIR/bin/pip" install --upgrade pip
-run_logged "Python-зависимости установлены" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+if compgen -G "${WHEELS_DIR}/*.whl" >/dev/null; then
+  run_logged "Python-зависимости установлены офлайн из ${WHEELS_DIR}" "$VENV_DIR/bin/pip" install --no-index --find-links "$WHEELS_DIR" -r "$APP_DIR/requirements.txt"
+else
+  run_logged "pip обновлён" "$VENV_DIR/bin/pip" install --upgrade pip
+  run_logged "Python-зависимости установлены" "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
+fi
+run_logged "Web-панель импортируется без ошибок" bash -c "cd '$APP_DIR' && '$VENV_DIR/bin/python' -c 'import app'"
 
 step "Создаём systemd service"
 cat > "$SERVICE_FILE" <<EOF
@@ -324,9 +265,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${APP_DIR}
-ExecStart=${VENV_DIR}/bin/uvicorn app:app --host 0.0.0.0 --port ${PORT}
+ExecStart=${VENV_DIR}/bin/uvicorn app:app --host ${WEB_HOST} --port ${PORT} --workers 1 --no-server-header
 Restart=always
 RestartSec=3
+TimeoutStopSec=20
+LimitNOFILE=65536
 User=root
 Group=root
 Environment=PYTHONUNBUFFERED=1
@@ -340,7 +283,24 @@ Environment=TMP=${UPLOAD_TMP_DIR}
 WantedBy=multi-user.target
 EOF
 ok "Создан service: $SERVICE_FILE"
+cat > "$NETWORK_SERVICE_FILE" <<EOF
+[Unit]
+Description=Virtuality NAT port forwarding restore
+After=network-online.target libvirtd.service nftables.service ufw.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=${APP_DIR}
+ExecStart=${VENV_DIR}/bin/python ${APP_DIR}/restore_network.py
+
+[Install]
+WantedBy=multi-user.target
+EOF
+ok "Создан service: $NETWORK_SERVICE_FILE"
 run_logged "systemd daemon-reload выполнен" systemctl daemon-reload
+run_logged "virtuality-network.service включён" systemctl enable virtuality-network.service
 
 step "Настраиваем автообновление"
 if [[ -f "${REPO_DIR}/scripts/auto_update_check.sh" ]]; then
@@ -373,8 +333,13 @@ Unit=virtuality-auto-update.service
 WantedBy=timers.target
 EOF
   run_logged "systemd daemon-reload выполнен для автообновлений" systemctl daemon-reload
-  run_logged "virtuality-auto-update.timer включён" systemctl enable --now virtuality-auto-update.timer
-  ok "Автообновление будет проверять GitHub 1 раз в сутки в 00:00 по Москве"
+  if [[ "$AUTO_UPDATE" == "1" ]]; then
+    run_logged "virtuality-auto-update.timer включён" systemctl enable --now virtuality-auto-update.timer
+    ok "Автообновление будет проверять GitHub 1 раз в сутки в 00:00 по Москве"
+  else
+    systemctl disable --now virtuality-auto-update.timer >> "$LOG_FILE" 2>&1 || true
+    ok "Автообновление отключено (VIRTUALITY_AUTO_UPDATE=0). Обновления — вручную через /update"
+  fi
 else
   warn "auto_update_check.sh не найден, автообновление пропущено"
 fi
@@ -415,7 +380,8 @@ echo -e "${BOLD}Login:${RESET}      ${AUTH_USER} / пароль Linux-польз
 echo -e "${BOLD}Profile:${RESET}    ${LABEL:-$PROFILE}"
 echo -e "${BOLD}Arch:${RESET}       ${ARCH:-unknown}"
 echo -e "${BOLD}Service:${RESET}    virtuality-web.service"
-echo -e "${BOLD}Auto update:${RESET} virtuality-auto-update.timer / ежедневно в 00:00 по Москве"
+echo -e "${BOLD}Auto update:${RESET} $([[ "$AUTO_UPDATE" == "1" ]] && echo "ежедневно в 00:00 по Москве" || echo "отключено")"
+echo -e "${BOLD}Settings:${RESET}   ${NODE_CONFIG_FILE}"
 echo -e "${BOLD}Upload tmp:${RESET}  ${UPLOAD_TMP_DIR}"
 echo -e "${BOLD}Session key:${RESET} ${SESSION_SECRET_FILE}"
 echo -e "${BOLD}Status:${RESET}     systemctl status virtuality-web --no-pager"

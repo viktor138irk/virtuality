@@ -1,0 +1,68 @@
+{% macro icon(name, cls='') -%}
+<svg class="icon {{ cls }}" aria-hidden="true"><use href="/static/icons.svg#i-{{ name }}"></use></svg>
+{%- endmacro %}
+
+{% macro logo() -%}
+<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 5.5 12 19l7.5-13.5" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 5.5h6" stroke="#fff" stroke-opacity=".55" stroke-width="2.6" stroke-linecap="round"/></svg>
+{%- endmacro %}
+
+{% macro badge(label, tone='neutral', dot=True, cls='', attrs='') -%}
+<span class="badge {{ tone }} {{ cls }}" {{ attrs|safe }}>{% if dot %}<span class="dot"></span>{% endif %}{{ label }}</span>
+{%- endmacro %}
+
+{% macro vm_badge(state, cls='') -%}
+{%- set s = state|vm_state -%}
+<span class="badge {{ s.tone }} {{ cls }}" data-live="badge"><span class="dot"></span>{{ s.label }}</span>
+{%- endmacro %}
+
+{% macro op_badge(status, cls='') -%}
+{%- set s = status|operation_state -%}
+<span class="badge {{ s.tone }} {{ cls }}"><span class="dot"></span>{{ s.label }}</span>
+{%- endmacro %}
+
+{% macro meter(pct, tone=None) -%}
+<div class="meter {{ tone or (pct|level_tone) }}"><span style="--value: {{ pct }}%"></span></div>
+{%- endmacro %}
+
+{% macro empty(icon_name, title, text, action_url=None, action_label=None, action_icon='plus') -%}
+<div class="empty">
+  <div class="empty-art">{{ icon(icon_name, 'icon-xl') }}</div>
+  <h3>{{ title }}</h3>
+  <p>{{ text }}</p>
+  {% if action_url %}<div class="row"><a class="btn btn-primary" href="{{ action_url }}">{{ icon(action_icon) }}{{ action_label }}</a></div>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro alert(tone, text, title=None, icon_name=None) -%}
+{%- set icons = {'success': 'circle-check', 'danger': 'circle-x', 'warning': 'triangle-alert', 'info': 'info', 'brand': 'sparkles'} -%}
+<div class="alert {{ tone }}" role="{{ 'alert' if tone == 'danger' else 'status' }}">
+  {{ icon(icon_name or icons.get(tone, 'info')) }}
+  <div>{% if title %}<strong>{{ title }}</strong>{% endif %}<span {% if tone == 'danger' %}data-error-message{% endif %}>{{ text }}</span></div>
+</div>
+{%- endmacro %}
+
+{% macro uploader(action, field, accept, title, hint, redirect, button) -%}
+<form method="post" action="{{ action }}" enctype="multipart/form-data" class="stack-sm" data-uploader data-accept="{{ accept }}" data-redirect="{{ redirect }}">
+  <label class="dropzone">
+    <input type="file" name="{{ field }}" accept="{{ accept }}" required>
+    <span class="dropzone-icon">{{ icon('cloud-upload', 'icon-lg') }}</span>
+    <strong>{{ title }}</strong>
+    <span>{{ hint }}</span>
+  </label>
+  <div class="upload-file" data-upload-file hidden>
+    <span class="list-icon brand">{{ icon('package') }}</span>
+    <div class="grow">
+      <div class="row-between"><strong class="truncate" data-upload-name></strong><span class="subtle small" data-upload-size></span></div>
+      <div class="subtle small mt-1" data-upload-status></div>
+      <div class="progress mt-1" data-upload-progress hidden><span></span></div>
+      <div class="upload-stats" data-upload-stats></div>
+    </div>
+    <button type="button" class="btn btn-ghost btn-icon btn-sm" data-upload-clear title="Убрать файл">{{ icon('x') }}</button>
+  </div>
+  <div class="alert danger" data-upload-error hidden>{{ icon('circle-x') }}<div data-upload-error-text></div></div>
+  <div class="row">
+    <button type="submit" class="btn btn-primary" data-upload-submit disabled>{{ icon('cloud-upload') }}{{ button }}</button>
+    <button type="button" class="btn btn-danger-soft" data-upload-cancel hidden>{{ icon('x') }}Отменить загрузку</button>
+  </div>
+</form>
+{%- endmacro %}

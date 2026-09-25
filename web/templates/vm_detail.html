@@ -1,389 +1,237 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ vm.name }} — {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-  <style>
-    .vm-four-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: stretch; margin-bottom: 14px; }
-    .vm-four-grid .card { min-width: 0; height: calc(100% - 14px); }
-    .vm-four-grid .card-head { align-items: flex-start; }
-    .vm-four-grid h2 { font-size: 16px; line-height: 1.2; }
-    .vm-four-grid .form-row { grid-template-columns: 1fr; }
-    .vm-four-grid .compact-actions { justify-content: flex-start; }
-    .vm-four-grid .vm-control-panel { display: grid; grid-template-columns: 1fr; gap: 12px; }
-    .vm-four-grid .autostart-indicator { width: 100%; }
-    .vm-visual-grid { grid-template-columns: 1.15fr 1fr 1fr; align-items: stretch; margin-bottom: 14px; }
-    .visual-card-body { display: grid; gap: 12px; }
-    .metric-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .metric-tile { padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: rgba(2,6,23,.32); min-width: 0; }
-    .metric-tile strong { display: block; margin-top: 5px; font-size: 20px; line-height: 1.1; letter-spacing: -.04em; overflow-wrap: anywhere; }
-    .metric-tile span { color: var(--muted); font-size: 11px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
-    .chart-row { display: grid; grid-template-columns: 96px 1fr; gap: 14px; align-items: center; }
-    .donut { --value: 0; --donut-color: var(--accent); width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--donut-color) calc(var(--value) * 1%), rgba(148,163,184,.16) 0); position: relative; }
-    .donut::before { content: ""; position: absolute; inset: 12px; border-radius: 50%; background: var(--panel-solid); opacity: .95; }
-    .donut-value { position: relative; z-index: 1; font-size: 18px; font-weight: 950; }
-    .bar-list { display: grid; gap: 10px; }
-    .bar-item { display: grid; gap: 6px; }
-    .bar-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; font-weight: 800; }
-    .mini-bar { height: 9px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; background: rgba(148,163,184,.12); }
-    .mini-bar span { display: block; height: 100%; width: var(--value, 0%); border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--green)); }
-    .visual-list { display: grid; gap: 9px; }
-    .visual-item { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 11px; border: 1px solid var(--line); border-radius: 15px; background: rgba(2,6,23,.32); }
-    .visual-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 12px; background: rgba(56,189,248,.13); color: var(--accent); font-weight: 950; }
-    .visual-item b { display: block; font-size: 14px; overflow-wrap: anywhere; }
-    .visual-item small { color: var(--muted); line-height: 1.35; }
-    .visual-empty { padding: 12px; border: 1px dashed var(--line-strong); border-radius: 15px; color: var(--muted); }
-    .raw-details { margin-top: 12px; }
-    .raw-details summary { cursor: pointer; color: var(--muted); font-weight: 900; }
-    .raw-details pre { max-height: 260px; }
-    html[data-theme="macos"] .metric-tile, html[data-theme="macos"] .visual-item { background: #f7f7fa; border-color: rgba(60,60,67,.10); }
-    html[data-theme="macos"] .donut::before { background: #fff; }
-    html[data-theme="macos"] .visual-empty { border-color: rgba(60,60,67,.18); }
-    @media (max-width: 1500px) { .vm-four-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vm-visual-grid { grid-template-columns: 1fr; } }
-    @media (max-width: 980px) { .vm-four-grid, .metric-strip { grid-template-columns: 1fr; } .chart-row { grid-template-columns: 1fr; } }
-  </style>
-</head>
-<body>
-  <div class="v-layout">
-    {% set is_running = 'running' in vm.dominfo|lower %}
-    {% set is_autostart = vm.autostart_enabled|default(false) %}
-    {% set autostart_label = 'enabled' if is_autostart else 'disabled' %}
-    {% set rs = resource_settings|default({}) %}
-    {% include "_sidebar.html" %}
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, vm_badge, alert %}
+{% set page_title = vm.name %}
+{% set s = (vm.info.state or ('running' if 'running' in vm.dominfo|lower else 'shut off'))|vm_state %}
+{% set rs = resource_settings|default({}) %}
+{% set has_ip = vm.ip and vm.ip not in ('—', 'not available') %}
 
-    <main class="v-main">
-      <header class="v-topbar">
-        <div>
-          <div class="v-title">{{ vm.name }}</div>
-          <div class="v-subtitle">Детали виртуальной машины</div>
+{% block page_header %}
+<div class="page-header" data-live-vm="{{ vm.name }}" data-running="{{ '1' if s.running else '0' }}" data-reload-on-change>
+  <div>
+    <div class="eyebrow"><a href="/">{{ icon('arrow-left', 'icon-sm') }} Все машины</a></div>
+    <div class="title-row">
+      <span class="vm-avatar {{ 'on' if s.running else '' }}" style="width:48px;height:48px">{{ icon('monitor', 'icon-lg') }}<span class="status-dot {{ s.tone }}" data-live="dot"></span></span>
+      <div>
+        <div class="row"><h1>{{ vm.name }}</h1>{{ vm_badge(vm.info.state or s.raw, 'lg') }}</div>
+        <p class="subtle mt-1">{{ vm.info.vcpus }} {{ plural(vm.info.vcpus, 'ядро', 'ядра', 'ядер') }} · {{ vm.info.memory_mb|format_mb }} памяти{% if has_ip %} · <span data-live="ip">{{ vm.ip }}</span>{% endif %}</p>
+      </div>
+    </div>
+  </div>
+  <div class="page-actions">
+    {% if s.running %}
+      <a class="btn btn-primary" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">{{ icon('monitor') }}Открыть экран</a>
+      <form method="post" action="/vm/{{ vm.name }}/shutdown" class="inline-form" data-toast="Машина выключается — это может занять до минуты"><button class="btn">{{ icon('power') }}Выключить</button></form>
+    {% else %}
+      <form method="post" action="/vm/{{ vm.name }}/start" class="inline-form" data-toast="Машина запускается"><button class="btn btn-primary">{{ icon('play') }}Запустить</button></form>
+    {% endif %}
+    <details class="menu">
+      <summary class="btn btn-icon" aria-label="Другие действия">{{ icon('ellipsis') }}</summary>
+      <div class="menu-list">
+        {% if s.running %}
+          <form method="post" action="/vm/{{ vm.name }}/reboot" data-toast="Машина перезагружается"><button class="menu-item">{{ icon('rotate-cw') }}<span>Перезагрузить<small>Мягкая перезагрузка системы</small></span></button></form>
+          <form method="post" action="/vm/{{ vm.name }}/destroy" data-confirm="Машина будет выключена сразу, как при отключении питания. Несохранённые данные внутри неё пропадут." data-confirm-title="Выключить принудительно?" data-confirm-button="Выключить" data-toast="Машина выключена" data-toast-tone="warning"><button class="menu-item danger">{{ icon('zap') }}<span>Выключить принудительно<small>Если система зависла</small></span></button></form>
+        {% else %}
+          <form method="post" action="/vm/{{ vm.name }}/delete" data-confirm="Машина {{ vm.name }} и все её диски будут удалены без возможности восстановления." data-confirm-title="Удалить машину?" data-confirm-button="Удалить навсегда" data-toast="Машина {{ vm.name }} удалена" data-toast-tone="warning"><button class="menu-item danger">{{ icon('trash-2') }}<span>Удалить машину<small>Вместе с дисками</small></span></button></form>
+        {% endif %}
+      </div>
+    </details>
+  </div>
+</div>
+{% endblock %}
+
+{% block alerts %}
+  {% for key in ('resource', 'iso', 'boot') %}
+    {% set msg = {'resource': resource_message, 'iso': iso_message, 'boot': boot_message}[key] %}
+    {% set err = {'resource': resource_error, 'iso': iso_error, 'boot': boot_error}[key] %}
+    {% if msg %}{{ alert('success', msg) }}{% endif %}
+    {% if err %}{{ alert('danger', err) }}{% endif %}
+  {% endfor %}
+{% endblock %}
+
+{% block content %}
+<nav class="tabs" data-tabs role="tablist">
+  <button type="button" data-tab="overview" role="tab">{{ icon('layout-dashboard', 'icon-sm') }}Обзор</button>
+  <button type="button" data-tab="resources" role="tab">{{ icon('cpu', 'icon-sm') }}Ресурсы</button>
+  <button type="button" data-tab="storage" role="tab">{{ icon('hard-drive', 'icon-sm') }}Диски и загрузка</button>
+  <button type="button" data-tab="expert" role="tab">{{ icon('terminal', 'icon-sm') }}Для специалистов</button>
+</nav>
+
+<section data-tab-panel="overview" class="grid grid-main">
+  <div class="stack">
+    <article class="card">
+      <div class="card-header"><h2>Сводка</h2></div>
+      <div class="card-body">
+        <div class="kv">
+          <div><span>Состояние</span><strong data-live-vm="{{ vm.name }}">{{ vm_badge(vm.info.state or s.raw) }}</strong></div>
+          <div><span>IP-адрес</span><strong>{% if has_ip %}{{ vm.ip }} <button type="button" class="btn btn-ghost btn-icon btn-sm" data-copy="{{ vm.ip }}" title="Скопировать" style="height:22px;width:22px;vertical-align:middle">{{ icon('copy', 'icon-sm') }}</button>{% else %}<span class="subtle">{{ 'Определяется…' if s.running else 'Нет — машина выключена' }}</span>{% endif %}</strong></div>
+          <div><span>Процессор</span><strong>{{ vm.info.vcpus }} {{ plural(vm.info.vcpus, 'ядро', 'ядра', 'ядер') }}</strong></div>
+          <div><span>Память</span><strong>{{ vm.info.memory_mb|format_mb }}</strong></div>
+          <div><span>Архитектура</span><strong>{{ rs.arch|default('—') }}</strong></div>
+          <div><span>Сеть</span><strong>{{ (vm.interface_list[0].source if vm.interface_list else '—')|replace('virtuality-nat', 'Автоматически (NAT)') }}</strong></div>
         </div>
-        <div class="top-meta">
-          <span>user: {{ user }}</span>
-          <span class="status {{ 'ok' if is_running else 'err' }}">{{ 'running' if is_running else 'shut off' }}</span>
-          <span class="status {{ 'ok' if is_autostart else 'err' }}">autostart: {{ autostart_label }}</span>
-          <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Консоль ↗</a>
-          <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header"><div><h2>Как подключиться</h2><p>Выберите удобный способ</p></div></div>
+      <div class="list">
+        <div class="list-item">
+          <span class="list-icon brand">{{ icon('monitor') }}</span>
+          <div class="grow"><div class="title">Экран в браузере</div><div class="meta">Как монитор, подключённый к машине. Подходит для установки системы.</div></div>
+          {% if s.running %}<a class="btn btn-sm" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">Открыть{{ icon('external-link', 'icon-sm') }}</a>{% else %}<span class="subtle small">Запустите машину</span>{% endif %}
         </div>
-      </header>
-
-      {% if resource_message %}<div class="alert success">{{ resource_message }}</div>{% endif %}
-      {% if resource_error %}<div class="alert danger">{{ resource_error }}</div>{% endif %}
-      {% if iso_message %}<div class="alert success">{{ iso_message }}</div>{% endif %}
-      {% if iso_error %}<div class="alert danger">{{ iso_error }}</div>{% endif %}
-      {% if boot_message %}<div class="alert success">{{ boot_message }}</div>{% endif %}
-      {% if boot_error %}<div class="alert danger">{{ boot_error }}</div>{% endif %}
-
-      <section class="grid vm-four-grid">
-        <article class="card">
-          <div class="card-head">
-            <h2>Управление</h2>
-            <span class="pill">actions</span>
-          </div>
-          <div class="vm-control-panel compact-control-panel">
-            <div>
-              <div class="label">Основные действия</div>
-              <div class="vm-actions compact-actions big-actions">
-                <a class="icon-action accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener" title="Открыть консоль"><span>▣</span><em>Консоль</em></a>
-                {% if is_running %}
-                  <form method="post" action="/vm/{{ vm.name }}/reboot"><button class="icon-action" title="Перезагрузить"><span>↻</span><em>Reboot</em></button></form>
-                  <form method="post" action="/vm/{{ vm.name }}/shutdown"><button class="icon-action" title="Мягко выключить"><span>⏻</span><em>Shutdown</em></button></form>
-                {% else %}
-                  <form method="post" action="/vm/{{ vm.name }}/start"><button class="icon-action success" title="Запустить"><span>▶</span><em>Start</em></button></form>
-                {% endif %}
-              </div>
-            </div>
-            <div>
-              <div class="label">Автозапуск</div>
-              <div class="vm-actions compact-actions big-actions">
-                {% if is_autostart %}
-                  <form method="post" action="/vm/{{ vm.name }}/autostart-disable" class="autostart-form">
-                    <button class="autostart-indicator on" title="Автозапуск включён. Нажми, чтобы отключить"><span>●</span><strong>Включён</strong><small>Нажми для отключения</small></button>
-                  </form>
-                {% else %}
-                  <form method="post" action="/vm/{{ vm.name }}/autostart" class="autostart-form">
-                    <button class="autostart-indicator off" title="Автозапуск выключен. Нажми, чтобы включить"><span>●</span><strong>Выключен</strong><small>Нажми для включения</small></button>
-                  </form>
-                {% endif %}
-              </div>
-              <p class="muted small-note">Автозапуск поднимает VM вместе с libvirt после перезагрузки хоста.</p>
-            </div>
-            <div class="danger-zone-inline">
-              <div class="label">Опасные действия</div>
-              <div class="vm-actions compact-actions big-actions">
-                {% if is_running %}
-                  <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="icon-action danger" title="Принудительно выключить"><span>⚡</span><em>Power off</em></button></form>
-                {% endif %}
-                {% if not is_running %}
-                  <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');"><button class="icon-action danger" title="Удалить VM вместе с дисками"><span>🗑</span><em>Delete</em></button></form>
-                {% else %}
-                  <span class="muted small-note">Удаление доступно после выключения VM.</span>
-                {% endif %}
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>CPU / RAM / Архитектура</h2>
-            <span class="pill">resources</span>
-          </div>
-          <form method="post" action="/vm/{{ vm.name }}/resources" class="form-grid">
-            <div class="form-row">
-              <label>
-                <span>CPU</span>
-                <input type="number" name="vcpus" min="1" max="128" value="{{ rs.vcpus|default(1) }}" {% if is_running %}disabled{% endif %} required>
-              </label>
-              <label>
-                <span>RAM, MB</span>
-                <input type="number" name="memory_mb" min="512" max="262144" step="512" value="{{ rs.memory_mb|default(1024) }}" {% if is_running %}disabled{% endif %} required>
-              </label>
-            </div>
-            <label>
-              <span>Архитектура</span>
-              <select name="guest_arch" {% if is_running %}disabled{% endif %}>
-                <option value="keep">Не менять — {{ rs.arch|default('unknown') }}</option>
-                <option value="x86_64">x86_64 / amd64</option>
-                <option value="aarch64">ARM64 / aarch64</option>
-              </select>
-            </label>
-            <button class="primary wide" type="submit" {% if is_running %}disabled{% endif %}>Сохранить ресурсы VM</button>
-          </form>
-          {% if is_running %}
-            <p class="muted small-note">CPU/RAM/архитектуру можно менять только при выключенной VM.</p>
-          {% else %}
-            <p class="muted small-note">Изменения применяются через XML VM и virsh define.</p>
-          {% endif %}
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>Порядок загрузки</h2>
-            <span class="pill">boot</span>
-          </div>
-          <form method="post" action="/vm/{{ vm.name }}/boot-order" class="form-grid boot-order-form">
-            <input type="hidden" name="boot_order" id="boot-order-value" value="{{ current_boot_order|default('auto') }}">
-            <div class="boot-order-list" id="boot-order-list" data-current="{{ current_boot_order|default('auto') }}">
-              <div class="boot-order-item" draggable="true" data-device="cdrom"><span class="drag-handle">☰</span><div><b>ISO / CD-ROM</b><small>Установщик или rescue-образ</small></div></div>
-              <div class="boot-order-item" draggable="true" data-device="hd"><span class="drag-handle">☰</span><div><b>Диск</b><small>Основной диск VM</small></div></div>
-              <div class="boot-order-item" draggable="true" data-device="network"><span class="drag-handle">☰</span><div><b>Сеть / PXE</b><small>Загрузка по сети</small></div></div>
-            </div>
-            <button class="primary wide" type="submit">Применить порядок</button>
-          </form>
-          <p class="muted small-note">Изменение работает после перезапуска VM.</p>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>ISO-привод</h2>
-            <span class="pill">cdrom</span>
-          </div>
-          {% if current_iso %}
-            <div class="notice">Сейчас подключен ISO: <b>{{ current_iso }}</b></div>
-          {% else %}
-            <div class="muted small-note">ISO сейчас не подключён.</div>
-          {% endif %}
-          <form method="post" action="/vm/{{ vm.name }}/iso/mount" class="form-grid">
-            <label>
-              <span>ISO образ</span>
-              <select name="iso_path" required>
-                {% for iso in isos|default([]) %}
-                  <option value="{{ iso.path }}" {% if current_iso == iso.path %}selected{% endif %}>{{ iso.name }} — {{ iso.size }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <button class="primary wide" type="submit" {% if not isos %}disabled{% endif %}>Смонтировать ISO</button>
-          </form>
-          <form method="post" action="/vm/{{ vm.name }}/iso/unmount" class="form-grid" onsubmit="return confirm('Отмонтировать ISO из VM {{ vm.name }}?');">
-            <button type="submit" class="ghost wide" {% if not current_iso %}disabled{% endif %}>Отмонтировать ISO</button>
-          </form>
-          {% if not isos %}
-            <div class="alert danger">ISO-образов пока нет. Сначала загрузи .iso в разделе ISO.</div>
-          {% endif %}
-        </article>
-      </section>
-
-      <section class="grid vm-visual-grid">
-        <article class="card">
-          <div class="card-head">
-            <h2>Информация</h2>
-            <span class="pill">overview</span>
-          </div>
-          <div class="visual-card-body" id="vm-info-visual"></div>
-          <details class="raw-details">
-            <summary>Технический вывод dominfo</summary>
-            <pre>{{ vm.dominfo }}</pre>
-          </details>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>Диски</h2>
-            <span class="pill">storage</span>
-          </div>
-          <div class="visual-card-body" id="vm-disk-visual"></div>
-          <details class="raw-details">
-            <summary>Технический вывод domblklist</summary>
-            <pre>{{ vm.disks }}</pre>
-          </details>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>Сеть</h2>
-            <span class="pill">network</span>
-          </div>
-          <div class="visual-card-body" id="vm-network-visual"></div>
-          <details class="raw-details">
-            <summary>Технический вывод domiflist</summary>
-            <pre>{{ vm.interfaces }}</pre>
-          </details>
-        </article>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2>Консоль</h2>
-          <a class="link-pill accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">noVNC ↗</a>
+        <div class="list-item">
+          <span class="list-icon">{{ icon('terminal') }}</span>
+          <div class="grow"><div class="title">SSH с этого сервера</div><div class="meta">{% if has_ip %}<code>ssh пользователь@{{ vm.ip }}</code>{% else %}Станет доступно, когда машина получит IP-адрес{% endif %}</div></div>
         </div>
-        <div class="services">
-          <div class="service-row"><span>VNC display</span><span class="status ok">{{ vm.vnc }}</span></div>
-          <div class="service-row"><span>Host</span><span class="status ok">{{ host_ip }}</span></div>
-          <div class="service-row"><span>Web console</span><span class="status ok">/vm/{{ vm.name }}/console</span></div>
+        <div class="list-item">
+          <span class="list-icon">{{ icon('globe') }}</span>
+          <div class="grow"><div class="title">Доступ из интернета</div><div class="meta">Откройте порт машины наружу: сайт, SSH, удалённый рабочий стол</div></div>
+          <a class="btn btn-sm" href="/network">Настроить</a>
         </div>
-        <p class="muted small-note">Консоль открывается в новой вкладке и занимает всё окно браузера. VNC наружу открывать не нужно.</p>
-      </section>
-    </main>
+      </div>
+    </article>
   </div>
 
-  <template id="vm-dominfo-raw">{{ vm.dominfo }}</template>
-  <template id="vm-disks-raw">{{ vm.disks }}</template>
-  <template id="vm-interfaces-raw">{{ vm.interfaces }}</template>
+  <div class="stack">
+    <article class="card">
+      <div class="card-body stack-sm">
+        <form method="post" action="/vm/{{ vm.name }}/{{ 'autostart-disable' if vm.autostart_enabled else 'autostart' }}" class="switch-row" data-no-busy data-toast="{{ 'Автозапуск выключен' if vm.autostart_enabled else 'Машина будет запускаться вместе с сервером' }}">
+          <div class="switch-text"><strong>Автозапуск</strong><span>Запускать машину вместе с сервером</span></div>
+          <button type="submit" class="switch" role="switch" aria-checked="{{ 'true' if vm.autostart_enabled else 'false' }}" aria-label="Автозапуск"></button>
+        </form>
+      </div>
+    </article>
 
-  <script>
-    (function(){
-      const list = document.getElementById('boot-order-list');
-      const input = document.getElementById('boot-order-value');
-      if (!list || !input) return;
-      const initialMap = { cdrom_disk: ['cdrom','hd','network'], disk_cdrom: ['hd','cdrom','network'], network_disk: ['network','hd','cdrom'], disk: ['hd','cdrom','network'], auto: ['hd','cdrom','network'] };
-      const order = initialMap[list.dataset.current || 'auto'] || initialMap.auto;
-      const nodes = Array.from(list.querySelectorAll('.boot-order-item'));
-      order.forEach(device => { const node = nodes.find(item => item.dataset.device === device); if (node) list.appendChild(node); });
-      function updateValue(){
-        const devices = Array.from(list.querySelectorAll('.boot-order-item')).map(item => item.dataset.device);
-        const first = devices[0]; const second = devices[1];
-        if (first === 'cdrom' && second === 'hd') input.value = 'cdrom_disk';
-        else if (first === 'hd' && second === 'cdrom') input.value = 'disk_cdrom';
-        else if (first === 'network' && second === 'hd') input.value = 'network_disk';
-        else if (first === 'hd') input.value = 'disk';
-        else input.value = 'auto';
-      }
-      let dragged = null;
-      list.addEventListener('dragstart', event => { dragged = event.target.closest('.boot-order-item'); if (!dragged) return; dragged.classList.add('dragging'); event.dataTransfer.effectAllowed = 'move'; });
-      list.addEventListener('dragend', () => { if (dragged) dragged.classList.remove('dragging'); dragged = null; updateValue(); });
-      list.addEventListener('dragover', event => {
-        event.preventDefault();
-        const after = Array.from(list.querySelectorAll('.boot-order-item:not(.dragging)')).find(item => {
-          const box = item.getBoundingClientRect();
-          return event.clientY < box.top + box.height / 2;
-        });
-        if (!dragged) return;
-        if (after) list.insertBefore(dragged, after); else list.appendChild(dragged);
-      });
-      updateValue();
-    })();
+    <article class="card">
+      <div class="card-header"><h2>Установочный диск</h2></div>
+      <div class="card-body stack-sm">
+        {% if current_iso %}
+          <div class="upload-file"><span class="list-icon brand">{{ icon('disc-3') }}</span><div class="grow"><strong class="truncate" style="display:block">{{ current_iso.split('/')[-1] }}</strong><span class="subtle small">Вставлен в привод</span></div></div>
+          <form method="post" action="/vm/{{ vm.name }}/iso/unmount" data-confirm="Образ будет извлечён из привода машины." data-confirm-title="Извлечь диск?" data-confirm-button="Извлечь" data-confirm-tone="brand"><button class="btn btn-sm btn-block">{{ icon('x', 'icon-sm') }}Извлечь</button></form>
+        {% else %}
+          <p class="subtle small">Привод пуст. Вставьте образ, чтобы установить систему или загрузиться с диска восстановления.</p>
+          <a class="btn btn-sm btn-block" href="#storage" onclick="document.querySelector('[data-tab=storage]').click()">{{ icon('disc-3', 'icon-sm') }}Вставить образ</a>
+        {% endif %}
+      </div>
+    </article>
+  </div>
+</section>
 
-    (function(){
-      function text(id) { const node = document.getElementById(id); return node ? node.textContent.trim() : ''; }
-      function escapeHtml(value) { return String(value || '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
-      function parseKeyValues(raw) {
-        const data = {};
-        raw.split('\n').forEach(line => {
-          const idx = line.indexOf(':');
-          if (idx < 0) return;
-          const key = line.slice(0, idx).trim().toLowerCase();
-          const value = line.slice(idx + 1).trim();
-          if (key) data[key] = value;
-        });
-        return data;
-      }
-      function kibToGiB(value) {
-        const n = Number(String(value || '').replace(/[^0-9.]/g, ''));
-        if (!Number.isFinite(n) || n <= 0) return 0;
-        return n / 1024 / 1024;
-      }
-      function renderInfo() {
-        const box = document.getElementById('vm-info-visual');
-        if (!box) return;
-        const data = parseKeyValues(text('vm-dominfo-raw'));
-        const cpu = data['cpu(s)'] || data['cpu'] || '—';
-        const state = data['state'] || 'unknown';
-        const osType = data['os type'] || '—';
-        const maxMem = kibToGiB(data['max memory']);
-        const usedMem = kibToGiB(data['used memory']);
-        const memPct = maxMem > 0 ? Math.max(0, Math.min(100, Math.round((usedMem / maxMem) * 100))) : 0;
-        const cpuPct = Math.max(8, Math.min(100, Number(cpu) ? Number(cpu) * 12 : 18));
-        box.innerHTML = `
-          <div class="metric-strip">
-            <div class="metric-tile"><span>Состояние</span><strong>${escapeHtml(state)}</strong></div>
-            <div class="metric-tile"><span>CPU</span><strong>${escapeHtml(cpu)}</strong></div>
-            <div class="metric-tile"><span>Тип ОС</span><strong>${escapeHtml(osType)}</strong></div>
+<section data-tab-panel="resources" hidden>
+  <article class="card" style="max-width:720px">
+    <div class="card-header"><div><h2>Процессор и память</h2><p>Сколько ресурсов сервера получает машина</p></div></div>
+    <form method="post" action="/vm/{{ vm.name }}/resources" data-toast="Настройки сохранены">
+      <div class="card-body form-grid">
+        {% if not rs.is_shutoff %}
+          {{ alert('info', 'Выключите машину, чтобы изменить процессор и память.') }}
+        {% endif %}
+        <div class="form-row">
+          <div class="field">
+            <label for="vcpus">Ядра процессора</label>
+            <input class="input" id="vcpus" type="number" name="vcpus" min="1" max="128" value="{{ rs.vcpus|default(1) }}" {% if not rs.is_shutoff %}disabled{% endif %} required>
           </div>
-          <div class="chart-row">
-            <div class="donut" style="--value:${memPct};--donut-color:var(--accent)"><div class="donut-value">${memPct}%</div></div>
-            <div class="bar-list">
-              <div class="bar-item"><div class="bar-head"><span>Память</span><b>${usedMem ? usedMem.toFixed(1) : '—'} / ${maxMem ? maxMem.toFixed(1) : '—'} GB</b></div><div class="mini-bar"><span style="--value:${memPct}%"></span></div></div>
-              <div class="bar-item"><div class="bar-head"><span>vCPU capacity</span><b>${escapeHtml(cpu)} vCPU</b></div><div class="mini-bar"><span style="--value:${cpuPct}%"></span></div></div>
-              <div class="bar-item"><div class="bar-head"><span>Автозапуск</span><b>${escapeHtml(data['autostart'] || '—')}</b></div><div class="mini-bar"><span style="--value:${String(data['autostart'] || '').includes('enable') ? 100 : 18}%"></span></div></div>
-            </div>
-          </div>`;
-      }
-      function renderDisks() {
-        const box = document.getElementById('vm-disk-visual');
-        if (!box) return;
-        const lines = text('vm-disks-raw').split('\n').map(line => line.trim()).filter(Boolean);
-        const rows = [];
-        lines.forEach(line => {
-          if (/^(type|[-\s]+$)/i.test(line)) return;
-          const parts = line.split(/\s+/);
-          if (parts.length < 4) return;
-          rows.push({ type: parts[0], device: parts[1], target: parts[2], source: parts.slice(3).join(' ') });
-        });
-        if (!rows.length) { box.innerHTML = '<div class="visual-empty">Диски не найдены в выводе libvirt.</div>'; return; }
-        box.innerHTML = `<div class="visual-list">${rows.map(row => `
-          <div class="visual-item">
-            <div class="visual-icon">▣</div>
-            <div><b>${escapeHtml(row.target)}</b><small>${escapeHtml(row.device)} · ${escapeHtml(row.type)}<br>${escapeHtml(row.source)}</small></div>
-            <span class="status ok">disk</span>
-          </div>`).join('')}</div>`;
-      }
-      function renderNetwork() {
-        const box = document.getElementById('vm-network-visual');
-        if (!box) return;
-        const lines = text('vm-interfaces-raw').split('\n').map(line => line.trim()).filter(Boolean);
-        const rows = [];
-        lines.forEach(line => {
-          if (/^(interface|[-\s]+$)/i.test(line)) return;
-          const parts = line.split(/\s+/);
-          if (parts.length < 5) return;
-          rows.push({ iface: parts[0], type: parts[1], source: parts[2], model: parts[3], mac: parts[4] });
-        });
-        if (!rows.length) { box.innerHTML = '<div class="visual-empty">Сетевые интерфейсы не найдены в выводе libvirt.</div>'; return; }
-        box.innerHTML = `<div class="visual-list">${rows.map(row => `
-          <div class="visual-item">
-            <div class="visual-icon">⇄</div>
-            <div><b>${escapeHtml(row.iface)}</b><small>${escapeHtml(row.type)} · ${escapeHtml(row.source)} · ${escapeHtml(row.model)}<br>${escapeHtml(row.mac)}</small></div>
-            <span class="status ok">link</span>
-          </div>`).join('')}</div>`;
-      }
-      renderInfo();
-      renderDisks();
-      renderNetwork();
-    })();
-  </script>
-  <script src="/static/panel.js" defer></script>
-</body>
-</html>
+          <div class="field">
+            <label for="memory_mb">Память</label>
+            <div class="input-group"><input class="input" id="memory_mb" type="number" name="memory_mb" min="512" max="262144" step="512" value="{{ rs.memory_mb|default(1024) }}" {% if not rs.is_shutoff %}disabled{% endif %} required><span class="addon">МБ</span></div>
+            <span class="hint">1024 МБ = 1 ГБ</span>
+          </div>
+        </div>
+        <details class="advanced">
+          <summary>{{ icon('wrench', 'icon-sm') }}Архитектура процессора<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+          <div class="advanced-body field">
+            <select class="select" name="guest_arch" {% if not rs.is_shutoff %}disabled{% endif %}>
+              <option value="keep">Не менять — {{ rs.arch|default('неизвестно') }}</option>
+              <option value="x86_64">x86_64 — обычные ПК и серверы</option>
+              <option value="aarch64">ARM64 — образы для Raspberry Pi и ARM-серверов</option>
+            </select>
+            <span class="hint">Меняйте, только если точно знаете, зачем: система внутри может перестать загружаться.</span>
+          </div>
+        </details>
+      </div>
+      <div class="card-footer"><button type="submit" class="btn btn-primary" {% if not rs.is_shutoff %}disabled{% endif %}>Сохранить</button></div>
+    </form>
+  </article>
+</section>
+
+<section data-tab-panel="storage" class="grid grid-2" hidden>
+  <article class="card">
+    <div class="card-header"><div><h2>Порядок загрузки</h2><p>С чего машина пытается загрузиться в первую очередь</p></div></div>
+    <form method="post" action="/vm/{{ vm.name }}/boot-order" data-toast="Порядок загрузки сохранён">
+      <input type="hidden" name="boot_order" value="{{ current_boot_order|default('auto') }}" data-boot-value>
+      <div class="list" data-boot-list data-current="{{ current_boot_order|default('auto') }}">
+        {% for dev, title, hint, ic in [('hd', 'Жёсткий диск', 'Установленная система', 'hard-drive'), ('cdrom', 'Установочный диск', 'ISO-образ в приводе', 'disc-3'), ('network', 'Сеть (PXE)', 'Загрузка по сети', 'network')] %}
+          <div class="list-item" data-device="{{ dev }}">
+            <span class="list-icon"><b data-position>{{ loop.index }}</b></span>
+            {{ icon(ic) }}
+            <div class="grow"><div class="title">{{ title }}</div><div class="meta">{{ hint }}</div></div>
+            <button type="button" class="btn btn-ghost btn-icon btn-sm" data-move="up" aria-label="Выше"><svg class="icon icon-sm" style="transform:rotate(180deg)"><use href="/static/icons.svg#i-chevron-down"></use></svg></button>
+            <button type="button" class="btn btn-ghost btn-icon btn-sm" data-move="down" aria-label="Ниже">{{ icon('chevron-down', 'icon-sm') }}</button>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="card-footer"><span class="subtle small" style="margin-right:auto">Применится при следующем запуске</span><button type="submit" class="btn btn-primary btn-sm">Сохранить порядок</button></div>
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="card-header"><div><h2>Привод CD/DVD</h2><p>Вставьте образ, чтобы установить систему</p></div></div>
+    <div class="card-body stack-sm">
+      {% if isos %}
+        <form method="post" action="/vm/{{ vm.name }}/iso/mount" class="stack-sm" data-toast="Образ вставлен в привод">
+          <div class="field">
+            <label for="iso_path">Образ диска</label>
+            <select class="select" id="iso_path" name="iso_path" required>
+              {% for iso in isos %}<option value="{{ iso.path }}" {% if current_iso == iso.path %}selected{% endif %}>{{ iso.name }} · {{ iso.size }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="row">
+            <button class="btn btn-primary btn-sm" type="submit">{{ icon('disc-3', 'icon-sm') }}Вставить</button>
+            {% if current_iso %}<button class="btn btn-sm" type="submit" form="iso-eject">Извлечь текущий</button>{% endif %}
+          </div>
+        </form>
+        <form method="post" action="/vm/{{ vm.name }}/iso/unmount" id="iso-eject" data-toast="Образ извлечён"></form>
+      {% else %}
+        <p class="subtle">Образов пока нет.</p>
+        <a class="btn btn-sm" href="/iso">{{ icon('cloud-upload', 'icon-sm') }}Загрузить образ</a>
+      {% endif %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-header"><h2>Диски</h2></div>
+    <div class="list">
+      {% for disk in vm.disk_list %}
+        <div class="list-item"><span class="list-icon">{{ icon('disc-3' if disk.is_cdrom else 'hard-drive') }}</span><div class="grow"><div class="title truncate">{{ disk.name }}</div><div class="meta">{{ disk.label }} · {{ disk.target }}</div></div></div>
+      {% else %}
+        <div class="list-item subtle">Дисков не найдено</div>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-header"><h2>Сетевые карты</h2></div>
+    <div class="list">
+      {% for nic in vm.interface_list %}
+        <div class="list-item"><span class="list-icon">{{ icon('network') }}</span><div class="grow"><div class="title">{{ nic.source|replace('virtuality-nat', 'Автоматическая сеть (NAT)') }}</div><div class="meta mono">{{ nic.mac }} · {{ nic.model }}</div></div></div>
+      {% else %}
+        <div class="list-item subtle">Сетевых карт не найдено</div>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section data-tab-panel="expert" class="stack" hidden>
+  <div class="kv">
+    <div><span>VNC-дисплей</span><strong class="mono">{{ vm.vnc }}</strong></div>
+    <div><span>Адрес сервера</span><strong class="mono">{{ host_ip }}</strong></div>
+    <div><span>UUID</span><strong class="mono small">{{ vm.info.uuid or '—' }}</strong></div>
+  </div>
+  {% for title, cmd, body in [('Информация о машине', 'virsh dominfo ' ~ vm.name, vm.dominfo), ('Диски', 'virsh domblklist ' ~ vm.name ~ ' --details', vm.disks), ('Сетевые интерфейсы', 'virsh domiflist ' ~ vm.name, vm.interfaces)] %}
+    <div>
+      <div class="terminal-head"><i></i><i></i><i></i><span style="margin-left:6px">{{ title }} — {{ cmd }}</span></div>
+      <pre class="terminal">{{ body or '—' }}</pre>
+    </div>
+  {% endfor %}
+</section>
+{% endblock %}

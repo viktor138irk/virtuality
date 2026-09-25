@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% set page_title = 'Помощь' %}
+
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <h1>Помощь</h1>
+    <p class="lead">Короткие инструкции для частых задач. Командная строка не понадобится.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<section class="grid grid-2">
+  <article class="card help-card"><div class="card-body">
+    <div class="row"><span class="list-icon brand">{{ icon('plus') }}</span><h3>Как создать машину</h3></div>
+    <ol>
+      <li>Скачайте установочный образ системы (.iso) на сайте разработчика — например, Ubuntu Server.</li>
+      <li>Откройте <a href="/iso">Образы ОС</a> и перетащите файл в окно загрузки.</li>
+      <li>Нажмите <a href="/vm/create">Создать машину</a>, выберите образ и конфигурацию.</li>
+      <li>Когда задача завершится, нажмите «Открыть экран» и установите систему как на обычный компьютер.</li>
+    </ol>
+  </div></article>
+
+  <article class="card help-card"><div class="card-body">
+    <div class="row"><span class="list-icon brand">{{ icon('globe') }}</span><h3>Как открыть сайт или SSH из интернета</h3></div>
+    <ol>
+      <li>Откройте <a href="/network">Сеть и доступ</a>.</li>
+      <li>В блоке «Открыть доступ» выберите машину и сервис, например «Сайт (HTTPS)».</li>
+      <li>Нажмите «Открыть доступ». Теперь адрес <code>{{ host_ip }}:порт</code> ведёт в машину.</li>
+      <li>Если не открывается — нажмите «Проверить» рядом с правилом: панель подскажет, в чём проблема.</li>
+    </ol>
+  </div></article>
+
+  <article class="card help-card"><div class="card-body">
+    <div class="row"><span class="list-icon brand">{{ icon('monitor') }}</span><h3>Экран машины</h3></div>
+    <ul>
+      <li>Экран открывается в новой вкладке браузера — это как монитор, подключённый к машине.</li>
+      <li>Если курсор «застрял» внутри экрана, нажмите <code>Ctrl + Alt</code>.</li>
+      <li>После установки системы извлеките установочный диск на странице машины → «Диски и загрузка».</li>
+    </ul>
+  </div></article>
+
+  <article class="card help-card"><div class="card-body">
+    <div class="row"><span class="list-icon brand">{{ icon('power') }}</span><h3>Выключение и автозапуск</h3></div>
+    <ul>
+      <li><b>Выключить</b> — аккуратно завершает работу системы, как кнопка питания.</li>
+      <li><b>Выключить принудительно</b> — мгновенно, как выдернуть шнур. Используйте, только если машина зависла.</li>
+      <li><b>Автозапуск</b> — машина сама включится после перезагрузки сервера.</li>
+    </ul>
+  </div></article>
+
+  <article class="card help-card"><div class="card-body">
+    <div class="row"><span class="list-icon brand">{{ icon('cpu') }}</span><h3>Сколько ресурсов выделять</h3></div>
+    <ul>
+      <li><b>Мини</b> (1 ядро, 1 ГБ) — VPN, роутер, небольшие сервисы.</li>
+      <li><b>Стандарт</b> (2 ядра, 4 ГБ) — сайт, база данных, Linux-сервер.</li>
+      <li><b>Мощная</b> (4 ядра, 8 ГБ) — Windows, 1С, игровые серверы.</li>
+      <li>Процессор и память можно поменять позже, когда машина выключена.</li>
+    </ul>
+  </div></article>
+
+  <article class="card help-card"><div class="card-body">
+    <div class="row"><span class="list-icon brand">{{ icon('wrench') }}</span><h3>Если что-то не работает</h3></div>
+    <ul>
+      <li>Проверьте раздел <a href="/host">Сервер</a> — там видно, чего не хватает.</li>
+      <li>Посмотрите <a href="/operations">Задачи</a> — у каждой есть подробный журнал.</li>
+      <li>Полная диагностика в терминале сервера: <code>sudo vhealth</code>.</li>
+      <li>Расширенное управление доступно в Cockpit: <a href="https://{{ host_ip }}:9090" target="_blank" rel="noopener">https://{{ host_ip }}:9090</a>.</li>
+    </ul>
+  </div></article>
+</section>
+{% endblock %}

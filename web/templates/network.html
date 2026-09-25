@@ -1,271 +1,185 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Сеть — {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <div class="v-layout">
-    {% include "_sidebar.html" %}
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, alert, empty %}
+{% set page_title = 'Сеть и доступ' %}
 
-    <main class="v-main">
-      <header class="v-topbar">
-        <div>
-          <div class="v-title">Сеть</div>
-          <div class="v-subtitle">NAT Router для VPS, проброс одиночных портов и диапазонов к VM</div>
-        </div>
-        <div class="top-meta">
-          <span>user: {{ user }}</span>
-          <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-        </div>
-      </header>
-
-      {% if error %}
-        <div class="alert danger">{{ error }}</div>
-      {% endif %}
-
-      <section class="grid stats">
-        <article class="card stat">
-          <div class="label">NAT network</div>
-          <div class="value small">{{ ctx.nat.name }}</div>
-          <span class="status {{ 'ok' if ctx.nat.exists else 'warn' }}">{{ 'ready' if ctx.nat.exists else 'not created' }}</span>
-        </article>
-        <article class="card stat">
-          <div class="label">Subnet</div>
-          <div class="value small">{{ ctx.nat.subnet }}</div>
-        </article>
-        <article class="card stat">
-          <div class="label">External interface</div>
-          <div class="value small">{{ ctx.external_interface }}</div>
-        </article>
-        <article class="card stat">
-          <div class="label">IPv4 forward</div>
-          <div class="value small">{{ ctx.ip_forward }}</div>
-        </article>
-      </section>
-
-      <section class="grid two">
-        <article class="card">
-          <div class="card-head">
-            <h2>Virtuality NAT Router</h2>
-            <span class="pill">{{ ctx.nat.bridge }}</span>
-          </div>
-          <div class="meta-grid">
-            <div><span>Gateway</span><strong>{{ ctx.nat.gateway }}</strong></div>
-            <div><span>DHCP</span><strong>{{ ctx.nat.dhcp }}</strong></div>
-            <div><span>Bridge</span><strong>{{ ctx.nat.bridge }}</strong></div>
-          </div>
-          <form method="post" action="/network/nat/setup" class="inline-form top-space">
-            <button class="primary">Создать / починить NAT-сеть</button>
-          </form>
-          <pre>{{ ctx.nat.info }}</pre>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>DHCP leases</h2>
-            <span class="pill">virsh net-dhcp-leases</span>
-          </div>
-          <pre>{{ ctx.nat.leases }}</pre>
-          <div class="notice top-space">IP для проброса можно оставить auto или ввести вручную, если DHCP leases пустые, у VM статический IP, bridge-сеть или нет qemu-guest-agent.</div>
-        </article>
-      </section>
-
-      <section class="grid two">
-        <article class="card">
-          <div class="card-head">
-            <h2>Добавить проброс порта</h2>
-            <span class="pill">DNAT auto/manual IP · ranges</span>
-          </div>
-          <form method="post" action="/network/forward/add" class="form-grid">
-            <label>
-              <span>Описание</span>
-              <input type="text" name="note" placeholder="Например: сайт, SSH, SIP, RTP MikoPBX">
-            </label>
-            <label>
-              <span>Внешний порт или диапазон</span>
-              <input type="text" name="external_port" pattern="[0-9]{1,5}([:-][0-9]{1,5})?" placeholder="80, 443, 2222 или 10000-20000" required>
-            </label>
-            <label>
-              <span>Машина</span>
-              <select name="vm_name" required>
-                {% for vm in vms %}
-                  <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <label>
-              <span>IP VM</span>
-              <input type="text" name="guest_ip" value="auto" placeholder="auto или 192.168.100.55" required>
-              <small>Оставь auto для DHCP/qemu-guest-agent или впиши внутренний IP VM вручную.</small>
-            </label>
-            <label>
-              <span>Внутренний порт или диапазон</span>
-              <input type="text" name="guest_port" list="standard-ports" pattern="[0-9]{1,5}([:-][0-9]{1,5})?" placeholder="Выбери стандартный или введи 10000-20000" required>
-              <datalist id="standard-ports">
-                <option value="20" label="FTP data"></option>
-                <option value="21" label="FTP"></option>
-                <option value="22" label="SSH"></option>
-                <option value="25" label="SMTP"></option>
-                <option value="53" label="DNS"></option>
-                <option value="80" label="HTTP / web"></option>
-                <option value="110" label="POP3"></option>
-                <option value="123" label="NTP"></option>
-                <option value="143" label="IMAP"></option>
-                <option value="443" label="HTTPS / SSL web"></option>
-                <option value="465" label="SMTPS"></option>
-                <option value="587" label="SMTP submission"></option>
-                <option value="993" label="IMAPS"></option>
-                <option value="995" label="POP3S"></option>
-                <option value="1194" label="OpenVPN"></option>
-                <option value="1433" label="Microsoft SQL Server"></option>
-                <option value="1521" label="Oracle Database"></option>
-                <option value="2049" label="NFS"></option>
-                <option value="3306" label="MySQL / MariaDB"></option>
-                <option value="3389" label="RDP / Windows Remote Desktop"></option>
-                <option value="5060" label="SIP"></option>
-                <option value="5061" label="SIP TLS"></option>
-                <option value="5432" label="PostgreSQL"></option>
-                <option value="5900" label="VNC"></option>
-                <option value="6379" label="Redis"></option>
-                <option value="8000" label="HTTP dev"></option>
-                <option value="8080" label="HTTP alternative"></option>
-                <option value="8443" label="HTTPS alternative"></option>
-                <option value="10000" label="Webmin / RTP start"></option>
-                <option value="10000-20000" label="RTP / VoIP media range"></option>
-              </datalist>
-            </label>
-            <label>
-              <span>Протокол</span>
-              <select name="protocol">
-                <option value="tcp">tcp</option>
-                <option value="udp">udp</option>
-              </select>
-            </label>
-            <div class="notice">Можно указать одиночный порт или диапазон. Если авто-IP не определяется, впиши IP VM вручную. Для VoIP/RTP обычно: внешний 10000-20000 → внутренний 10000-20000, протокол udp.</div>
-            <button class="primary wide">Добавить и применить</button>
-          </form>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>Диагностика публичного доступа</h2>
-            <span class="pill">VM → Internet</span>
-          </div>
-          <form method="post" action="/network/diagnose" class="form-grid">
-            <label>
-              <span>Виртуальная машина</span>
-              <select name="vm_name" required>
-                {% for vm in vms %}
-                  <option value="{{ vm.name }}">{{ vm.name }} — {{ vm.state }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <div class="form-row">
-              <label>
-                <span>Внешний порт</span>
-                <input type="number" name="external_port" min="1" max="65535" value="80" required>
-              </label>
-              <label>
-                <span>Порт внутри VM</span>
-                <input type="number" name="guest_port" min="1" max="65535" value="80" required>
-              </label>
-            </div>
-            <label>
-              <span>Протокол</span>
-              <select name="protocol">
-                <option value="tcp">tcp</option>
-                <option value="udp">udp</option>
-              </select>
-            </label>
-            <button class="primary wide">Проверить доступ</button>
-          </form>
-        </article>
-      </section>
-
-      {% if diagnostics %}
-      <section class="card">
-        <div class="card-head">
-          <h2>Результат диагностики</h2>
-          <span class="pill">{{ diagnostics.vm_name }} · {{ diagnostics.protocol }} {{ diagnostics.external_port }} → {{ diagnostics.guest_port }}</span>
-        </div>
-        <div class="notice">{{ diagnostics.verdict }}</div>
-        <div class="meta-grid top-space">
-          <div><span>VM IP</span><strong>{{ diagnostics.vm_ip or 'not found' }}</strong></div>
-          <div><span>External interface</span><strong>{{ diagnostics.external_interface }}</strong></div>
-          <div><span>Mapping</span><strong>{{ diagnostics.external_port }} → {{ diagnostics.guest_port }}</strong></div>
-        </div>
-        <table class="top-space">
-          <thead><tr><th>Проверка</th><th>Статус</th><th>Детали</th></tr></thead>
-          <tbody>
-          {% for check in diagnostics.checks %}
-            <tr>
-              <td class="strong">{{ check.name }}</td>
-              <td><span class="status {{ 'ok' if check.ok else 'err' }}">{{ 'OK' if check.ok else 'FAIL' }}</span></td>
-              <td class="muted">{{ check.detail }}</td>
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
-        <div class="grid two top-space">
-          <article><div class="label">Проверить входящий трафик</div><pre>{{ diagnostics.commands.watch_external }}</pre></article>
-          <article><div class="label">Проверить трафик к VM</div><pre>{{ diagnostics.commands.watch_internal }}</pre></article>
-        </div>
-      </section>
-      {% endif %}
-
-      <section class="card">
-        <div class="card-head">
-          <h2>Пробросы портов</h2>
-          <form method="post" action="/network/apply"><button>Применить правила</button></form>
-        </div>
-        <table>
-          <thead>
-            <tr><th>Проброс</th><th>VM</th><th>Внутренний адрес</th><th>Протокол</th><th>Описание</th><th>Действия</th></tr>
-          </thead>
-          <tbody>
-          {% for item in ctx.forwards %}
-            <tr>
-              <td class="strong">
-                {{ item.external_port_label|default(item.external_port) }} → {{ item.guest_port_label|default(item.guest_port) }}
-                {% if item.is_range %}<span class="status warn">range</span>{% endif %}
-              </td>
-              <td>{{ item.vm_name }}</td>
-              <td>{{ item.guest_ip }}</td>
-              <td><span class="status ok">{{ item.protocol }}</span></td>
-              <td>{{ item.note }}</td>
-              <td>
-                <div class="actions">
-                  <form method="post" action="/network/diagnose">
-                    <input type="hidden" name="vm_name" value="{{ item.vm_name }}">
-                    <input type="hidden" name="external_port" value="{{ item.external_port }}">
-                    <input type="hidden" name="guest_port" value="{{ item.guest_port }}">
-                    <input type="hidden" name="protocol" value="{{ item.protocol }}">
-                    <button>Диагностика</button>
-                  </form>
-                  <form method="post" action="/network/forward/{{ item.id }}/delete"><button class="danger">Удалить</button></form>
-                </div>
-              </td>
-            </tr>
-          {% else %}
-            <tr><td colspan="6" class="muted">Пробросов пока нет</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2>nftables preview</h2>
-          <span class="pill">/etc/virtuality/nftables/virtuality.nft</span>
-        </div>
-        <pre>{{ ctx.nft_rules }}</pre>
-      </section>
-    </main>
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <h1>Сеть и доступ</h1>
+    <p class="lead">Откройте доступ к машинам из интернета: сайт, SSH, удалённый рабочий стол. Всё остальное остаётся закрытым.</p>
   </div>
-  <script src="/static/panel.js" defer></script>
-</body>
-</html>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if diagnostics %}
+  {% set failed = diagnostics.checks|rejectattr('ok')|list %}
+  <article class="card" style="margin-bottom:20px">
+    <div class="card-header">
+      <div><h2>Проверка доступа: {{ diagnostics.vm_name }}, порт {{ diagnostics.external_port }}</h2><p>{{ diagnostics.protocol|upper }} {{ diagnostics.external_port }} → {{ diagnostics.vm_ip or 'IP не найден' }}:{{ diagnostics.guest_port }}</p></div>
+      {% if failed %}{{ badge('Есть проблемы: ' ~ failed|length, 'warning') }}{% else %}{{ badge('Всё в порядке', 'success') }}{% endif %}
+    </div>
+    <div class="card-body stack-sm">
+      {{ alert('warning' if failed else 'success', diagnostics.verdict) }}
+    </div>
+    <div class="checklist">
+      {% for check in diagnostics.checks %}
+        <div class="check-item {{ 'success' if check.ok else 'danger' }}">{{ icon('circle-check' if check.ok else 'circle-x') }}<div style="min-width:0"><strong>{{ check.name }}</strong><span class="truncate" style="display:block">{{ check.detail|truncate(160) }}</span></div></div>
+      {% endfor %}
+    </div>
+    <div class="card-footer" style="justify-content:flex-start;display:grid;gap:8px">
+      <span class="subtle small">Проверить входящий трафик на сервере:</span>
+      <div class="code-line">{{ diagnostics.commands.watch_external }}<button type="button" class="btn btn-ghost btn-icon btn-sm" data-copy="{{ diagnostics.commands.watch_external }}" style="margin-left:auto">{{ icon('copy', 'icon-sm') }}</button></div>
+    </div>
+  </article>
+{% endif %}
+
+<section class="grid grid-main">
+  <article class="card">
+    <div class="card-header">
+      <div><h2>Доступ из интернета</h2><p>Порты сервера, которые ведут внутрь машин</p></div>
+      {% if ctx.forwards %}<form method="post" action="/network/apply" class="inline-form" data-toast="Правила применены заново"><button class="btn btn-sm btn-ghost">{{ icon('refresh-cw', 'icon-sm') }}Применить заново</button></form>{% endif %}
+    </div>
+    {% if ctx.forwards %}
+      <div class="list">
+        {% for item in ctx.forwards %}
+          {% set service = item.note or (item.guest_port|port_service) or ('Порт ' ~ item.guest_port_label) %}
+          <div class="list-item">
+            <span class="list-icon success">{{ icon('globe') }}</span>
+            <div class="grow">
+              <div class="title">{{ service }}</div>
+              <div class="meta">Сервер : <b class="mono">{{ item.external_port_label }}</b> → {{ item.vm_name }} : <b class="mono">{{ item.guest_port_label }}</b> · {{ item.protocol|upper }}{% if item.is_range %} · диапазон{% endif %}</div>
+            </div>
+            <form method="post" action="/network/diagnose" class="inline-form">
+              <input type="hidden" name="vm_name" value="{{ item.vm_name }}"><input type="hidden" name="external_port" value="{{ item.external_port }}"><input type="hidden" name="guest_port" value="{{ item.guest_port }}"><input type="hidden" name="protocol" value="{{ item.protocol }}">
+              <button class="btn btn-sm hide-sm">{{ icon('activity', 'icon-sm') }}Проверить</button>
+            </form>
+            <form method="post" action="/network/forward/{{ item.id }}/delete" class="inline-form" data-confirm="Доступ к «{{ service }}» из интернета будет закрыт." data-confirm-title="Закрыть доступ?" data-confirm-button="Закрыть" data-toast="Доступ закрыт" data-toast-tone="warning">
+              <button class="btn btn-sm btn-icon btn-ghost" aria-label="Удалить">{{ icon('trash-2', 'icon-sm') }}</button>
+            </form>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      {{ empty('shield-check', 'Всё закрыто', 'Машины выходят в интернет, но снаружи к ним подключиться нельзя. Откройте нужный порт в форме справа.') }}
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <div class="card-header"><div><h2>Открыть доступ</h2><p>Сделайте сервис машины доступным снаружи</p></div></div>
+    {% if vms %}
+    <form method="post" action="/network/forward/add" data-toast="Доступ открыт">
+      <div class="card-body form-grid">
+        <div class="field">
+          <label for="fw-vm">Машина</label>
+          <select class="select" id="fw-vm" name="vm_name" required>
+            {% for vm in vms %}<option value="{{ vm.name }}">{{ vm.name }}{% if vm.ip and vm.ip != '—' %} · {{ vm.ip }}{% endif %}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="fw-preset">Что открыть</label>
+          <select class="select" id="fw-preset" data-port-preset>
+            <option value="">Выберите сервис…</option>
+            {% for p in port_presets %}<option value="{{ p.port }}" data-protocol="{{ p.protocol }}">{{ p.label }}</option>{% endfor %}
+            <option value="custom">Другой порт</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="field"><label for="fw-guest">Порт в машине</label><input class="input" id="fw-guest" type="text" name="guest_port" pattern="[0-9]{1,5}([:\-][0-9]{1,5})?" placeholder="22" required></div>
+          <div class="field"><label for="fw-ext">Порт на сервере</label><input class="input" id="fw-ext" type="text" name="external_port" pattern="[0-9]{1,5}([:\-][0-9]{1,5})?" placeholder="2222" required></div>
+        </div>
+        <div class="field">
+          <label>Протокол</label>
+          <div class="segmented" role="radiogroup">
+            <label style="display:contents"><input type="radio" name="protocol" value="tcp" checked hidden><button type="button" class="active" data-proto="tcp">TCP</button></label>
+            <label style="display:contents"><input type="radio" name="protocol" value="udp" hidden><button type="button" data-proto="udp">UDP</button></label>
+          </div>
+        </div>
+        <details class="advanced">
+          <summary>{{ icon('wrench', 'icon-sm') }}Дополнительно<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+          <div class="advanced-body form-grid">
+            <div class="field"><label for="fw-ip">IP-адрес машины</label><input class="input" id="fw-ip" type="text" name="guest_ip" value="auto"><span class="hint">«auto» — определить автоматически</span></div>
+            <div class="field"><label for="fw-note">Название</label><input class="input" id="fw-note" type="text" name="note" maxlength="120" placeholder="например, Сайт компании"></div>
+          </div>
+        </details>
+      </div>
+      <div class="card-footer"><button type="submit" class="btn btn-primary">{{ icon('globe', 'icon-sm') }}Открыть доступ</button></div>
+    </form>
+    {% else %}
+      <div class="card-body subtle">Сначала <a href="/vm/create">создайте машину</a>.</div>
+    {% endif %}
+  </article>
+</section>
+
+<section class="grid grid-2 mt-3">
+  <article class="card">
+    <div class="card-header">
+      <div><h2>Внутренняя сеть машин</h2><p>Через неё машины выходят в интернет</p></div>
+      {% if ctx.nat.exists %}{{ badge('Работает', 'success') }}{% else %}{{ badge('Не создана', 'warning') }}{% endif %}
+    </div>
+    <div class="card-body stack-sm">
+      <div class="kv">
+        <div><span>Адреса машин</span><strong class="mono">{{ ctx.nat.subnet }}</strong></div>
+        <div><span>Шлюз</span><strong class="mono">{{ ctx.nat.gateway }}</strong></div>
+        <div><span>Выход в интернет</span><strong class="mono">{{ ctx.external_interface }}</strong></div>
+        <div><span>Маршрутизация</span><strong>{{ 'Включена' if ctx.ip_forward == 'enabled' else 'Выключена' }}</strong></div>
+      </div>
+      <form method="post" action="/network/nat/setup" data-toast="Сеть проверена и настроена"><button class="btn btn-sm">{{ icon('wrench', 'icon-sm') }}{{ 'Проверить и починить' if ctx.nat.exists else 'Создать сеть' }}</button></form>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-header"><div><h2>Адреса машин</h2><p>Если адрес не определился сам, укажите его вручную</p></div></div>
+    <div class="list">
+      {% for vm in vms %}
+        <form method="post" action="/network/vm-ip/save" class="list-item" data-toast="Адрес сохранён">
+          <span class="list-icon">{{ icon('monitor') }}</span>
+          <div class="grow"><div class="title">{{ vm.name }}</div><div class="meta">{{ vm.ip if vm.ip and vm.ip != '—' else 'адрес не определён' }}{% if vm.manual_ip %} · задан вручную{% endif %}</div></div>
+          <input type="hidden" name="vm_name" value="{{ vm.name }}">
+          <input class="input" style="width:150px;height:32px" type="text" name="manual_ip" value="{{ vm.manual_ip }}" placeholder="авто" aria-label="IP вручную">
+          <button class="btn btn-sm">Сохранить</button>
+        </form>
+      {% else %}
+        <div class="list-item subtle">Машин пока нет</div>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<details class="advanced mt-3">
+  <summary>{{ icon('terminal', 'icon-sm') }}Для специалистов: DHCP и правила nftables<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+  <div class="advanced-body grid grid-2">
+    <div><div class="terminal-head"><i></i><i></i><i></i><span>virsh net-dhcp-leases {{ ctx.nat.name }}</span></div><pre class="terminal">{{ ctx.nat.leases or '—' }}</pre></div>
+    <div><div class="terminal-head"><i></i><i></i><i></i><span>/etc/virtuality/nftables/virtuality.nft</span></div><pre class="terminal">{{ ctx.nft_rules }}</pre></div>
+  </div>
+</details>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var preset = document.querySelector('[data-port-preset]');
+    if (!preset) return;
+    var guest = document.getElementById('fw-guest'), ext = document.getElementById('fw-ext'), note = document.getElementById('fw-note');
+    function setProto(value) {
+      document.querySelectorAll('[data-proto]').forEach(function (btn) {
+        var on = btn.dataset.proto === value;
+        btn.classList.toggle('active', on);
+        btn.previousElementSibling.checked = on;
+      });
+    }
+    document.querySelectorAll('[data-proto]').forEach(function (btn) { btn.addEventListener('click', function () { setProto(btn.dataset.proto); }); });
+    preset.addEventListener('change', function () {
+      var opt = preset.options[preset.selectedIndex];
+      if (!opt.value || opt.value === 'custom') { if (opt.value === 'custom') guest.focus(); return; }
+      guest.value = opt.value;
+      var port = parseInt(opt.value, 10);
+      ext.value = opt.value.indexOf('-') > -1 ? opt.value : (port === 22 ? '2222' : port === 3389 ? '33890' : opt.value);
+      setProto(opt.dataset.protocol || 'tcp');
+      if (note && !note.value) note.value = opt.text.split(' — ')[0];
+    });
+    guest.addEventListener('input', function () { if (!ext.dataset.touched) ext.value = guest.value; });
+    ext.addEventListener('input', function () { ext.dataset.touched = '1'; });
+  })();
+</script>
+{% endblock %}

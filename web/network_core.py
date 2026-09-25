@@ -72,6 +72,18 @@ def iptables_port_value(start: int, end: int) -> str:
     return str(int(start)) if int(start) == int(end) else f'{int(start)}:{int(end)}'
 
 
+def iptables_dnat_port_value(start: int, end: int) -> str:
+    return str(int(start)) if int(start) == int(end) else f'{int(start)}-{int(end)}'
+
+
+def successful_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in results if item.get('ok')]
+
+
+def failed_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in results if not item.get('ok')]
+
+
 def port_label(start: int, end: int) -> str:
     return str(int(start)) if int(start) == int(end) else f'{int(start)}-{int(end)}'
 
@@ -126,6 +138,20 @@ def external_interface() -> str:
         return 'eth0'
     match = re.search(r'\bdev\s+([^\s]+)', result['stdout'])
     return match.group(1) if match else 'eth0'
+
+
+def route_interface_for_ip(ip: str) -> str:
+    if not valid_ip(ip):
+        return NAT_BRIDGE
+    result = run_cmd(['ip', 'route', 'get', ip], timeout=5)
+    if not result['ok']:
+        return NAT_BRIDGE
+    match = re.search(r'\bdev\s+([^\s]+)', result['stdout'])
+    return match.group(1) if match else NAT_BRIDGE
+
+
+def forward_guest_interface(item: dict[str, Any]) -> str:
+    return route_interface_for_ip(str(item.get('guest_ip', '')))
 
 
 def ip_forward_state() -> str:
@@ -352,12 +378,13 @@ def delete_port_forward(forward_id: str) -> None:
 
 def render_nft_rules() -> str:
     ext = external_interface()
+    forwards = load_port_forwards()
     lines = [
         'table ip virtuality {',
         '  chain prerouting {',
         '    type nat hook prerouting priority dstnat; policy accept;',
     ]
-    for item in load_port_forwards():
+    for item in forwards:
         external_ports = nft_port_value(item['external_port_start'], item['external_port_end'])
         guest_ports = nft_port_value(item['guest_port_start'], item['guest_port_end'])
         lines.append(f"    iifname \"{ext}\" {item['protocol']} dport {external_ports} dnat to {item['guest_ip']}:{guest_ports}")
@@ -366,11 +393,22 @@ def render_nft_rules() -> str:
         '  chain postrouting {',
         '    type nat hook postrouting priority srcnat; policy accept;',
         f'    ip saddr {NAT_SUBNET} oifname "{ext}" masquerade',
+    ]
+    for item in forwards:
+        guest_iface = forward_guest_interface(item)
+        lines.append(f'    ip daddr {item["guest_ip"]} oifname "{guest_iface}" masquerade')
+    lines += [
         '  }',
         '  chain forward {',
         '    type filter hook forward priority filter; policy accept;',
         f'    ip saddr {NAT_SUBNET} accept',
         f'    ip daddr {NAT_SUBNET} accept',
+    ]
+    for item in forwards:
+        guest_iface = forward_guest_interface(item)
+        lines.append(f'    iifname "{ext}" oifname "{guest_iface}" ip daddr {item["guest_ip"]} accept')
+        lines.append(f'    iifname "{guest_iface}" oifname "{ext}" ip saddr {item["guest_ip"]} ct state established,related accept')
+    lines += [
         '  }',
         '}',
     ]
@@ -392,7 +430,7 @@ def apply_ufw_route_rules(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         cmd = [
             'ufw', 'route', 'allow',
             'in', 'on', ext,
-            'out', 'on', NAT_BRIDGE,
+            'out', 'on', forward_guest_interface(item),
             'to', item['guest_ip'],
             'port', guest_port,
             'proto', item['protocol'],
@@ -429,10 +467,13 @@ def apply_iptables_fallback(items: list[dict[str, Any]]) -> list[dict[str, Any]]
         guest_ip = item['guest_ip']
         external_port = iptables_port_value(item['external_port_start'], item['external_port_end'])
         guest_port = iptables_port_value(item['guest_port_start'], item['guest_port_end'])
-        guest_to = f"{guest_ip}:{iptables_port_value(item['guest_port_start'], item['guest_port_end'])}"
-        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', ext, '-o', NAT_BRIDGE, '-p', proto, '-d', guest_ip, '-m', proto, '--dport', guest_port, '-j', 'ACCEPT']))
-        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', NAT_BRIDGE, '-o', ext, '-s', guest_ip, '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', '-j', 'ACCEPT']))
+        guest_to_port = iptables_dnat_port_value(item['guest_port_start'], item['guest_port_end'])
+        guest_to = f"{guest_ip}:{guest_to_port}"
+        guest_iface = forward_guest_interface(item)
+        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', ext, '-o', guest_iface, '-p', proto, '-d', guest_ip, '-m', proto, '--dport', guest_port, '-j', 'ACCEPT']))
+        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', guest_iface, '-o', ext, '-s', guest_ip, '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', '-j', 'ACCEPT']))
         results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', ext, '-p', proto, '-m', proto, '--dport', external_port, '-j', 'DNAT', '--to-destination', guest_to]))
+        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-d', guest_ip, '-o', guest_iface, '-j', 'MASQUERADE']))
     results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-s', NAT_SUBNET, '-o', ext, '-j', 'MASQUERADE']))
     return results
 
@@ -443,16 +484,29 @@ def apply_port_forwards() -> dict[str, Any]:
     disable_rp_filter()
     items = load_port_forwards()
     NFT_FILE.write_text(render_nft_rules())
-    run_cmd(['nft', 'delete', 'table', 'ip', 'virtuality'], timeout=8)
-    result = run_cmd(['nft', '-f', str(NFT_FILE)], timeout=15)
-    if not result['ok']:
-        raise NetworkError(result['stderr'] or result['stdout'] or 'Не удалось применить nftables-правила')
+
+    nft_delete = run_cmd(['nft', 'delete', 'table', 'ip', 'virtuality'], timeout=8)
+    nft_apply = run_cmd(['nft', '-f', str(NFT_FILE)], timeout=15)
     ufw_results = apply_ufw_route_rules(items)
     iptables_results = apply_iptables_fallback(items)
+
+    iptables_ok = bool(successful_results(iptables_results)) or not items
+    if not nft_apply['ok'] and not iptables_ok:
+        details = [
+            nft_apply.get('stderr') or nft_apply.get('stdout') or 'nftables не применился',
+            *[
+                item.get('stderr') or item.get('stdout') or item.get('cmd', 'iptables rule failed')
+                for item in failed_results(iptables_results)
+            ],
+        ]
+        raise NetworkError('Не удалось применить правила проброса: ' + ' | '.join([d for d in details if d]))
+
     return {
-        'ok': True,
+        'ok': nft_apply['ok'] or iptables_ok,
         'file': str(NFT_FILE),
         'rules': render_nft_rules(),
+        'nft_delete': nft_delete,
+        'nft_apply': nft_apply,
         'ufw': ufw_results,
         'iptables': iptables_results,
     }
@@ -505,7 +559,7 @@ def diagnose_public_access(vm_name: str, external_port: int, guest_port: int, pr
     nft_has_range_rule = bool(matching_forward and vm_ip and matching_forward['external_port_label'] in nft_text and f"{vm_ip}:{matching_forward['guest_port_label']}" in nft_text)
     nft_has_rule = nft_has_single_rule or nft_has_range_rule
     iptables_has_prerouting = bool(vm_ip and f'--dport {int(external_port)} -j DNAT --to-destination {vm_ip}:{int(guest_port)}' in ipt_nat_text)
-    iptables_has_range_prerouting = bool(matching_forward and vm_ip and matching_forward['external_port_label'].replace('-', ':') in ipt_nat_text and f"{vm_ip}:{matching_forward['guest_port_label'].replace('-', ':')}" in ipt_nat_text)
+    iptables_has_range_prerouting = bool(matching_forward and vm_ip and matching_forward['external_port_label'].replace('-', ':') in ipt_nat_text and (f"{vm_ip}:{matching_forward['guest_port_label']}" in ipt_nat_text or f"{vm_ip}:{matching_forward['guest_port_label'].replace('-', ':')}" in ipt_nat_text))
     iptables_has_prerouting = iptables_has_prerouting or iptables_has_range_prerouting
     iptables_has_forward = bool(vm_ip and f'-d {vm_ip}/32' in ipt_forward_text and (f'--dport {int(guest_port)}' in ipt_forward_text or (matching_forward and matching_forward['guest_port_label'].replace('-', ':') in ipt_forward_text)))
     ufw_has_route = bool(vm_ip and vm_ip in ufw_text and (str(int(guest_port)) in ufw_text or (matching_forward and matching_forward['guest_port_label'].replace('-', ':') in ufw_text)))
@@ -545,7 +599,7 @@ def diagnose_public_access(vm_name: str, external_port: int, guest_port: int, pr
         'checks': checks,
         'commands': {
             'watch_external': f"sudo tcpdump -ni {ext} '{protocol} port {int(external_port)}'",
-            'watch_internal': f"sudo tcpdump -ni {NAT_BRIDGE} 'host {vm_ip or '<VM_IP>'} and {protocol} port {int(guest_port)}'",
+            'watch_internal': f"sudo tcpdump -ni {route_interface_for_ip(vm_ip) if vm_ip else NAT_BRIDGE} 'host {vm_ip or '<VM_IP>'} and {protocol} port {int(guest_port)}'",
         },
         'raw': {
             'domifaddr': domifaddr['stdout'] or domifaddr['stderr'],

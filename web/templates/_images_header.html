@@ -1,0 +1,12 @@
+{% from "_ui.html" import icon %}
+<div class="page-header">
+  <div>
+    <h1>Образы ОС</h1>
+    <p class="lead">Файлы, из которых создаются машины. Загрузите один раз — используйте для любого количества машин.</p>
+  </div>
+  <div class="page-actions"><a class="btn btn-primary" href="/vm/create">{{ icon('plus') }}Создать машину</a></div>
+</div>
+<nav class="tabs">
+  <a href="/iso" class="{{ 'active' if request.url.path.startswith('/iso') else '' }}">{{ icon('disc-3', 'icon-sm') }}Установочные образы{% if isos is defined %}<span class="tag">{{ isos|length }}</span>{% endif %}</a>
+  <a href="/disk-images" class="{{ 'active' if request.url.path.startswith('/disk-images') else '' }}">{{ icon('hard-drive', 'icon-sm') }}Готовые системы{% if images is defined %}<span class="tag">{{ images|length }}</span>{% endif %}</a>
+</nav>

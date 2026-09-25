@@ -96,6 +96,11 @@ diag_network() {
         write_state "idle" "Автообновление: новых обновлений нет"
         exit 0
       fi
+      if [ -n "$latest" ] && [ "$current" != "unknown" ] && ! git merge-base --is-ancestor "$current" "$latest" 2>/dev/null; then
+        log "local build ${current:0:12} is not behind ${REMOTE}/${BRANCH} (${latest:0:12}); skip to avoid a downgrade"
+        write_state "idle" "Автообновление: установленная сборка новее или отличается от ${BRANCH}, обновление пропущено"
+        exit 0
+      fi
       log "update may be available or current commit unknown: ${current:0:12} -> ${latest:0:12}"
     else
       log "git fetch failed; diagnostics and apply ZIP fallback will be used"

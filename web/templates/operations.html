@@ -1,56 +1,38 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Операции — {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <div class="v-layout">
-    {% include "_sidebar.html" %}
+{% extends "base.html" %}
+{% from "_ui.html" import icon, op_badge, empty %}
+{% set page_title = 'Задачи' %}
 
-    <main class="v-main">
-      <header class="v-topbar">
-        <div>
-          <div class="v-title">Операции</div>
-          <div class="v-subtitle">Журнал фоновых действий Virtuality</div>
-        </div>
-        <div class="top-meta">
-          <span>user: {{ user }}</span>
-          <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-        </div>
-      </header>
-
-      <section class="card">
-        <div class="card-head">
-          <h2>Последние операции</h2>
-          <span class="pill">/var/log/virtuality/operations</span>
-        </div>
-        <table>
-          <thead>
-            <tr><th>Операция</th><th>Статус</th><th>Создана</th><th>Действие</th></tr>
-          </thead>
-          <tbody>
-          {% for operation in operations %}
-            <tr>
-              <td>
-                <div class="strong">{{ operation.title }}</div>
-                <div class="muted small-note">{{ operation.message }}</div>
-              </td>
-              <td><span class="status {{ operation_css(operation.status) }}">{{ operation.status }}</span></td>
-              <td>{{ operation.created_at }}</td>
-              <td><a class="link-pill" href="/operations/{{ operation.id }}">Открыть</a></td>
-            </tr>
-          {% else %}
-            <tr><td colspan="4" class="muted">Журнал операций пуст</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </section>
-    </main>
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <h1>Задачи</h1>
+    <p class="lead">Долгие операции выполняются в фоне: создание машин, распаковка и конвертация образов. Можно закрыть страницу — работа продолжится.</p>
   </div>
-  <script src="/static/panel.js" defer></script>
-</body>
-</html>
+</div>
+{% endblock %}
+
+{% block content %}
+<article class="card">
+  {% if operations %}
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Задача</th><th>Статус</th><th class="hide-sm">Прогресс</th><th class="hide-sm">Начата</th><th></th></tr></thead>
+        <tbody>
+          {% for op in operations %}
+            {% set os = op.status|operation_state %}
+            <tr>
+              <td><a class="strong" href="/operations/{{ op.id }}" style="color:inherit">{{ op.title }}</a><div class="subtle small truncate" style="max-width:420px">{{ op.message }}</div></td>
+              <td>{{ op_badge(op.status) }}</td>
+              <td class="hide-sm" style="width:180px"><div class="progress {{ 'success' if op.status == 'success' else 'danger' if op.status == 'error' else '' }}"><span style="width:{{ op.progress|default(0) }}%"></span></div></td>
+              <td class="hide-sm nowrap subtle">{{ op.created_at }}</td>
+              <td><div class="actions"><a class="btn btn-sm btn-ghost" href="/operations/{{ op.id }}">Подробнее{{ icon('chevron-right', 'icon-sm') }}</a></div></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    {{ empty('list-checks', 'Задач пока нет', 'Когда вы создадите машину или загрузите образ, здесь появится ход выполнения.', '/vm/create', 'Создать машину') }}
+  {% endif %}
+</article>
+{% endblock %}
