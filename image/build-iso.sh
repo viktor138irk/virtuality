@@ -206,18 +206,15 @@ import sys
 
 path, unattended, version = sys.argv[1], sys.argv[2] == "1", sys.argv[3]
 text = open(path).read()
-match = re.search(r'menuentry "[^"]*" \{\n(.*?)\n\}', text, re.S)
-if not match:
-    raise SystemExit("no menuentry found in grub.cfg")
-body = match.group(1)
-if "linux" not in body or "---" not in body:
-    raise SystemExit("unexpected grub.cfg layout: " + body)
-kernel_args = "autoinstall ---" if unattended else "---"
-title = "Install Virtuality %s%s" % (version, " (UNATTENDED: erases disk)" if unattended else "")
-entry = 'menuentry "%s" {\n%s\n}\n' % (title, body.replace("---", kernel_args, 1))
-text = text[: match.start()] + entry + text[match.start():]
+# /autoinstall.yaml applies to every entry, so all Ubuntu entries become Virtuality entries.
+suffix = " (UNATTENDED: erases disk)" if unattended else ""
+text = text.replace('menuentry "Try or Install Ubuntu Server"', 'menuentry "Install Virtuality %s%s"' % (version, suffix), 1)
+text = text.replace('menuentry "Ubuntu Server with the HWE kernel"', 'menuentry "Install Virtuality %s with the HWE kernel%s"' % (version, suffix), 1)
+if "Install Virtuality" not in text:
+    raise SystemExit("unexpected grub.cfg menu titles")
+if unattended:
+    text = re.sub(r"^(\s*linux\s+\S+\s+)---", r"\1autoinstall ---", text, flags=re.M)
 text = re.sub(r"^set timeout=\d+", "set default=0\nset timeout=10", text, count=1, flags=re.M)
-text = text.replace('menuentry "Try or Install Ubuntu Server"', 'menuentry "Ubuntu Server (without Virtuality)"')
 open(path, "w").write(text)
 PYEOF
 new_md5="$(md5sum "${WORK_DIR}/grub.cfg" | cut -d' ' -f1)"
