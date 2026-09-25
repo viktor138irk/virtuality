@@ -1,5 +1,6 @@
 import json
 import re
+import shlex
 import socket
 import subprocess
 import uuid
@@ -9,6 +10,7 @@ from typing import Any
 CONFIG_DIR = Path('/var/lib/virtuality/config')
 NETWORK_DIR = Path('/var/lib/virtuality/network')
 NFT_DIR = Path('/etc/virtuality/nftables')
+UFW_STATE_FILE = NETWORK_DIR / 'ufw_rules.json'
 PORT_FORWARDS_FILE = NETWORK_DIR / 'port_forwards.json'
 NAT_XML_FILE = NETWORK_DIR / 'virtuality-nat.xml'
 NFT_FILE = NFT_DIR / 'virtuality.nft'
@@ -415,6 +417,25 @@ def render_nft_rules() -> str:
     return '\n'.join(lines) + '\n'
 
 
+def ufw_rules_for(items: list[dict[str, Any]], ext: str) -> list[list[str]]:
+    rules: list[list[str]] = []
+    for raw_item in items:
+        item = normalize_forward(raw_item)
+        guest_port = iptables_port_value(item['guest_port_start'], item['guest_port_end'])
+        external_port = iptables_port_value(item['external_port_start'], item['external_port_end'])
+        rules.append(['route', 'allow', 'in', 'on', ext, 'out', 'on', forward_guest_interface(item), 'to', item['guest_ip'], 'port', guest_port, 'proto', item['protocol']])
+        rules.append(['allow', f"{external_port}/{item['protocol']}"])
+    return rules
+
+
+def load_ufw_state() -> list[list[str]]:
+    try:
+        data = json.loads(UFW_STATE_FILE.read_text())
+        return [list(map(str, rule)) for rule in data] if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
 def apply_ufw_route_rules(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ext = external_interface()
     results: list[dict[str, Any]] = []
@@ -423,20 +444,16 @@ def apply_ufw_route_rules(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     status = run_cmd(['ufw', 'status'], timeout=8)
     if 'Status: active' not in status['stdout']:
         return results
-    for raw_item in items:
-        item = normalize_forward(raw_item)
-        guest_port = iptables_port_value(item['guest_port_start'], item['guest_port_end'])
-        external_port = iptables_port_value(item['external_port_start'], item['external_port_end'])
-        cmd = [
-            'ufw', 'route', 'allow',
-            'in', 'on', ext,
-            'out', 'on', forward_guest_interface(item),
-            'to', item['guest_ip'],
-            'port', guest_port,
-            'proto', item['protocol'],
-        ]
-        results.append(run_cmd(cmd, timeout=15))
-        results.append(run_cmd(['ufw', 'allow', f"{external_port}/{item['protocol']}"], timeout=15))
+    wanted = ufw_rules_for(items, ext)
+    # Rules of forwards that were removed (or moved to another port) are deleted; ufw only keeps what is still wanted.
+    for rule in load_ufw_state():
+        if rule not in wanted:
+            delete = ['ufw', 'route', 'delete', *rule[1:]] if rule[0] == 'route' else ['ufw', 'delete', *rule]
+            results.append(run_cmd(delete, timeout=15))
+    for rule in wanted:
+        results.append(run_cmd(['ufw', *rule], timeout=15))
+    ensure_dirs()
+    UFW_STATE_FILE.write_text(json.dumps(wanted))
     run_cmd(['ufw', 'reload'], timeout=20)
     return results
 
@@ -456,11 +473,28 @@ def ensure_iptables_rule(cmd: list[str]) -> dict[str, Any]:
     return run_cmd(cmd, timeout=10)
 
 
+IPTABLES_TAG = ['-m', 'comment', '--comment', 'virtuality-forward']
+
+
+def clear_iptables_fallback() -> None:
+    """Delete every rule this module added earlier (they carry the virtuality-forward comment)."""
+    for table, chains in (('filter', ['FORWARD']), ('nat', ['PREROUTING', 'POSTROUTING'])):
+        for chain in chains:
+            listing = run_cmd(['iptables', '-t', table, '-S', chain], timeout=8)
+            if not listing['ok']:
+                continue
+            for line in listing['stdout'].splitlines():
+                if 'virtuality-forward' not in line or not line.startswith('-A '):
+                    continue
+                run_cmd(['iptables', '-t', table, '-D', *shlex.split(line)[1:]], timeout=8)
+
+
 def apply_iptables_fallback(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ext = external_interface()
     results: list[dict[str, Any]] = []
     if not run_cmd(['sh', '-lc', 'command -v iptables >/dev/null 2>&1'], timeout=5)['ok']:
         return results
+    clear_iptables_fallback()
     for raw_item in items:
         item = normalize_forward(raw_item)
         proto = item['protocol']
@@ -470,11 +504,11 @@ def apply_iptables_fallback(items: list[dict[str, Any]]) -> list[dict[str, Any]]
         guest_to_port = iptables_dnat_port_value(item['guest_port_start'], item['guest_port_end'])
         guest_to = f"{guest_ip}:{guest_to_port}"
         guest_iface = forward_guest_interface(item)
-        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', ext, '-o', guest_iface, '-p', proto, '-d', guest_ip, '-m', proto, '--dport', guest_port, '-j', 'ACCEPT']))
-        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', guest_iface, '-o', ext, '-s', guest_ip, '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', '-j', 'ACCEPT']))
-        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', ext, '-p', proto, '-m', proto, '--dport', external_port, '-j', 'DNAT', '--to-destination', guest_to]))
-        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-d', guest_ip, '-o', guest_iface, '-j', 'MASQUERADE']))
-    results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-s', NAT_SUBNET, '-o', ext, '-j', 'MASQUERADE']))
+        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', ext, '-o', guest_iface, '-p', proto, '-d', guest_ip, '-m', proto, '--dport', guest_port, *IPTABLES_TAG, '-j', 'ACCEPT']))
+        results.append(ensure_iptables_rule(['iptables', '-I', 'FORWARD', '1', '-i', guest_iface, '-o', ext, '-s', guest_ip, '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', *IPTABLES_TAG, '-j', 'ACCEPT']))
+        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', ext, '-p', proto, '-m', proto, '--dport', external_port, *IPTABLES_TAG, '-j', 'DNAT', '--to-destination', guest_to]))
+        results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-d', guest_ip, '-o', guest_iface, *IPTABLES_TAG, '-j', 'MASQUERADE']))
+    results.append(ensure_iptables_rule(['iptables', '-t', 'nat', '-I', 'POSTROUTING', '1', '-s', NAT_SUBNET, '-o', ext, *IPTABLES_TAG, '-j', 'MASQUERADE']))
     return results
 
 

@@ -306,11 +306,24 @@ restart_panel() {
   fi
 }
 
+# VMs created by older versions listened for VNC on every address; the panel proxies consoles over localhost.
+harden_vnc() {
+  command -v virsh >/dev/null 2>&1 && command -v virt-xml >/dev/null 2>&1 || return 0
+  local name
+  while read -r name; do
+    [[ -n "$name" ]] || continue
+    if virsh dumpxml "$name" 2>/dev/null | grep -q "listen='0.0.0.0'"; then
+      virt-xml "$name" --edit --graphics listen=127.0.0.1 >/dev/null 2>&1 && log "vnc of ${name} now listens on 127.0.0.1 (applies after restart)" || true
+    fi
+  done < <(virsh list --all --name 2>/dev/null)
+}
+
 cmd_reconfigure() {
   need_root reconfigure
   [[ -d "$APP_DIR" ]] || die "панель не установлена: ${APP_DIR} не найден"
   write_units
   apply_firewall
+  harden_vnc
   restart_panel
   log "reconfigured: $(panel_url)"
   echo "Панель перезапущена: $(panel_url)"

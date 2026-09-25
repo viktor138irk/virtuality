@@ -40,6 +40,8 @@
 {% endblock %}
 
 {% block alerts %}
+  {% if request.query_params.get('error') %}{{ alert('danger', request.query_params.get('error')) }}{% endif %}
+  {% if request.query_params.get('message') %}{{ alert('success', request.query_params.get('message')) }}{% endif %}
   {% for key in ('resource', 'iso', 'boot') %}
     {% set msg = {'resource': resource_message, 'iso': iso_message, 'boot': boot_message}[key] %}
     {% set err = {'resource': resource_error, 'iso': iso_error, 'boot': boot_error}[key] %}
@@ -139,17 +141,6 @@
             <span class="hint">1024 МБ = 1 ГБ</span>
           </div>
         </div>
-        <details class="advanced">
-          <summary>{{ icon('wrench', 'icon-sm') }}Архитектура процессора<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
-          <div class="advanced-body field">
-            <select class="select" name="guest_arch" {% if not rs.is_shutoff %}disabled{% endif %}>
-              <option value="keep">Не менять — {{ rs.arch|default('неизвестно') }}</option>
-              <option value="x86_64">x86_64 — обычные ПК и серверы</option>
-              <option value="aarch64">ARM64 — образы для Raspberry Pi и ARM-серверов</option>
-            </select>
-            <span class="hint">Меняйте, только если точно знаете, зачем: система внутри может перестать загружаться.</span>
-          </div>
-        </details>
       </div>
       <div class="card-footer"><button type="submit" class="btn btn-primary" {% if not rs.is_shutoff %}disabled{% endif %}>Сохранить</button></div>
     </form>

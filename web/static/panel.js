@@ -67,6 +67,8 @@
       const raw = sessionStorage.getItem('virtualityToast');
       if (!raw) return;
       sessionStorage.removeItem('virtualityToast');
+      // The toast was queued when the form was submitted; if the page came back with an error, the action failed.
+      if (document.querySelector('.alert.danger') || /(^|[?&_])error=/.test(location.search)) return;
       const data = JSON.parse(raw);
       toast(data.message, data.tone);
     } catch (_) {}

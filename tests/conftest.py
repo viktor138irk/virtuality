@@ -143,6 +143,7 @@ def data_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(network_core, "NETWORK_DIR", dirs["network"])
     monkeypatch.setattr(network_core, "NFT_DIR", dirs["nft"])
     monkeypatch.setattr(network_core, "PORT_FORWARDS_FILE", dirs["network"] / "port_forwards.json")
+    monkeypatch.setattr(network_core, "UFW_STATE_FILE", dirs["network"] / "ufw_rules.json")
     monkeypatch.setattr(network_core, "NAT_XML_FILE", dirs["network"] / "virtuality-nat.xml")
     monkeypatch.setattr(network_core, "NFT_FILE", dirs["nft"] / "virtuality.nft")
     monkeypatch.setattr(network_core, "enable_ip_forward", lambda: None)

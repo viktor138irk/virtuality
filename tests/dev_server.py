@@ -76,6 +76,7 @@ def seed(root: Path) -> None:
     seed_backups(dirs["backups"])
     network_core.CONFIG_DIR, network_core.NETWORK_DIR, network_core.NFT_DIR = dirs["config"], dirs["network"], dirs["nft"]
     network_core.PORT_FORWARDS_FILE = dirs["network"] / "port_forwards.json"
+    network_core.UFW_STATE_FILE = dirs["network"] / "ufw_rules.json"
     network_core.NAT_XML_FILE = dirs["network"] / "virtuality-nat.xml"
     network_core.NFT_FILE = dirs["nft"] / "virtuality.nft"
     network_core.enable_ip_forward = lambda: None

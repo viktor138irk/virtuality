@@ -561,26 +561,10 @@ def refresh_iso_pool() -> None:
     run_cmd(["virsh", "pool-refresh", "virtuality-iso"], timeout=20)
 
 
-def vm_arch_options() -> list[dict[str, str]]:
-    return [
-        {"value": "auto", "label": "Auto — по профилю хоста"},
-        {"value": "x86_64", "label": "x86_64 / amd64"},
-        {"value": "aarch64", "label": "ARM64 / aarch64"},
-        {"value": "generic", "label": "Generic / no arch override"},
-    ]
-
-
-def normalize_guest_arch(value: str, profile: dict[str, Any]) -> str:
-    value = (value or "auto").strip()
-    if value == "auto":
-        return str(profile.get("recommended_guest_arch") or "x86_64")
-    if value in ("x86_64", "amd64"):
-        return "x86_64"
-    if value in ("aarch64", "arm64"):
-        return "aarch64"
-    if value == "generic":
-        return "generic"
-    return str(profile.get("recommended_guest_arch") or "x86_64")
+def guest_arch_for_host(profile: dict[str, Any]) -> str:
+    """Machines run natively: aarch64 on ARM boards, x86_64 everywhere else."""
+    arch = str(profile.get("recommended_guest_arch") or profile.get("arch") or platform.machine() or "x86_64")
+    return "aarch64" if arch in ("aarch64", "arm64") else "x86_64"
 
 
 def list_disk_image_files() -> list[dict[str, str]]:
@@ -619,10 +603,16 @@ def disk_image_path_by_name(name: str) -> Path | None:
 
 
 def disk_image_format(path: Path) -> str:
-    suffix = path.suffix.lower().lstrip('.')
-    if suffix == 'qcow2':
-        return 'qcow2'
-    return 'raw'
+    """Real image format: Ubuntu cloud images are qcow2 despite the .img name, so the suffix is only a fallback."""
+    info = run_cmd(["qemu-img", "info", "--output=json", str(path)], timeout=30)
+    if info.get("ok"):
+        try:
+            fmt = str(json.loads(info.get("stdout") or "{}").get("format", "")).lower()
+            if fmt in ("qcow2", "raw", "vmdk", "vdi", "vpc", "vhdx", "qcow"):
+                return fmt
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    return 'qcow2' if path.suffix.lower() == '.qcow2' else 'raw'
 
 
 def bridge_exists(name: str) -> bool:
@@ -909,7 +899,6 @@ def boot_order_to_devs(value: str) -> list[str]:
         "disk": ["hd"],
         "cdrom_disk": ["cdrom", "hd"],
         "disk_cdrom": ["hd", "cdrom"],
-        "network_disk": ["network", "hd"],
     }
     return mapping.get(value, ["hd"])
 
@@ -920,8 +909,6 @@ def boot_devs_to_order(devs: list[str]) -> str:
         return "cdrom_disk"
     if clean[:2] == ["hd", "cdrom"]:
         return "disk_cdrom"
-    if clean[:2] == ["network", "hd"]:
-        return "network_disk"
     if clean[:1] == ["hd"]:
         return "disk"
     return "auto"
@@ -949,7 +936,7 @@ def current_vm_boot_order(name: str) -> str:
 def apply_vm_boot_order(name: str, boot_order: str) -> tuple[bool, str]:
     if not valid_vm_name(name) or not vm_exists(name):
         return False, "VM не найдена."
-    if boot_order not in ("auto", "disk", "cdrom_disk", "disk_cdrom", "network_disk"):
+    if boot_order not in ("auto", "disk", "cdrom_disk", "disk_cdrom"):
         return False, "Некорректный порядок загрузки VM."
 
     selected = normalize_boot_order(boot_order, "disk_image")
@@ -1042,18 +1029,16 @@ def vm_resource_settings(name: str) -> dict[str, Any]:
     }
 
 
-def apply_vm_resources(name: str, memory_mb: int, vcpus: int, guest_arch: str) -> tuple[bool, str]:
+def apply_vm_resources(name: str, memory_mb: int, vcpus: int) -> tuple[bool, str]:
     if not valid_vm_name(name) or not vm_exists(name):
         return False, "VM не найдена."
     resources = vm_resource_settings(name)
     if not resources.get("is_shutoff"):
-        return False, "CPU/RAM/архитектуру можно менять только когда VM выключена. Сначала выключи VM."
+        return False, "Процессор и память можно менять только когда машина выключена."
     if memory_mb < 512 or memory_mb > 262144:
         return False, "RAM должна быть от 512 MB до 262144 MB."
     if vcpus < 1 or vcpus > 128:
         return False, "CPU должен быть от 1 до 128 vCPU."
-    if guest_arch not in ("keep", "x86_64", "aarch64"):
-        return False, "Некорректная архитектура VM."
 
     result = run_cmd(["virsh", "dumpxml", name], timeout=15)
     if not result.get("ok"):
@@ -1077,22 +1062,6 @@ def apply_vm_resources(name: str, memory_mb: int, vcpus: int, guest_arch: str) -
     vcpu_node.text = str(int(vcpus))
     vcpu_node.set("placement", "static")
 
-    arch_changed = False
-    if guest_arch != "keep":
-        os_type = root.find("os/type")
-        if os_type is None:
-            os_node = root.find("os")
-            if os_node is None:
-                os_node = ET.SubElement(root, "os")
-            os_type = ET.SubElement(os_node, "type")
-            os_type.text = "hvm"
-        old_arch = os_type.attrib.get("arch", "")
-        if old_arch != guest_arch:
-            os_type.set("arch", guest_arch)
-            if guest_arch == "aarch64":
-                os_type.set("machine", "virt")
-            arch_changed = True
-
     xml_text = ET.tostring(root, encoding="unicode")
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".xml", delete=False) as handle:
         handle.write(xml_text)
@@ -1103,11 +1072,7 @@ def apply_vm_resources(name: str, memory_mb: int, vcpus: int, guest_arch: str) -
         Path(tmp_name).unlink(missing_ok=True)
     if not define.get("ok"):
         return False, define.get("stderr") or "virsh define завершился ошибкой."
-
-    message = f"Ресурсы VM применены: CPU {vcpus}, RAM {memory_mb} MB"
-    if arch_changed:
-        message += f", архитектура {guest_arch}. Важно: смена архитектуры может потребовать совместимый диск/загрузчик."
-    return True, message
+    return True, f"Ресурсы VM применены: CPU {vcpus}, RAM {memory_mb} MB"
 
 
 def vm_state(name: str) -> str:
@@ -1128,45 +1093,47 @@ def current_vm_iso(name: str) -> str:
     return ""
 
 
+def vm_cdrom_devices(name: str) -> list[dict[str, str]]:
+    """CD-ROM drives of the VM from its XML: [{"target": "sda", "source": "/path.iso" or ""}]."""
+    xml = run_cmd(["virsh", "dumpxml", name], timeout=12)
+    drives: list[dict[str, str]] = []
+    if not xml.get("ok"):
+        return drives
+    try:
+        root = ET.fromstring(xml.get("stdout") or "")
+    except ET.ParseError:
+        return drives
+    devices = root.find("devices")
+    for disk in devices.findall("disk") if devices is not None else []:
+        if disk.attrib.get("device") != "cdrom":
+            continue
+        target = disk.find("target")
+        source = disk.find("source")
+        dev = target.attrib.get("dev", "") if target is not None else ""
+        if dev:
+            drives.append({"target": dev, "source": (source.attrib.get("file") or source.attrib.get("dev") or "") if source is not None else ""})
+    return drives
+
+
+def change_media_flags(name: str) -> list[str]:
+    # --live --config: the running VM and its saved configuration change together.
+    return ["--config", "--live"] if vm_state(name) == "running" else ["--config"]
+
+
 def detach_vm_iso(name: str) -> tuple[bool, str]:
     if not valid_vm_name(name) or not vm_exists(name):
         return False, "VM не найдена."
-    xml = run_cmd(["virsh", "dumpxml", name], timeout=12)
-    cdrom_targets: list[str] = []
-    if xml.get("ok"):
-        try:
-            root = ET.fromstring(xml.get("stdout") or "")
-            devices = root.find("devices")
-            if devices is not None:
-                for disk in devices.findall("disk"):
-                    if disk.attrib.get("device") != "cdrom":
-                        continue
-                    target = disk.find("target")
-                    dev = target.attrib.get("dev") if target is not None else ""
-                    if dev:
-                        cdrom_targets.append(dev)
-        except Exception:
-            pass
-    if not cdrom_targets:
-        cdrom_targets = ["sda", "hda", "sdb", "hdc"]
-
-    running = vm_state(name) == "running"
+    drives = [drive for drive in vm_cdrom_devices(name) if drive["source"]]
+    if not drives:
+        return False, "Подключенный ISO не найден."
     errors = []
-    changed_any = False
-    for target in cdrom_targets:
-        commands = []
-        if running:
-            commands.append(["virsh", "detach-disk", name, target, "--live"])
-        commands.append(["virsh", "detach-disk", name, target, "--config"])
-        for cmd in commands:
-            result = run_cmd(cmd, timeout=30)
-            if result.get("ok"):
-                changed_any = True
-            elif result.get("stderr"):
-                errors.append(result.get("stderr"))
-    if changed_any:
-        return True, "ISO был отмонтирован."
-    return False, errors[-1] if errors else "Подключенный ISO не найден."
+    for drive in drives:
+        result = run_cmd(["virsh", "change-media", name, drive["target"], "--eject", *change_media_flags(name)], timeout=30)
+        if not result.get("ok"):
+            errors.append(result.get("stderr") or "virsh change-media завершился с ошибкой")
+    if errors:
+        return False, errors[-1]
+    return True, "ISO был отмонтирован."
 
 
 def mount_vm_iso(name: str, iso_path: str) -> tuple[bool, str]:
@@ -1180,17 +1147,19 @@ def mount_vm_iso(name: str, iso_path: str) -> tuple[bool, str]:
     if iso_root not in iso.parents or iso.suffix.lower() != ".iso" or not iso.exists():
         return False, "ISO должен быть существующим .iso файлом из /var/lib/virtuality/iso."
 
-    detach_vm_iso(name)
-    running = vm_state(name) == "running"
-    base = ["virsh", "attach-disk", name, str(iso), "sda", "--type", "cdrom", "--mode", "readonly"]
-    if running:
-        live = run_cmd(base + ["--live"], timeout=30)
-        if not live.get("ok"):
-            return False, live.get("stderr") or "Не удалось подключить ISO к запущенной VM."
-    config = run_cmd(base + ["--config"], timeout=30)
-    if not config.get("ok"):
-        return False, config.get("stderr") or "Не удалось сохранить ISO в конфигурации VM."
-    return True, "ISO был смонтирован в VM. Если гостевая ОС его не увидела сразу, перезагрузи VM или обнови устройства внутри гостевой ОС."
+    drives = vm_cdrom_devices(name)
+    if drives:
+        result = run_cmd(["virsh", "change-media", name, drives[0]["target"], str(iso), "--update", *change_media_flags(name)], timeout=30)
+        if not result.get("ok"):
+            return False, result.get("stderr") or "Не удалось подключить ISO."
+        return True, "ISO был смонтирован в VM. Если гостевая ОС его не увидела сразу, перезагрузи VM или обнови устройства внутри гостевой ОС."
+    # No CD-ROM drive at all: add one to the configuration; a SATA drive appears after the next start.
+    result = run_cmd(["virsh", "attach-disk", name, str(iso), "sda", "--type", "cdrom", "--mode", "readonly", "--config"], timeout=30)
+    if not result.get("ok"):
+        return False, result.get("stderr") or "Не удалось добавить CD-ROM в конфигурацию VM."
+    if vm_state(name) == "running":
+        return True, "CD-ROM добавлен в конфигурацию. Он появится в машине после её перезапуска."
+    return True, "ISO был смонтирован в VM."
 
 
 def vm_details(name: str) -> dict[str, Any]:
@@ -1244,7 +1213,6 @@ def vm_boot_order_options() -> list[dict[str, str]]:
         {"value": "disk", "label": "Сначала диск"},
         {"value": "cdrom_disk", "label": "Сначала ISO/CD-ROM, потом диск"},
         {"value": "disk_cdrom", "label": "Сначала диск, потом ISO/CD-ROM"},
-        {"value": "network_disk", "label": "Сначала сеть/PXE, потом диск"},
     ]
 
 
@@ -1252,7 +1220,7 @@ def normalize_boot_order(value: str, source_type: str) -> str:
     value = (value or "auto").strip()
     if value == "auto":
         return "cdrom_disk" if source_type == "iso" else "disk"
-    if value in ("disk", "cdrom_disk", "disk_cdrom", "network_disk"):
+    if value in ("disk", "cdrom_disk", "disk_cdrom"):
         return value
     return "cdrom_disk" if source_type == "iso" else "disk"
 
@@ -1262,7 +1230,6 @@ def virt_boot_arg(boot_order: str, is_arm: bool) -> str:
         "disk": "hd",
         "cdrom_disk": "cdrom,hd",
         "disk_cdrom": "hd,cdrom",
-        "network_disk": "network,hd",
     }
     value = mapping.get(boot_order, "hd")
     if is_arm:
@@ -1273,7 +1240,7 @@ def virt_boot_arg(boot_order: str, is_arm: bool) -> str:
 def vm_form_context(request: Request, error: str | None = None, form: dict[str, Any] | None = None, status_code: int = 200):
     profile = host_profile.load_host_profile()
     default_mode = profile.get("recommended_network", "nat")
-    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "disk_images": list_disk_image_files(), "arch_options": vm_arch_options(), "boot_options": vm_boot_order_options(), "error": error, "profile": profile, "form": form or {"memory": 4096, "vcpus": 2, "disk_size": 40, "source_type": "iso", "guest_arch": "auto", "boot_order": "auto", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
+    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "disk_images": list_disk_image_files(), "boot_options": vm_boot_order_options(), "error": error, "profile": profile, "form": form or {"memory": 4096, "vcpus": 2, "disk_size": 40, "source_type": "iso", "boot_order": "auto", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
 
 
 # Virtuality noVNC console patch
@@ -1773,7 +1740,7 @@ def vm_create_page(request: Request, iso: str = "", image: str = ""):
     if not iso and not image:
         return vm_form_context(request)
     profile = host_profile.load_host_profile()
-    form = {"memory": 4096, "vcpus": 2, "disk_size": 40, "source_type": "disk_image" if image else "iso", "guest_arch": "auto", "boot_order": "auto", "network_mode": profile.get("recommended_network", "nat"), "bridge": DEFAULT_BRIDGE}
+    form = {"memory": 4096, "vcpus": 2, "disk_size": 40, "source_type": "disk_image" if image else "iso", "boot_order": "auto", "network_mode": profile.get("recommended_network", "nat"), "bridge": DEFAULT_BRIDGE}
     if iso:
         form["iso_path"] = str(ISO_DIR / Path(iso).name)
     if image:
@@ -1782,11 +1749,11 @@ def vm_create_page(request: Request, iso: str = "", image: str = ""):
 
 
 @app.post("/vm/create", response_class=HTMLResponse)
-def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(20), iso_path: str = Form(""), disk_image_path: str = Form(""), source_type: str = Form("iso"), guest_arch: str = Form("auto"), boot_order: str = Form("auto"), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE)):
+def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(20), iso_path: str = Form(""), disk_image_path: str = Form(""), source_type: str = Form("iso"), boot_order: str = Form("auto"), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE)):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-    form = {"name": name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "iso_path": iso_path, "disk_image_path": disk_image_path, "source_type": source_type, "guest_arch": guest_arch, "boot_order": boot_order, "network_mode": network_mode, "bridge": bridge}
+    form = {"name": name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "iso_path": iso_path, "disk_image_path": disk_image_path, "source_type": source_type, "boot_order": boot_order, "network_mode": network_mode, "bridge": bridge}
     error = None
     if not valid_vm_name(name):
         error = "Имя VM может содержать латиницу, цифры, точку, дефис и подчёркивание. Длина 2–63 символа."
@@ -1804,9 +1771,7 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
         error = "Некорректное имя bridge."
     elif source_type not in ("iso", "disk_image"):
         error = "Некорректный источник VM."
-    elif guest_arch not in ("auto", "x86_64", "aarch64", "generic"):
-        error = "Некорректная архитектура VM."
-    elif boot_order not in ("auto", "disk", "cdrom_disk", "disk_cdrom", "network_disk"):
+    elif boot_order not in ("auto", "disk", "cdrom_disk", "disk_cdrom"):
         error = "Некорректный порядок загрузки VM."
     elif network_mode == "bridge" and not bridge_exists(bridge):
         error = f"Bridge {bridge} не найден на сервере. Для VPS выбери режим NAT Router — virtuality-nat, либо сначала создай bridge {bridge}."
@@ -1834,17 +1799,13 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
         return vm_form_context(request, error=f"Диск уже существует: {disk_path}", form=form, status_code=400)
 
     profile = host_profile.load_host_profile()
-    selected_arch = normalize_guest_arch(guest_arch, profile)
+    selected_arch = guest_arch_for_host(profile)
     selected_boot_order = normalize_boot_order(boot_order, source_type)
-    host_arch = str(profile.get("arch") or platform.machine() or "")
     is_arm = selected_arch == "aarch64"
-    # ARM64 guest on x86 host cannot use KVM. It must use QEMU emulation.
-    virt_type = "qemu" if (is_arm and host_arch not in ("aarch64", "arm64")) else ("kvm" if profile.get("kvm_device") else "qemu")
+    virt_type = "kvm" if profile.get("kvm_device") else "qemu"
     network_arg = f"network={network_core.NETWORK_NAME},model=virtio" if network_mode == "nat" else f"bridge={bridge},model=virtio"
     cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--virt-type", virt_type]
-    if selected_arch == "x86_64":
-        cmd += ["--arch", "x86_64"]
-    elif is_arm:
+    if is_arm:
         cmd += ["--arch", "aarch64", "--machine", "virt", "--cpu", "host" if virt_type == "kvm" else "cortex-a57"]
 
     cmd += ["--boot", virt_boot_arg(selected_boot_order, is_arm)]
@@ -1853,10 +1814,10 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
         source_disk = Path(disk_image_path).resolve()
         source_format = disk_image_format(source_disk)
         convert_cmd = f"qemu-img convert -p -f {source_format} -O qcow2 {source_disk} {disk_path}"
-        virt_cmd = " ".join(cmd + ["--import", "--disk", f"path={disk_path},format=qcow2,bus=virtio", "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"])
+        virt_cmd = " ".join(cmd + ["--import", "--disk", f"path={disk_path},format=qcow2,bus=virtio", "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=127.0.0.1", "--noautoconsole"])
         cmd = ["bash", "-lc", f"set -euo pipefail; {convert_cmd}; {virt_cmd}"]
     else:
-        cmd += ["--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=0.0.0.0", "--noautoconsole"]
+        cmd += ["--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=127.0.0.1", "--noautoconsole"]
 
     operation_id = str(uuid.uuid4())
     operation = {"id": operation_id, "type": "vm_create", "title": f"Создание VM {name}", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": name, "disk_path": str(disk_path), "iso_path": iso_path, "host_profile": profile.get("profile"), "guest_arch": selected_arch, "boot_order": selected_boot_order, "network_mode": network_mode, "network": network_arg, "bridge": bridge, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "cmd": " ".join(cmd)}
@@ -1924,11 +1885,11 @@ def vm_detail_page(request: Request, name: str):
 
 
 @app.post("/vm/{name}/resources")
-def vm_resources_apply(request: Request, name: str, memory_mb: int = Form(...), vcpus: int = Form(...), guest_arch: str = Form("keep")):
+def vm_resources_apply(request: Request, name: str, memory_mb: int = Form(...), vcpus: int = Form(...)):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-    ok, message = apply_vm_resources(name, memory_mb, vcpus, guest_arch)
+    ok, message = apply_vm_resources(name, memory_mb, vcpus)
     if ok:
         return redirect_with_message(f"/vm/{name}", "resource_message", message)
     return redirect_with_message(f"/vm/{name}", "resource_error", message)
@@ -1967,6 +1928,23 @@ def vm_iso_unmount_apply(request: Request, name: str):
     return redirect_with_message(f"/vm/{name}", "iso_error", message)
 
 
+VIRSH_ERRORS = {
+    "Domain is already active": "Машина уже запущена",
+    "domain is not running": "Машина не запущена",
+    "Domain not found": "Машина не найдена",
+    "Requested operation is not valid: domain is not running": "Машина не запущена",
+}
+
+
+def virsh_error(result: dict[str, Any]) -> str:
+    text = (result.get("stderr") or result.get("stdout") or "virsh завершился с ошибкой").strip()
+    text = re.sub(r"^error: ", "", text, flags=re.M)
+    for needle, human in VIRSH_ERRORS.items():
+        if needle.lower() in text.lower():
+            return human
+    return text.splitlines()[0][:300] if text else "virsh завершился с ошибкой"
+
+
 @app.post("/vm/{name}/{action}")
 def vm_action(request: Request, name: str, action: str):
     auth_redirect = require_auth(request)
@@ -1976,12 +1954,18 @@ def vm_action(request: Request, name: str, action: str):
         return JSONResponse({"ok": False, "error": "Invalid VM name"}, status_code=400)
     allowed = {"start": ["virsh", "start", name], "shutdown": ["virsh", "shutdown", name], "reboot": ["virsh", "reboot", name], "destroy": ["virsh", "destroy", name], "autostart": ["virsh", "autostart", name], "autostart-disable": ["virsh", "autostart", "--disable", name]}
     if action == "delete":
-        run_cmd(["virsh", "destroy", name], timeout=20)
-        run_cmd(["virsh", "undefine", name, "--remove-all-storage"], timeout=60)
-        return RedirectResponse(url="/", status_code=303)
+        if vm_state(name) == "running":
+            run_cmd(["virsh", "destroy", name], timeout=20)
+        # --nvram: UEFI machines keep firmware variables that block a plain undefine.
+        result = run_cmd(["virsh", "undefine", name, "--remove-all-storage", "--nvram", "--managed-save", "--snapshots-metadata", "--checkpoints-metadata"], timeout=120)
+        if not result["ok"]:
+            return redirect_with_message(f"/vm/{name}", "error", f"Не удалось удалить машину: {virsh_error(result)}")
+        return redirect_with_message("/", "message", f"Машина {name} удалена")
     if action not in allowed:
         return JSONResponse({"ok": False, "error": "Unsupported action"}, status_code=400)
-    run_cmd(allowed[action], timeout=30)
+    result = run_cmd(allowed[action], timeout=30)
+    if not result["ok"]:
+        return redirect_with_message(f"/vm/{name}", "error", virsh_error(result))
     return RedirectResponse(url=f"/vm/{name}", status_code=303)
 
 

@@ -126,19 +126,11 @@
         <details class="advanced">
           <summary>{{ icon('wrench', 'icon-sm') }}Дополнительные настройки<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
           <div class="advanced-body form-grid">
-            <div class="form-row">
-              <div class="field">
-                <label for="guest_arch">Архитектура</label>
-                <select class="select" id="guest_arch" name="guest_arch">
-                  {% for arch in arch_options %}<option value="{{ arch.value }}" {% if form.guest_arch == arch.value %}selected{% endif %}>{{ arch.label }}</option>{% endfor %}
-                </select>
-              </div>
-              <div class="field">
-                <label for="boot_order">Порядок загрузки</label>
-                <select class="select" id="boot_order" name="boot_order">
-                  {% for opt in boot_options %}<option value="{{ opt.value }}" {% if form.boot_order == opt.value %}selected{% endif %}>{{ opt.label }}</option>{% endfor %}
-                </select>
-              </div>
+            <div class="field">
+              <label for="boot_order">Порядок загрузки</label>
+              <select class="select" id="boot_order" name="boot_order">
+                {% for opt in boot_options %}<option value="{{ opt.value }}" {% if form.boot_order == opt.value %}selected{% endif %}>{{ opt.label }}</option>{% endfor %}
+              </select>
             </div>
             <div class="field">
               <label for="bridge">Сетевой мост для режима «В локальной сети»</label>
