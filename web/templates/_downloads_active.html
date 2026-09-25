@@ -1,0 +1,71 @@
+{#- Идущие скачивания (операции типа download) с живым прогрессом. Ожидает переменную kind ('iso' | 'disk'). -#}
+{% from "_ui.html" import icon %}
+{% set dl = downloads_panel(kind) %}
+{% if dl.active %}
+<article class="card downloads" data-downloads>
+  <div class="card-header">
+    <div><h2>Скачиваем на сервер</h2><p>Страницу можно закрыть — загрузка продолжится. Когда файл будет готов, он появится в списке.</p></div>
+    <a class="btn btn-sm btn-ghost hide-sm" href="/operations">{{ icon('list-checks', 'icon-sm') }}Все задачи</a>
+  </div>
+  <div class="list">
+    {% for op in dl.active %}
+      <div class="list-item download-item" data-download-op="{{ op.id }}" data-status="{{ op.status }}">
+        <span class="list-icon info">{{ icon('download') }}</span>
+        <div class="grow">
+          <div class="row-between">
+            <div class="title truncate" title="{{ op.url }}">{{ op.filename }}</div>
+            <strong class="download-pct" data-dl="pct">{{ op.progress|default(0) }}%</strong>
+          </div>
+          <div class="progress mt-1{% if op.indeterminate %} indeterminate{% endif %}" data-dl="progress"><span data-dl="bar" style="width:{{ op.progress|default(0) }}%"></span></div>
+          <div class="meta mt-1" data-dl="message">{{ op.message }}</div>
+        </div>
+        <a class="btn btn-sm btn-ghost hide-sm" href="/operations/{{ op.id }}">Подробнее</a>
+        <form method="post" action="/downloads/{{ op.id }}/cancel" class="inline-form" data-dl="cancel" data-confirm="Скачивание {{ op.filename }} остановится, а недокачанный файл будет удалён." data-confirm-title="Отменить скачивание?" data-confirm-button="Остановить" data-toast="Скачивание отменено" data-toast-tone="warning">
+          <button class="btn btn-sm btn-danger-soft" {% if op.cancel_requested %}disabled{% endif %}>{{ icon('x', 'icon-sm') }}Отменить</button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+</article>
+<script>
+  (function () {
+    var items = document.querySelectorAll('[data-download-op]');
+    if (!items.length) return;
+    items.forEach(function (item) {
+      var id = item.dataset.downloadOp;
+      var bar = item.querySelector('[data-dl="bar"]');
+      var pct = item.querySelector('[data-dl="pct"]');
+      var message = item.querySelector('[data-dl="message"]');
+      var progress = item.querySelector('[data-dl="progress"]');
+      var cancel = item.querySelector('[data-dl="cancel"]');
+      var timer = setInterval(async function () {
+        var op;
+        try {
+          var response = await fetch('/api/operations/' + encodeURIComponent(id), { cache: 'no-store', headers: { Accept: 'application/json' } });
+          if (!response.ok) return;
+          op = (await response.json()).operation || {};
+        } catch (_) { return; }
+        var value = Math.max(0, Math.min(100, Number(op.progress) || 0));
+        bar.style.width = value + '%';
+        pct.textContent = value + '%';
+        message.textContent = op.message || '';
+        if (op.total_bytes) progress.classList.remove('indeterminate');
+        if (op.cancel_requested) cancel.querySelector('button').disabled = true;
+        if (op.status !== 'success' && op.status !== 'error') return;
+        clearInterval(timer);
+        progress.classList.remove('indeterminate');
+        progress.classList.add(op.status === 'success' ? 'success' : 'danger');
+        cancel.hidden = true;
+        item.dataset.status = op.status;
+        if (op.status === 'success') {
+          try { sessionStorage.setItem('virtualityToast', JSON.stringify({ message: op.message || 'Файл скачан', tone: 'success' })); } catch (_) {}
+          setTimeout(function () { location.replace(location.pathname); }, 900);
+        } else {
+          message.classList.add('download-error');
+          if (window.vToast) window.vToast(op.message || 'Скачивание не удалось', 'danger');
+        }
+      }, 2000);
+    });
+  })();
+</script>
+{% endif %}

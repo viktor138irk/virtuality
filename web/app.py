@@ -28,7 +28,7 @@ import auth
 import host_profile
 import network_core
 import presenters
-from features import backups, settings, setup, snapshots
+from features import backups, downloads, settings, setup, snapshots
 import update_core
 from network_core import NetworkError
 
@@ -2009,3 +2009,4 @@ app.include_router(setup.router)
 app.include_router(settings.router)
 app.include_router(snapshots.router)
 app.include_router(backups.router)
+app.include_router(downloads.router)

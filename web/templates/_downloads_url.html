@@ -1,0 +1,17 @@
+{#- Карточка «Скачать по ссылке». Ожидает переменную kind ('iso' | 'disk'). -#}
+{% from "_ui.html" import icon %}
+<article class="card">
+  <div class="card-header"><div><h2>Скачать по ссылке</h2><p>Сервер скачает файл сам — не нужно гонять его через компьютер</p></div></div>
+  <div class="card-body">
+    <form method="post" action="/downloads/url" class="stack-sm" data-busy="Проверяем ссылку…">
+      <input type="hidden" name="kind" value="{{ kind }}">
+      <div class="field">
+        <label for="download-url-{{ kind }}">Адрес файла</label>
+        <input class="input" id="download-url-{{ kind }}" type="url" name="url" inputmode="url" spellcheck="false" autocomplete="off" required
+               placeholder="{{ 'https://…/ubuntu-26.04-server.iso' if kind == 'iso' else 'https://…/debian-13-cloud.qcow2' }}">
+        <span class="hint">{{ 'Ссылка должна вести на файл .iso — например, со страницы загрузки Ubuntu или Debian.' if kind == 'iso' else 'Подойдут файлы .qcow2, .img, .raw и сжатые .img.xz — распакуем и подготовим сами.' }}</span>
+      </div>
+      <div class="row"><button type="submit" class="btn btn-primary">{{ icon('download') }}Скачать на сервер</button></div>
+    </form>
+  </div>
+</article>

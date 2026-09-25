@@ -132,6 +132,17 @@ def seed(root: Path) -> None:
     for line in ("Машина работает — отправляем команду выключения.", "Машина выключена.", "Настройки машины сохранены в vm.xml.", "Копируем диск vda (1 из 1): 100%", "Машина запущена снова."):
         app.append_operation_log(op_id, line)
 
+    # Идущие скачивания — видны на /iso и /disk-images (в каталоге Ubuntu 26.04 помечена «Скачивается»).
+    for kind, url, catalog_id, title, progress, message, total, done in (
+        ("iso", "https://software-download.microsoft.com/download/pr/windows-server-2025-eval-x64.iso", None, "Скачивание windows-server-2025-eval-x64.iso", 37, "1,9 ГБ из 5,2 ГБ · 24 МБ/с · осталось 2 мин", 5_583_457_280, 2_065_879_193),
+        ("disk", "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img", "ubuntu-26.04", "Скачивание Ubuntu Server 26.04 LTS", 62, "412 МБ из 663 МБ · 31 МБ/с · осталось 8 с", 695_205_888, 431_027_650),
+    ):
+        filename = url.rsplit("/", 1)[-1]
+        target = (dirs["iso"] if kind == "iso" else dirs["disk-images"]) / filename
+        op = core.new_operation("download", title, download_kind=kind, url=url, filename=filename, target_path=str(target), page="/iso" if kind == "iso" else "/disk-images", catalog_id=catalog_id, total_bytes=total, downloaded_bytes=done, cancel_requested=False)
+        core.update_operation(op, status="running", progress=progress, message=message, started_at=core.utc_now())
+        core.append_operation_log(op["id"], f"Ссылка: {url}")
+
 
 if __name__ == "__main__":
     import uvicorn

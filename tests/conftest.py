@@ -91,6 +91,8 @@ def fake_run_cmd(cmd, timeout=12, **_kwargs):
         return fake_result(":0")
     if cmd[:2] == ["virsh", "pool-list"]:
         return fake_result(" Name  State  Autostart\n---\n virtuality-images  active  yes")
+    if cmd[:2] == ["virsh", "pool-refresh"]:
+        return fake_result(f"Pool {cmd[-1]} refreshed")
     if cmd[:2] == ["virsh", "net-list"]:
         return fake_result(" Name  State  Autostart  Persistent\n---\n virtuality-nat  active  yes  yes")
     if cmd[:2] == ["systemctl", "is-active"]:

@@ -1,0 +1,4 @@
+{#- Сообщения после запуска/отмены скачивания (download_message / download_error в query string). -#}
+{% from "_ui.html" import alert %}
+{% if request.query_params.get('download_message') %}{{ alert('success', request.query_params.get('download_message')) }}{% endif %}
+{% if request.query_params.get('download_error') %}{{ alert('danger', request.query_params.get('download_error')) }}{% endif %}

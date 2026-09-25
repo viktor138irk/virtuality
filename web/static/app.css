@@ -621,3 +621,12 @@ details.advanced > .advanced-body { padding: 4px 16px 16px; }
   .setup-step { flex: none; padding: 6px 10px; }
   .setup-step small { display: none; }
 }
+
+/* ---------------------------------------------------------- downloads */
+.downloads { margin-bottom: 20px; }
+.download-item .download-pct { flex: none; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.download-item[data-status="error"] .download-pct { color: var(--danger); }
+.download-item[data-status="success"] .download-pct { color: var(--success); }
+.download-error { color: var(--danger); }
+.catalog-item .meta code { padding: 1px 5px; border-radius: 5px; background: var(--surface-3); font: 12px/1.4 var(--mono); color: var(--text-2); }
+@media (max-width: 640px) { .download-item, .catalog-item { flex-wrap: wrap; } .download-item .grow, .catalog-item .grow { flex-basis: calc(100% - 50px); } }
