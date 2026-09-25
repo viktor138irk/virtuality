@@ -33,7 +33,7 @@
   --border-strong: #d3d7e1;
   --text: #0e1525;
   --text-2: #4a5468;
-  --text-3: #7b8498;
+  --text-3: #5f6980;
   --brand: #5a48f5;
   --brand-hover: #4a38e6;
   --brand-soft: #efedff;
@@ -46,6 +46,9 @@
   --danger: #e03e45;    --danger-soft: #fdecec;
   --info: #2f73f0;      --info-soft: #e9f1ff;
   --neutral: #6b7488;   --neutral-soft: #eff1f5;
+  /* Badge text: darker than the accents so small labels stay readable (WCAG 4.5:1 on the soft backgrounds). */
+  --success-text: #0b7a45; --warning-text: #8a5600; --danger-text: #b8262d; --info-text: #1f5fd0; --neutral-text: #525b6e;
+  --switch-off: #8a93a6;
 
   --terminal-bg: #0d1117;
   --terminal-text: #d6deeb;
@@ -84,6 +87,8 @@
   --danger: #ff6369;    --danger-soft: rgba(255, 99, 105, .13);
   --info: #5b9bff;      --info-soft: rgba(91, 155, 255, .13);
   --neutral: #8d96a8;   --neutral-soft: rgba(141, 150, 168, .13);
+  --success-text: var(--success); --warning-text: var(--warning); --danger-text: var(--danger); --info-text: var(--info); --neutral-text: var(--neutral);
+  --switch-off: #5c6678;
   --terminal-bg: #07090d;
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, .3);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, .35);
@@ -225,13 +230,13 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
 .badge {
   display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px;
   border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
-  background: var(--neutral-soft); color: var(--neutral);
+  background: var(--neutral-soft); color: var(--neutral-text);
 }
 .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.badge.success { background: var(--success-soft); color: var(--success); }
-.badge.warning { background: var(--warning-soft); color: var(--warning); }
-.badge.danger { background: var(--danger-soft); color: var(--danger); }
-.badge.info { background: var(--info-soft); color: var(--info); }
+.badge.success { background: var(--success-soft); color: var(--success-text); }
+.badge.warning { background: var(--warning-soft); color: var(--warning-text); }
+.badge.danger { background: var(--danger-soft); color: var(--danger-text); }
+.badge.info { background: var(--info-soft); color: var(--info-text); }
 .badge.brand { background: var(--brand-soft); color: var(--brand-text); }
 .badge.success .dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent); animation: pulse 2.4s ease-in-out infinite; }
 .badge.info .dot { animation: pulse 1.4s ease-in-out infinite; }
@@ -293,7 +298,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .switch-row .switch-text strong { display: block; font-weight: 600; }
 .switch-row .switch-text span { color: var(--text-3); font-size: 12.5px; }
-.switch { position: relative; width: 42px; height: 24px; flex: none; padding: 0; border: 0; border-radius: 999px; background: var(--border-strong); cursor: pointer; transition: background .2s; }
+.switch { position: relative; width: 42px; height: 24px; flex: none; padding: 0; border: 0; border-radius: 999px; background: var(--switch-off); cursor: pointer; transition: background .2s; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(16,24,40,.25); transition: transform .2s cubic-bezier(.2,.8,.2,1); }
 .switch[aria-checked="true"] { background: var(--success); }
 .switch[aria-checked="true"]::after { transform: translateX(18px); }
