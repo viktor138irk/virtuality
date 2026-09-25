@@ -242,3 +242,12 @@ def plural(count: int, one: str, few: str, many: str) -> str:
 
 def port_service(port: int) -> str:
     return WELL_KNOWN_PORTS.get(int(port or 0), "")
+
+
+def format_bytes(value: int | float) -> str:
+    value = float(value or 0)
+    for unit in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
+        if value < 1024 or unit == "ТБ":
+            return f"{value:.0f} {unit}" if value >= 10 or unit == "Б" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.0f} ТБ"
