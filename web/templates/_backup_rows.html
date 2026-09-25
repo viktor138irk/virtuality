@@ -10,7 +10,7 @@
     {% if b.complete %}
       <a class="btn btn-sm" href="/backups/{{ b.vm }}/{{ b.id }}/restore">{{ icon('rotate-cw', 'icon-sm') }}<span class="hide-sm">Восстановить</span></a>
     {% endif %}
-    <form method="post" action="/backups/{{ b.vm }}/{{ b.id }}/delete" class="inline-form" data-confirm="Копия машины {{ b.vm }} от {{ b.created_label }} ({{ b.size }}) будет удалена. Сама машина не пострадает." data-confirm-title="Удалить копию?" data-confirm-button="Удалить" data-toast="Копия удалена" data-toast-tone="warning">
+    <form method="post" action="/backups/{{ b.vm }}/{{ b.id }}/delete" class="inline-form" data-confirm="Копия машины {{ b.vm }} от {{ b.created_label }} ({{ b.size }}) будет удалена. Сама машина не пострадает." data-confirm-title="Удалить копию?" data-confirm-button="Удалить">
       <input type="hidden" name="next" value="{{ back }}">
       <button class="btn btn-sm btn-icon btn-ghost" aria-label="Удалить копию" title="Удалить копию">{{ icon('trash-2', 'icon-sm') }}</button>
     </form>
