@@ -1,96 +1,56 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Профиль хоста — {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <div class="v-layout">
-    {% include "_sidebar.html" %}
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, alert %}
+{% set page_title = 'Сервер' %}
+{% set problems = profile.checks|selectattr('level', 'ne', 'ok')|list %}
 
-    <main class="v-main">
-      <header class="v-topbar">
-        <div>
-          <div class="v-title">Профиль хоста</div>
-          <div class="v-subtitle">Автоматически выбранная сборка Virtuality</div>
-        </div>
-        <div class="top-meta">
-          <span>user: {{ user }}</span>
-          <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-        </div>
-      </header>
-
-      {% if profile.virtualization_warning %}
-        <div class="notice">{{ profile.virtualization_warning }}</div>
-      {% endif %}
-
-      <section class="grid stats">
-        <article class="card stat">
-          <div class="label">Profile</div>
-          <div class="value small">{{ profile.label }}</div>
-        </article>
-        <article class="card stat">
-          <div class="label">Arch</div>
-          <div class="value small">{{ profile.arch }}</div>
-        </article>
-        <article class="card stat">
-          <div class="label">Virtualization</div>
-          <div class="value small">{{ profile.virtualization_mode|default('unknown') }}</div>
-        </article>
-        <article class="card stat">
-          <div class="label">Default network</div>
-          <div class="value small">{{ profile.recommended_network }}</div>
-        </article>
-      </section>
-
-      <section class="grid two">
-        <article class="card">
-          <div class="card-head">
-            <h2>Модель устройства</h2>
-            <span class="pill">auto-detected</span>
-          </div>
-          <div class="meta-grid">
-            <div><span>Model</span><strong>{{ profile.model }}</strong></div>
-            <div><span>VM mode</span><strong>{{ profile.recommended_vm_mode }}</strong></div>
-            <div><span>Ready</span><strong>{{ 'yes' if profile.ready else 'needs check' }}</strong></div>
-          </div>
-          <div class="notice top-space">
-            На физическом сервере для нормальной скорости нужен KVM: включи Intel VT-x / AMD-V в BIOS/UEFI. Если KVM недоступен, Virtuality может использовать QEMU fallback, но VM будут работать медленно.
-          </div>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>Проверки</h2>
-            <form method="post" action="/host/refresh"><button>Переопределить профиль</button></form>
-          </div>
-          <div class="services">
-            {% for check in profile.checks %}
-              {% set level = check.level|default('ok' if check.ok else 'err') %}
-              <div class="service-row">
-                <span>
-                  <strong>{{ check.name }}</strong>
-                  <small>{{ check.hint }}</small>
-                </span>
-                <span class="status {{ 'ok' if level == 'ok' else 'warn' if level == 'warn' else 'err' }}">{{ 'OK' if level == 'ok' else 'WARN' if level == 'warn' else 'FAIL' }}</span>
-              </div>
-            {% endfor %}
-          </div>
-        </article>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2>Raw profile</h2>
-          <span class="pill">/var/lib/virtuality/config/host_profile.json</span>
-        </div>
-        <pre>{{ profile_json }}</pre>
-      </section>
-    </main>
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <h1>Сервер</h1>
+    <p class="lead">Оборудование и готовность сервера к работе с виртуальными машинами.</p>
   </div>
-  <script src="/static/panel.js" defer></script>
-</body>
-</html>
+  <div class="page-actions">
+    <form method="post" action="/host/refresh" data-toast="Проверка выполнена"><button class="btn">{{ icon('refresh-cw', 'icon-sm') }}Проверить заново</button></form>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<section class="grid grid-main">
+  <div class="stack">
+    <article class="card">
+      <div class="card-header">
+        <div><h2>Готовность</h2><p>{{ 'Всё готово для запуска машин' if not problems else 'Есть замечания — ниже написано, что сделать' }}</p></div>
+        {% if profile.ready and not problems %}{{ badge('Готов', 'success') }}{% elif profile.ready %}{{ badge('Работает с замечаниями', 'warning') }}{% else %}{{ badge('Не готов', 'danger') }}{% endif %}
+      </div>
+      <div class="checklist">
+        {% for check in profile.checks %}
+          {% set level = check.level|default('ok' if check.ok else 'err') %}
+          {% set tone = 'success' if level == 'ok' else 'warning' if level == 'warn' else 'danger' %}
+          <div class="check-item {{ tone }}">
+            {{ icon('circle-check' if tone == 'success' else 'triangle-alert' if tone == 'warning' else 'circle-x') }}
+            <div><strong>{{ check.name }}</strong>{% if tone != 'success' %}<span>{{ check.hint }}</span>{% endif %}</div>
+          </div>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+
+  <aside class="stack">
+    <article class="card">
+      <div class="card-header"><h2>Оборудование</h2></div>
+      <div class="card-body" style="padding-top:6px;padding-bottom:6px">
+        <div class="summary-row"><span>Тип</span><strong>{{ profile.label }}</strong></div>
+        <div class="summary-row"><span>Модель</span><strong>{{ profile.model }}</strong></div>
+        <div class="summary-row"><span>Архитектура</span><strong>{{ profile.arch }}</strong></div>
+        <div class="summary-row"><span>Ускорение</span><strong>{{ 'KVM (аппаратное)' if profile.virtualization_mode == 'kvm' else 'Эмуляция (медленно)' }}</strong></div>
+        <div class="summary-row"><span>Сеть по умолчанию</span><strong>{{ 'Локальная сеть' if profile.recommended_network == 'bridge' else 'Автоматически (NAT)' }}</strong></div>
+      </div>
+    </article>
+    <details class="advanced">
+      <summary>{{ icon('terminal', 'icon-sm') }}Профиль целиком<span class="chev">{{ icon('chevron-down', 'icon-sm') }}</span></summary>
+      <div class="advanced-body"><pre class="terminal" style="max-height:360px">{{ profile_json }}</pre></div>
+    </details>
+  </aside>
+</section>
+{% endblock %}

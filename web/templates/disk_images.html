@@ -1,329 +1,44 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Диски — {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <div class="v-layout">
-    {% include "_sidebar.html" %}
+{% extends "base.html" %}
+{% from "_ui.html" import icon, uploader, empty %}
+{% set page_title = 'Готовые системы' %}
 
-    <main class="v-main">
-      <header class="v-topbar">
-        <div>
-          <div class="v-title">Диски</div>
-          <div class="v-subtitle">Готовые образы установленных систем: .img / .raw / .qcow2 / .img.xz, а также архивы .zip / .tar.gz / .tgz</div>
-        </div>
-        <div class="top-meta">
-          <span>user: {{ user }}</span>
-          <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-        </div>
-      </header>
+{% block page_header %}{% include "_images_header.html" %}{% endblock %}
 
-      {% if error %}
-        <div class="alert danger">{{ error }}</div>
-      {% endif %}
-
-      <section class="grid two">
-        <article class="card">
-          <div class="card-head">
-            <h2>Загрузить образ установленной системы</h2>
-            <span class="pill">.img .raw .qcow2 .img.xz .zip .tar.gz</span>
+{% block content %}
+<section class="grid grid-main">
+  <article class="card">
+    <div class="card-header"><div><h2>Готовые системы</h2><p>Образы уже установленных систем — машина запускается сразу, без установки</p></div></div>
+    {% if images %}
+      <div class="list">
+        {% for image in images %}
+          <div class="list-item">
+            <span class="list-icon brand">{{ icon('hard-drive') }}</span>
+            <div class="grow"><div class="title truncate">{{ image.name }}</div><div class="meta">{{ image.size|replace('GB', 'ГБ') }} · формат {{ image.format }} · {{ image.updated }}</div></div>
+            <a class="btn btn-sm hide-sm" href="/vm/create?image={{ image.name|urlencode }}">Создать машину</a>
+            <form method="post" action="/disk-images/{{ image.name }}/delete" class="inline-form" data-confirm="Файл {{ image.name }} будет удалён с сервера. Машины, созданные из него, продолжат работать." data-confirm-title="Удалить образ?" data-confirm-button="Удалить" data-toast="Образ удалён" data-toast-tone="warning">
+              <button class="btn btn-sm btn-icon btn-ghost" aria-label="Удалить">{{ icon('trash-2', 'icon-sm') }}</button>
+            </form>
           </div>
-          <form id="disk-upload-form" method="post" action="/disk-images/upload" enctype="multipart/form-data" class="form-grid">
-            <label class="upload-box">
-              <span>Выбери файл готового диска или архив с диском</span>
-              <input id="disk-file-input" type="file" name="image_file" accept=".img,.raw,.qcow2,.img.xz,.zip,.tar.gz,.tgz" required>
-            </label>
-            <div id="disk-file-hint" class="muted small-note">Файл ещё не выбран. Разрешены .img, .raw, .qcow2, .img.xz, .zip, .tar.gz и .tgz.</div>
-            <div id="disk-file-error" class="alert danger" hidden></div>
-            <div id="upload-progress-wrap" class="upload-progress-wrap" hidden>
-              <div class="upload-progress-head">
-                <strong id="upload-status">Подготовка…</strong>
-                <span id="upload-percent">0%</span>
-              </div>
-              <div class="progress big"><span id="upload-progress-bar"></span></div>
-              <div class="upload-progress-meta">
-                <span id="upload-loaded">0 MB</span>
-                <span id="upload-speed">скорость считается…</span>
-              </div>
-            </div>
-            <button id="disk-upload-button" type="submit" class="primary wide">Загрузить образ диска</button>
-          </form>
-          <p class="muted small-note">Архив или .img.xz будет распакован автоматически. Virtuality найдёт внутри .img/.raw/.qcow2 или распакует .img.xz и положит результат в <b>/var/lib/virtuality/disk-images</b>. После загрузки .img/.raw/.img.xz запускается конвертация в qcow2. Установочные .iso загружаются отдельно в разделе <b>ISO</b>.</p>
-        </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      {{ empty('hard-drive', 'Готовых образов пока нет', 'Подойдут облачные образы Ubuntu и Debian, образы для Raspberry Pi, диски других систем виртуализации.') }}
+    {% endif %}
+  </article>
 
-        <article class="card">
-          <div class="card-head">
-            <h2>Как использовать</h2>
-            <span class="pill">import disk</span>
-          </div>
-          <div class="quick-actions">
-            <div class="big-action static">
-              <strong>Raspberry / Orange Pi images</strong>
-              <span>Загрузи .img, .img.xz или архив с .img, дождись распаковки/конвертации, затем в “Создать VM” выбери режим “Готовый диск”.</span>
-            </div>
-            <div class="big-action static">
-              <strong>Архивы безопасно распаковываются</strong>
-              <span>Поддерживаются .zip, .tar.gz, .tgz и .img.xz. Из обычных архивов берём только .img/.raw/.qcow2.</span>
-            </div>
-          </div>
-          <pre>qemu-img convert -p -f raw -O qcow2 source.img source.qcow2</pre>
-        </article>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2>Локальные образы дисков</h2>
-          <span class="pill">{{ images|length }} файлов</span>
-        </div>
-        <table>
-          <thead>
-            <tr><th>Файл</th><th>Тип</th><th>Размер</th><th>Обновлён</th><th>Действия</th></tr>
-          </thead>
-          <tbody>
-          {% for image in images %}
-            <tr>
-              <td class="strong">{{ image.name }}</td>
-              <td><span class="status ok">{{ image.format }}</span></td>
-              <td>{{ image.size }}</td>
-              <td>{{ image.updated }}</td>
-              <td class="actions">
-                <a class="link-pill" href="/vm/create">Создать VM</a>
-                <form method="post" action="/disk-images/{{ image.name }}/delete" onsubmit="return confirm('Удалить образ {{ image.name }}?');">
-                  <button class="danger">Удалить</button>
-                </form>
-              </td>
-            </tr>
-          {% else %}
-            <tr><td colspan="5" class="muted">Образов пока нет. Загрузи .img, .raw, .qcow2, .img.xz или архив .zip/.tar.gz/.tgz.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </section>
-    </main>
-  </div>
-
-  <script>
-    const form = document.getElementById('disk-upload-form');
-    const fileInput = document.getElementById('disk-file-input');
-    const button = document.getElementById('disk-upload-button');
-    const hint = document.getElementById('disk-file-hint');
-    const errorBox = document.getElementById('disk-file-error');
-    const box = document.getElementById('upload-progress-wrap');
-    const bar = document.getElementById('upload-progress-bar');
-    const percent = document.getElementById('upload-percent');
-    const statusLine = document.getElementById('upload-status');
-    const loadedLine = document.getElementById('upload-loaded');
-    const speedLine = document.getElementById('upload-speed');
-    const allowedExtensions = ['.img', '.raw', '.qcow2', '.img.xz', '.zip', '.tar.gz', '.tgz'];
-    let activeXhr = null;
-    let uploadActive = false;
-
-    function bytesText(bytes) {
-      if (!bytes) return '0 MB';
-      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-      let value = bytes;
-      let i = 0;
-      while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
-      return value.toFixed(value >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
-    }
-
-    function validDiskFile(file) {
-      if (!file || !file.name) return false;
-      const lower = file.name.toLowerCase();
-      return allowedExtensions.some(ext => lower.endsWith(ext));
-    }
-
-    function setFileError(message) {
-      if (!errorBox) return;
-      errorBox.textContent = message || '';
-      errorBox.hidden = !message;
-    }
-
-    function setUploadMode(active) {
-      uploadActive = active;
-      window.VirtualityUploadActive = active;
-      document.body.classList.toggle('upload-active', active);
-      if (active) {
-        button.disabled = false;
-        button.type = 'button';
-        button.textContent = 'Отменить загрузку';
-        button.classList.remove('primary');
-        button.classList.add('danger');
-        fileInput.disabled = true;
-      } else {
-        activeXhr = null;
-        button.type = 'submit';
-        button.textContent = 'Загрузить образ диска';
-        button.classList.add('primary');
-        button.classList.remove('danger');
-        fileInput.disabled = false;
-        button.disabled = !validDiskFile(fileInput.files[0]);
-      }
-    }
-
-    function resetProgress(title, detail) {
-      bar.style.width = '0%';
-      percent.textContent = '0%';
-      statusLine.textContent = title;
-      loadedLine.textContent = detail || '0%';
-      speedLine.textContent = 'ожидание…';
-    }
-
-    window.addEventListener('beforeunload', function (event) {
-      if (!uploadActive) return;
-      event.preventDefault();
-      event.returnValue = 'Идёт загрузка образа. Если уйти со страницы, загрузка будет прервана.';
-    });
-
-    document.addEventListener('click', function (event) {
-      if (!uploadActive) return;
-      const navTarget = event.target.closest('a, form button[type="submit"], form button:not([type])');
-      if (!navTarget || navTarget === button) return;
-      event.preventDefault();
-      event.stopPropagation();
-      statusLine.textContent = 'Сначала заверши или отмени текущую загрузку.';
-    }, true);
-
-    async function pollConvert(operationId) {
-      fileInput.disabled = true;
-      button.disabled = true;
-      button.textContent = 'Идёт конвертация…';
-      button.classList.remove('danger');
-      button.classList.add('primary');
-      resetProgress('Конвертация образа в qcow2…', '0%');
-      while (true) {
-        const response = await fetch('/api/operations/' + operationId, {cache: 'no-store'});
-        const payload = await response.json();
-        if (!payload.ok) throw new Error(payload.error || 'operation error');
-        const op = payload.operation;
-        const progress = Math.max(0, Math.min(100, Number(op.progress || 0)));
-        bar.style.width = progress + '%';
-        percent.textContent = progress + '%';
-        loadedLine.textContent = 'Конвертация: ' + progress + '%';
-        speedLine.textContent = op.status;
-        statusLine.textContent = op.message || 'Конвертация образа…';
-        if (op.status === 'success') {
-          bar.style.width = '100%';
-          percent.textContent = '100%';
-          statusLine.textContent = 'Конвертация завершена. Обновляем список образов…';
-          setUploadMode(false);
-          setTimeout(() => { window.location.href = '/disk-images'; }, 650);
-          return;
-        }
-        if (op.status === 'error') {
-          statusLine.textContent = 'Ошибка конвертации: ' + (op.message || 'см. журнал операций');
-          setUploadMode(false);
-          return;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
-
-    fileInput.addEventListener('change', function () {
-      const file = fileInput.files[0];
-      setFileError('');
-      if (!file) {
-        hint.textContent = 'Файл ещё не выбран. Разрешены .img, .raw, .qcow2, .img.xz, .zip, .tar.gz и .tgz.';
-        button.disabled = false;
-        return;
-      }
-      if (!validDiskFile(file)) {
-        const message = 'Неверное расширение: ' + file.name + '. Разрешены только .img, .raw, .qcow2, .img.xz, .zip, .tar.gz и .tgz.';
-        hint.textContent = message;
-        setFileError(message);
-        fileInput.value = '';
-        button.disabled = true;
-        return;
-      }
-      button.disabled = false;
-      hint.textContent = file.name + ' · ' + bytesText(file.size);
-    });
-
-    button.addEventListener('click', function () {
-      if (!uploadActive) return;
-      if (activeXhr) activeXhr.abort();
-    });
-
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
-      if (uploadActive) return;
-      const file = fileInput.files[0];
-      setFileError('');
-      if (!validDiskFile(file)) {
-        const message = 'Выбери образ установленной системы или архив: .img, .raw, .qcow2, .img.xz, .zip, .tar.gz или .tgz.';
-        hint.textContent = message;
-        setFileError(message);
-        return;
-      }
-
-      const xhr = new XMLHttpRequest();
-      activeXhr = xhr;
-      const data = new FormData(form);
-      const started = Date.now();
-
-      box.hidden = false;
-      setUploadMode(true);
-      resetProgress('Передача файла на сервер…', '0 MB из ' + bytesText(file.size));
-
-      xhr.upload.onprogress = function (event) {
-        if (!event.lengthComputable) {
-          statusLine.textContent = 'Загрузка идёт…';
-          return;
-        }
-        const pct = Math.round((event.loaded / event.total) * 100);
-        const seconds = Math.max(1, (Date.now() - started) / 1000);
-        const speed = event.loaded / seconds;
-        bar.style.width = pct + '%';
-        percent.textContent = pct + '%';
-        loadedLine.textContent = bytesText(event.loaded) + ' из ' + bytesText(event.total);
-        speedLine.textContent = bytesText(speed) + '/s';
-        if (pct >= 100) statusLine.textContent = 'Файл передан. Сервер сохраняет и при необходимости распаковывает архив…';
-      };
-
-      xhr.onload = async function () {
-        if (xhr.status >= 200 && xhr.status < 400) {
-          let payload = null;
-          try { payload = JSON.parse(xhr.responseText); } catch (error) {}
-          if (payload && payload.mode === 'converting' && payload.operation_id) {
-            await pollConvert(payload.operation_id);
-            return;
-          }
-          bar.style.width = '100%';
-          percent.textContent = '100%';
-          statusLine.textContent = 'Готово. Обновляем список образов…';
-          setUploadMode(false);
-          window.location.href = '/disk-images';
-        } else {
-          statusLine.textContent = 'Ошибка загрузки: HTTP ' + xhr.status;
-          setUploadMode(false);
-        }
-      };
-
-      xhr.onabort = function () {
-        statusLine.textContent = 'Загрузка отменена пользователем.';
-        bar.style.width = '0%';
-        percent.textContent = '0%';
-        loadedLine.textContent = '0 MB';
-        speedLine.textContent = 'отменено';
-        setUploadMode(false);
-      };
-
-      xhr.onerror = function () {
-        statusLine.textContent = 'Ошибка сети во время загрузки.';
-        setUploadMode(false);
-      };
-
-      xhr.open('POST', form.action);
-      xhr.setRequestHeader('Accept', 'application/json');
-      xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-      xhr.send(data);
-    });
-  </script>
-  <script src="/static/panel.js" defer></script>
-</body>
-</html>
+  <aside class="stack">
+    <article class="card">
+      <div class="card-header"><h2>Загрузить образ</h2></div>
+      <div class="card-body">
+        {{ uploader('/disk-images/upload', 'image_file', '.qcow2,.img,.raw,.img.xz,.zip,.tar.gz,.tgz', 'Перетащите файл образа сюда', '.qcow2, .img, .raw, а также архивы .img.xz, .zip, .tar.gz', '/disk-images', 'Загрузить') }}
+      </div>
+    </article>
+    <article class="card">
+      <div class="card-body stack-sm">
+        <div class="row">{{ icon('sparkles') }}<h3>Всё делается автоматически</h3></div>
+        <p class="muted small">Архивы распаковываются, а образы .img и .raw конвертируются в быстрый формат qcow2. Прогресс виден прямо здесь и в разделе «Задачи».</p>
+      </div>
+    </article>
+  </aside>
+</section>
+{% endblock %}

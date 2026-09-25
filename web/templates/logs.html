@@ -1,92 +1,34 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Журналы — {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <div class="v-layout">
-    <aside class="v-sidebar">
-      <div class="v-logo">
-        <strong>Virtuality</strong>
-        <span>control panel</span>
-      </div>
-      <nav class="v-nav">
-        <a href="/">Обзор</a>
-        <a href="/vm/create">Создать VM</a>
-        <div class="v-nav-group open">
-          <button class="v-nav-group-title" type="button">Образы</button>
-          <a href="/iso">ISO</a>
-          <a href="/disk-images">Диски</a>
-        </div>
-        <a href="/network">Сеть</a>
-        <a href="/operations">Операции</a>
-        <a class="active" href="/logs">Журналы</a>
-        <a href="/update">Обновления</a>
-        <a href="/host">Хост</a>
-      </nav>
-    </aside>
+{% extends "base.html" %}
+{% from "_ui.html" import icon %}
+{% set page_title = 'Журналы' %}
 
-    <main class="v-main">
-      <header class="v-topbar">
-        <div>
-          <div class="v-title">Журналы</div>
-          <div class="v-subtitle">systemd, libvirt, update, install и операции Virtuality</div>
-        </div>
-        <div class="top-meta">
-          <span>user: {{ user }}</span>
-          <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-        </div>
-      </header>
-
-      <section class="grid stats compact-stats">
-        {% for key, source in sources.items() %}
-          <a class="card stat log-source-card {{ 'selected' if key == selected.key else '' }}" href="/logs?source={{ key }}&lines={{ selected.lines }}">
-            <div class="label">Источник</div>
-            <div class="value small">{{ source.title }}</div>
-          </a>
-        {% endfor %}
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div>
-            <h2>{{ selected.title }}</h2>
-            <div class="muted small-note">{{ selected.cmd }}</div>
-          </div>
-          <div class="actions">
-            <a class="link-pill" href="/logs?source={{ selected.key }}&lines=120">120</a>
-            <a class="link-pill" href="/logs?source={{ selected.key }}&lines=300">300</a>
-            <a class="link-pill" href="/logs?source={{ selected.key }}&lines=1000">1000</a>
-            <button class="primary" onclick="refreshLog()">Обновить</button>
-          </div>
-        </div>
-        <pre id="log-content" class="op-log">{{ selected.content }}</pre>
-      </section>
-    </main>
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <h1>Журналы</h1>
+    <p class="lead">Записи служб сервера. Пригодятся, если что-то пошло не так, — их можно отправить в поддержку.</p>
   </div>
+</div>
+{% endblock %}
 
-  <script>
-    async function refreshLog() {
-      const params = new URLSearchParams(window.location.search);
-      const source = params.get('source') || '{{ selected.key }}';
-      const lines = params.get('lines') || '{{ selected.lines }}';
-      const box = document.getElementById('log-content');
-      try {
-        const response = await fetch('/api/logs?source=' + encodeURIComponent(source) + '&lines=' + encodeURIComponent(lines), {cache: 'no-store'});
-        const payload = await response.json();
-        if (payload.ok && payload.log) {
-          box.textContent = payload.log.content || 'Лог пуст';
-        }
-      } catch (error) {
-        box.textContent = 'Ошибка обновления лога: ' + error;
-      }
-    }
-    setInterval(refreshLog, 5000);
-  </script>
-  <script src="/static/panel.js" defer></script>
-</body>
-</html>
+{% block content %}
+<nav class="tabs">
+  {% for key, source in sources.items() %}
+    <a href="/logs?source={{ key }}&lines={{ selected.lines }}" class="{{ 'active' if key == selected.key else '' }}">{{ source.title }}</a>
+  {% endfor %}
+</nav>
+<article class="card">
+  <div class="card-header">
+    <div><h2>{{ selected.title }}</h2><p class="mono">{{ selected.cmd }}</p></div>
+    <div class="row">
+      <label class="row small subtle" style="gap:8px;cursor:pointer"><input type="checkbox" data-log-live checked> Обновлять</label>
+      <div class="segmented">
+        {% for n in (120, 300, 1000) %}<a href="/logs?source={{ selected.key }}&lines={{ n }}" class="{{ 'active' if selected.lines == n else '' }}">{{ n }}</a>{% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="card-body">
+    <pre class="terminal tall" data-log-source="{{ selected.key }}" data-log-lines="{{ selected.lines }}">{{ selected.content }}</pre>
+  </div>
+</article>
+{% endblock %}

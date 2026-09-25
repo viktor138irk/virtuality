@@ -33,14 +33,24 @@ generic-arm64          # другая ARM64-плата
 
 Для ARM64-плат правильный сценарий — **ARM64-гости**, NAT-сеть и позже cloud-image/cloud-init шаблоны. x86_64 ISO на Raspberry/Orange Pi не являются целевым режимом.
 
+![Обзор](docs/screenshots/dashboard.png)
+
+| Мастер создания машины | Страница машины |
+|---|---|
+| ![Создание машины](docs/screenshots/create.png) | ![Машина](docs/screenshots/vm.png) |
+
+| Сеть и доступ | Тёмная тема |
+|---|---|
+| ![Сеть](docs/screenshots/network.png) | ![Тёмная тема](docs/screenshots/dashboard-dark.png) |
+
 ---
 
 ## Установка с ISO-образа
 
-Для установки на «голое» железо собирается загрузочный ISO на базе Ubuntu Server 24.04: установщик спрашивает только сеть, диск и пользователя, а при первой загрузке нода настраивается сама.
+Для установки на «голое» железо собирается загрузочный ISO на базе чистого Ubuntu Server 26.04 LTS: установщик спрашивает только сеть, диск и пользователя, а при первой загрузке нода настраивается сама.
 
 ```bash
-make iso               # dist/virtuality-<версия>-ubuntu-24.04-amd64.iso
+make iso               # dist/virtuality-<версия>-ubuntu-26.04-amd64.iso
 make iso ARCH=arm64
 ```
 
@@ -138,7 +148,7 @@ CPU: 2 ядра с Intel VT-x / AMD-V
 RAM: 4 GB
 /: минимум 8 GB свободно
 /var/lib: минимум 20 GB свободно
-OS: Ubuntu Server 24.04 LTS / Debian-like с apt
+OS: Ubuntu Server 26.04 / 24.04 LTS или Debian 13
 Network: один проводной интерфейс
 ```
 
@@ -149,7 +159,7 @@ CPU: 4+ ядра
 RAM: 16+ GB
 Storage: 100+ GB SSD/NVMe под /var/lib/virtuality
 Network: 1 Gbit/s+
-OS: Ubuntu Server 24.04 LTS
+OS: Ubuntu Server 26.04 LTS
 ```
 
 ARM64 edge nodes:
@@ -440,8 +450,11 @@ VIRTUALITY_COOKIE_SECURE=0      # 1 — cookie только по HTTPS (за rev
 
 ```bash
 pip install -r web/requirements.txt -r requirements-dev.txt
-make check      # pyflakes + shellcheck + pytest
+make check                       # pyflakes + shellcheck + pytest
+python3 tests/dev_server.py      # панель на http://127.0.0.1:8765 с имитацией virsh, вход: любой пароль
 ```
+
+Интерфейс: шаблоны `web/templates` (общий каркас `base.html`, компоненты `_ui.html`), стили `web/static/app.css` (светлая и тёмная темы на CSS-переменных), поведение `web/static/panel.js`. Шрифт Inter и иконки Lucide лежат в `web/static` — панель работает без доступа в интернет.
 
 Код панели лежит в `web/` целиком и устанавливается как есть. Патчить `app.py` во время установки больше не нужно: изменения вносятся прямо в `web/` и покрываются тестами в `tests/`. GitHub Actions запускает проверки на Python 3.11–3.13 и собирает ISO по тегу `v*`.
 

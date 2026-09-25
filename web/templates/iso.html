@@ -1,272 +1,51 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ISO — {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <div class="v-layout">
-    {% include "_sidebar.html" %}
+{% extends "base.html" %}
+{% from "_ui.html" import icon, uploader, empty %}
+{% set page_title = 'Образы ОС' %}
 
-    <main class="v-main">
-      <header class="v-topbar">
-        <div>
-          <div class="v-title">ISO</div>
-          <div class="v-subtitle">Установочные образы только .iso в /var/lib/virtuality/iso</div>
-        </div>
-        <div class="top-meta">
-          <span>user: {{ user }}</span>
-          <a class="link-pill" href="/">← Дашборд</a>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-        </div>
-      </header>
+{% block page_header %}{% include "_images_header.html" %}{% endblock %}
 
-      {% if error %}
-        <div class="alert danger">{{ error }}</div>
-      {% endif %}
-
-      <section class="grid two">
-        <article class="card">
-          <div class="card-head">
-            <h2>Загрузить установочный ISO</h2>
-            <span class="pill">только .iso</span>
+{% block content %}
+<section class="grid grid-main">
+  <article class="card">
+    <div class="card-header">
+      <div><h2>Установочные образы</h2><p>Файлы .iso для установки системы с нуля</p></div>
+      <form method="post" action="/iso/refresh" class="inline-form" data-toast="Список образов обновлён"><button class="btn btn-sm btn-ghost">{{ icon('refresh-cw', 'icon-sm') }}Обновить</button></form>
+    </div>
+    {% if isos %}
+      <div class="list">
+        {% for iso in isos %}
+          <div class="list-item">
+            <span class="list-icon brand">{{ icon('disc-3') }}</span>
+            <div class="grow"><div class="title truncate">{{ iso.name }}</div><div class="meta">{{ iso.size|replace('MB', 'МБ') }} · загружен {{ iso.updated }}</div></div>
+            <a class="btn btn-sm hide-sm" href="/vm/create?iso={{ iso.name|urlencode }}">Создать машину</a>
+            <form method="post" action="/iso/{{ iso.name }}/delete" class="inline-form" data-confirm="Файл {{ iso.name }} будет удалён с сервера. Уже созданные машины продолжат работать." data-confirm-title="Удалить образ?" data-confirm-button="Удалить" data-toast="Образ удалён" data-toast-tone="warning">
+              <button class="btn btn-sm btn-icon btn-ghost" aria-label="Удалить">{{ icon('trash-2', 'icon-sm') }}</button>
+            </form>
           </div>
-          <form id="iso-upload-form" method="post" action="/iso/upload" enctype="multipart/form-data" class="form-grid">
-            <label class="upload-box">
-              <span>Выбери ISO-файл установочного диска</span>
-              <input id="iso-file-input" type="file" name="iso_file" accept=".iso" required>
-            </label>
-            <div id="iso-file-hint" class="muted small-note">Файл ещё не выбран. В этом разделе разрешены только установочные образы .iso.</div>
-            <div id="iso-file-error" class="alert danger" hidden></div>
-            <div id="upload-progress-wrap" class="upload-progress-wrap" hidden>
-              <div class="upload-progress-head">
-                <strong id="upload-status">Подготовка…</strong>
-                <span id="upload-percent">0%</span>
-              </div>
-              <div class="progress big"><span id="upload-progress-bar"></span></div>
-              <div class="upload-progress-meta">
-                <span id="upload-loaded">0 MB</span>
-                <span id="upload-speed">скорость считается…</span>
-              </div>
-            </div>
-            <button id="iso-upload-button" type="submit" class="primary wide">Загрузить ISO</button>
-          </form>
-          <p class="muted small-note">Файл попадёт в <b>/var/lib/virtuality/iso</b>. Для готовых системных дисков используй раздел <b>Диски</b>: .img / .raw / .qcow2.</p>
-        </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      {{ empty('disc-3', 'Образов пока нет', 'Скачайте установочный образ нужной системы на сайте разработчика и загрузите его сюда.') }}
+    {% endif %}
+  </article>
 
-        <article class="card">
-          <div class="card-head">
-            <h2>Действия</h2>
-            <span class="pill">pool</span>
-          </div>
-          <div class="actions big-actions">
-            <form method="post" action="/iso/refresh"><button>Обновить ISO pool</button></form>
-            <a class="link-pill accent" href="/vm/create">Создать VM</a>
-          </div>
-          <pre>sudo virsh pool-refresh virtuality-iso
-ls -lh /var/lib/virtuality/iso</pre>
-        </article>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2>ISO-образы</h2>
-          <span class="pill">{{ isos|length }} файлов</span>
-        </div>
-        <table>
-          <thead>
-            <tr><th>Файл</th><th>Размер</th><th>Обновлён</th><th>Действия</th></tr>
-          </thead>
-          <tbody>
-          {% for iso in isos %}
-            <tr>
-              <td class="strong">{{ iso.name }}</td>
-              <td>{{ iso.size }}</td>
-              <td>{{ iso.updated }}</td>
-              <td class="actions">
-                <form method="post" action="/iso/{{ iso.name }}/delete" onsubmit="return confirm('Удалить ISO {{ iso.name }}?');">
-                  <button class="danger">Удалить</button>
-                </form>
-              </td>
-            </tr>
-          {% else %}
-            <tr><td colspan="4" class="muted">ISO пока нет. Загрузи первый установочный .iso через форму выше.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </section>
-    </main>
-  </div>
-
-  <script>
-    const form = document.getElementById('iso-upload-form');
-    const fileInput = document.getElementById('iso-file-input');
-    const button = document.getElementById('iso-upload-button');
-    const hint = document.getElementById('iso-file-hint');
-    const errorBox = document.getElementById('iso-file-error');
-    const box = document.getElementById('upload-progress-wrap');
-    const bar = document.getElementById('upload-progress-bar');
-    const percent = document.getElementById('upload-percent');
-    const statusLine = document.getElementById('upload-status');
-    const loadedLine = document.getElementById('upload-loaded');
-    const speedLine = document.getElementById('upload-speed');
-    let activeXhr = null;
-    let uploadActive = false;
-
-    function bytesText(bytes) {
-      if (!bytes) return '0 MB';
-      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-      let value = bytes;
-      let i = 0;
-      while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
-      return value.toFixed(value >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
-    }
-
-    function validIsoFile(file) {
-      return file && file.name && file.name.toLowerCase().endsWith('.iso');
-    }
-
-    function setFileError(message) {
-      if (!errorBox) return;
-      errorBox.textContent = message || '';
-      errorBox.hidden = !message;
-    }
-
-    function setUploadMode(active) {
-      uploadActive = active;
-      window.VirtualityUploadActive = active;
-      document.body.classList.toggle('upload-active', active);
-      if (active) {
-        button.disabled = false;
-        button.type = 'button';
-        button.textContent = 'Отменить загрузку';
-        button.classList.remove('primary');
-        button.classList.add('danger');
-        fileInput.disabled = true;
-      } else {
-        activeXhr = null;
-        button.type = 'submit';
-        button.textContent = 'Загрузить ISO';
-        button.classList.add('primary');
-        button.classList.remove('danger');
-        fileInput.disabled = false;
-        button.disabled = !validIsoFile(fileInput.files[0]);
-      }
-    }
-
-    window.addEventListener('beforeunload', function (event) {
-      if (!uploadActive) return;
-      event.preventDefault();
-      event.returnValue = 'Идёт загрузка ISO. Если уйти со страницы, загрузка будет прервана.';
-    });
-
-    document.addEventListener('click', function (event) {
-      if (!uploadActive) return;
-      const navTarget = event.target.closest('a, form button[type="submit"], form button:not([type])');
-      if (!navTarget || navTarget === button) return;
-      event.preventDefault();
-      event.stopPropagation();
-      statusLine.textContent = 'Сначала заверши или отмени текущую загрузку.';
-    }, true);
-
-    fileInput.addEventListener('change', function () {
-      const file = fileInput.files[0];
-      setFileError('');
-      if (!file) {
-        hint.textContent = 'Файл ещё не выбран. В этом разделе разрешены только установочные образы .iso.';
-        button.disabled = false;
-        return;
-      }
-      if (!validIsoFile(file)) {
-        const message = 'Неверный тип файла: ' + file.name + '. Здесь можно выбрать только .iso.';
-        hint.textContent = message;
-        setFileError(message);
-        fileInput.value = '';
-        button.disabled = true;
-        return;
-      }
-      button.disabled = false;
-      hint.textContent = file.name + ' · ' + bytesText(file.size);
-    });
-
-    button.addEventListener('click', function () {
-      if (!uploadActive) return;
-      if (activeXhr) activeXhr.abort();
-    });
-
-    form.addEventListener('submit', function (event) {
-      event.preventDefault();
-      if (uploadActive) return;
-      const file = fileInput.files[0];
-      setFileError('');
-      if (!validIsoFile(file)) {
-        const message = 'Выбери установочный образ .iso.';
-        hint.textContent = message;
-        setFileError(message);
-        return;
-      }
-
-      const xhr = new XMLHttpRequest();
-      activeXhr = xhr;
-      const data = new FormData(form);
-      const started = Date.now();
-
-      box.hidden = false;
-      setUploadMode(true);
-      statusLine.textContent = 'Передача файла на сервер…';
-      bar.style.width = '0%';
-      percent.textContent = '0%';
-      loadedLine.textContent = '0 MB из ' + bytesText(file.size);
-      speedLine.textContent = 'скорость считается…';
-
-      xhr.upload.onprogress = function (event) {
-        if (!event.lengthComputable) {
-          statusLine.textContent = 'Загрузка идёт…';
-          return;
-        }
-        const pct = Math.round((event.loaded / event.total) * 100);
-        const seconds = Math.max(1, (Date.now() - started) / 1000);
-        const speed = event.loaded / seconds;
-        bar.style.width = pct + '%';
-        percent.textContent = pct + '%';
-        loadedLine.textContent = bytesText(event.loaded) + ' из ' + bytesText(event.total);
-        speedLine.textContent = bytesText(speed) + '/s';
-        if (pct >= 100) statusLine.textContent = 'Файл передан. Сервер сохраняет ISO и обновляет pool…';
-      };
-
-      xhr.onload = function () {
-        if (xhr.status >= 200 && xhr.status < 400) {
-          bar.style.width = '100%';
-          percent.textContent = '100%';
-          statusLine.textContent = 'Готово. Обновляем список ISO…';
-          setUploadMode(false);
-          window.location.href = '/iso';
-        } else {
-          statusLine.textContent = 'Ошибка загрузки: HTTP ' + xhr.status;
-          setUploadMode(false);
-        }
-      };
-
-      xhr.onabort = function () {
-        statusLine.textContent = 'Загрузка отменена пользователем.';
-        bar.style.width = '0%';
-        percent.textContent = '0%';
-        loadedLine.textContent = '0 MB';
-        speedLine.textContent = 'отменено';
-        setUploadMode(false);
-      };
-
-      xhr.onerror = function () {
-        statusLine.textContent = 'Ошибка сети во время загрузки.';
-        setUploadMode(false);
-      };
-
-      xhr.open('POST', form.action);
-      xhr.send(data);
-    });
-  </script>
-  <script src="/static/panel.js" defer></script>
-</body>
-</html>
+  <aside class="stack">
+    <article class="card">
+      <div class="card-header"><h2>Загрузить образ</h2></div>
+      <div class="card-body">
+        {{ uploader('/iso/upload', 'iso_file', '.iso', 'Перетащите файл .iso сюда', 'или нажмите, чтобы выбрать на компьютере', '/iso', 'Загрузить') }}
+      </div>
+    </article>
+    <article class="card">
+      <div class="card-header"><h2>Где взять образ</h2></div>
+      <div class="list">
+        {% for name, url, note in [('Ubuntu Server', 'https://ubuntu.com/download/server', 'Популярный Linux для серверов'), ('Debian', 'https://www.debian.org/distrib/', 'Надёжный и лёгкий Linux'), ('Windows Server', 'https://www.microsoft.com/evalcenter', 'Пробная версия от Microsoft')] %}
+          <a class="list-item" href="{{ url }}" target="_blank" rel="noopener">
+            <div class="grow"><div class="title">{{ name }}</div><div class="meta">{{ note }}</div></div>{{ icon('external-link', 'icon-sm') }}
+          </a>
+        {% endfor %}
+      </div>
+    </article>
+  </aside>
+</section>
+{% endblock %}

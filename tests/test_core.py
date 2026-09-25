@@ -65,3 +65,40 @@ def test_versions_manifest_matches_version_file():
     version = (root / "VERSION").read_text().strip()
     manifest = json.loads((root / "updates" / "versions.json").read_text())
     assert version in [item["version"] for item in manifest["versions"]]
+
+
+def test_presenters_parse_virsh_tables():
+    import presenters
+
+    disks = presenters.parse_domblklist(" Type   Device   Target   Source\n------------------------------------\n file   disk     vda      /var/lib/virtuality/images/web01.qcow2\n file   cdrom    sda      -\n")
+    assert [d["name"] for d in disks] == ["web01.qcow2", "Пусто"]
+    assert disks[1]["is_cdrom"]
+    nics = presenters.parse_domiflist(" Interface   Type      Source           Model    MAC\n---\n vnet0       network   virtuality-nat   virtio   52:54:00:aa:bb:cc\n")
+    assert nics[0]["mac"] == "52:54:00:aa:bb:cc"
+    info = presenters.parse_dominfo("State: shut off\nCPU(s): 4\nMax memory: 8388608 KiB\nUsed memory: 8388608 KiB\nAutostart: disable\n")
+    assert (info["vcpus"], info["memory_mb"], info["autostart"]) == (4, 8192, False)
+    assert presenters.vm_state("shut off")["label"] == "Выключена"
+    assert presenters.format_mb(1536) == "1.5 ГБ"
+    assert presenters.plural(22, "ядро", "ядра", "ядер") == "ядра"
+
+
+def test_update_not_offered_when_local_is_newer(tmp_path, monkeypatch, data_dirs):
+    import subprocess
+
+    def git(*args, cwd):
+        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+    remote, local = tmp_path / "remote", tmp_path / "local"
+    remote.mkdir()
+    git("init", "-q", "-b", "main", cwd=remote)
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base", cwd=remote)
+    git("clone", "-q", str(remote), str(local), cwd=tmp_path)
+    (local / "VERSION").write_text("0.10.0\n")
+    git("add", "VERSION", cwd=local)
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "newer local build", cwd=local)
+    monkeypatch.setattr(update_core, "SOURCE_DIR", local)
+    assert update_core.check_updates(fetch=True)["has_update"] is False
+
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "upstream", cwd=remote)
+    git("reset", "-q", "--hard", "origin/main", cwd=local)
+    assert update_core.check_updates(fetch=True)["has_update"] is True

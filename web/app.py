@@ -27,12 +27,14 @@ from itsdangerous import BadSignature, URLSafeSerializer, URLSafeTimedSerializer
 import auth
 import host_profile
 import network_core
+import presenters
 import update_core
 from network_core import NetworkError
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_NAME = "Virtuality"
 ENV_FILE = BASE_DIR / ".env"
+STORAGE_DIR = Path("/var/lib/virtuality")
 ISO_DIR = Path("/var/lib/virtuality/iso")
 IMAGES_DIR = Path("/var/lib/virtuality/images")
 DISK_IMAGES_DIR = Path("/var/lib/virtuality/disk-images")
@@ -48,6 +50,26 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 if NOVNC_DIR:
     app.mount("/novnc", StaticFiles(directory=str(NOVNC_DIR)), name="novnc")
 OP_LOCK = threading.Lock()
+
+
+def update_notice() -> dict[str, Any]:
+    try:
+        data = json.loads((update_core.STATE_DIR / "last_check.json").read_text())
+    except Exception:
+        return {"has_update": False}
+    return {"has_update": bool(data.get("has_update")), "latest_version": data.get("latest_version", "")}
+
+
+templates.env.globals.update(update_notice=update_notice, vm_presets=presenters.VM_PRESETS, port_presets=presenters.PORT_PRESETS)
+templates.env.filters.update(
+    vm_state=presenters.vm_state,
+    operation_state=presenters.operation_state,
+    service_state=presenters.service_state,
+    format_mb=presenters.format_mb,
+    level_tone=presenters.level_tone,
+    port_service=presenters.port_service,
+)
+templates.env.globals["plural"] = presenters.plural
 
 SECURITY_HEADERS = {
     "X-Frame-Options": "SAMEORIGIN",
@@ -107,6 +129,7 @@ def read_version() -> str:
 
 
 APP_VERSION = read_version()
+templates.env.globals["app_version"] = APP_VERSION
 
 
 def redirect_with_message(path: str, key: str, message: str) -> RedirectResponse:
@@ -290,13 +313,13 @@ def start_background_operation(operation: dict[str, Any], cmd: list[str]) -> Non
 
 
 LOG_SOURCES = {
-    "web": {"title": "Virtuality Web", "kind": "journal", "unit": "virtuality-web.service"},
-    "update": {"title": "Update Center", "kind": "file", "path": "/var/log/virtuality/update.log"},
-    "install": {"title": "Последняя установка", "kind": "glob", "pattern": "/var/log/virtuality/install_web_panel_*.log"},
-    "operations": {"title": "Операции", "kind": "operations"},
-    "auto-update": {"title": "Auto Update", "kind": "journal", "unit": "virtuality-auto-update.service"},
-    "libvirtd": {"title": "libvirtd", "kind": "journal", "unit": "libvirtd.service"},
-    "virtlogd": {"title": "virtlogd", "kind": "journal", "unit": "virtlogd.service"},
+    "web": {"title": "Панель", "kind": "journal", "unit": "virtuality-web.service"},
+    "update": {"title": "Обновления", "kind": "file", "path": "/var/log/virtuality/update.log"},
+    "install": {"title": "Установка", "kind": "glob", "pattern": "/var/log/virtuality/install_web_panel_*.log"},
+    "operations": {"title": "Задачи", "kind": "operations"},
+    "auto-update": {"title": "Автообновление", "kind": "journal", "unit": "virtuality-auto-update.service"},
+    "libvirtd": {"title": "Виртуализация", "kind": "journal", "unit": "libvirtd.service"},
+    "virtlogd": {"title": "Журналы машин", "kind": "journal", "unit": "virtlogd.service"},
 }
 
 
@@ -459,11 +482,15 @@ def parse_virsh_list() -> list[dict[str, str]]:
     for line in result["stdout"].splitlines()[2:]:
         parts = line.strip().split(None, 2)
         if len(parts) == 3:
-            autostart = vm_autostart_status(parts[1])
-            rows.append({"id": parts[0], "name": parts[1], "state": parts[2], "autostart_enabled": autostart["enabled"], "autostart_label": autostart["label"], "autostart_css": autostart["css"]})
+            vm_id, name, state = parts
         elif len(parts) == 2:
-            autostart = vm_autostart_status(parts[0])
-            rows.append({"id": "-", "name": parts[0], "state": parts[1], "autostart_enabled": autostart["enabled"], "autostart_label": autostart["label"], "autostart_css": autostart["css"]})
+            vm_id, name, state = "-", parts[0], parts[1]
+        else:
+            continue
+        info = presenters.parse_dominfo(run_cmd(["virsh", "dominfo", name], timeout=8).get("stdout", ""))
+        enabled = info["autostart"]
+        label = "enabled" if enabled else "disabled" if info["autostart_known"] else "unknown"
+        rows.append({"id": vm_id, "name": name, "state": state, "autostart_enabled": enabled, "autostart_label": label, "autostart_css": "ok" if enabled else "warn", "vcpus": info["vcpus"], "memory_mb": info["memory_mb"]})
     for row in rows:
         row["ip"] = resolve_ip(row.get("name", ""))
         row["manual_ip"] = manual_ips.get(row.get("name", ""), "")
@@ -1168,7 +1195,7 @@ def mount_vm_iso(name: str, iso_path: str) -> tuple[bool, str]:
 def vm_details(name: str) -> dict[str, Any]:
     dominfo = run_cmd(["virsh", "dominfo", name], timeout=10)["stdout"]
     autostart = vm_autostart_status(name)
-    return {
+    details = {
         "name": name,
         "dominfo": dominfo,
         "vnc": vm_vnc_display(name),
@@ -1180,6 +1207,10 @@ def vm_details(name: str) -> dict[str, Any]:
         "autostart_label": autostart["label"],
         "autostart_css": autostart["css"],
     }
+    details["info"] = presenters.parse_dominfo(dominfo)
+    details["disk_list"] = presenters.parse_domblklist(details["disks"])
+    details["interface_list"] = presenters.parse_domiflist(details["interfaces"])
+    return details
 
 
 def system_summary() -> dict[str, str]:
@@ -1241,7 +1272,7 @@ def virt_boot_arg(boot_order: str, is_arm: bool) -> str:
 def vm_form_context(request: Request, error: str | None = None, form: dict[str, Any] | None = None, status_code: int = 200):
     profile = host_profile.load_host_profile()
     default_mode = profile.get("recommended_network", "nat")
-    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "disk_images": list_disk_image_files(), "arch_options": vm_arch_options(), "boot_options": vm_boot_order_options(), "error": error, "profile": profile, "form": form or {"memory": 2048, "vcpus": 2, "disk_size": 20, "source_type": "iso", "guest_arch": "auto", "boot_order": "auto", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
+    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "disk_images": list_disk_image_files(), "arch_options": vm_arch_options(), "boot_options": vm_boot_order_options(), "error": error, "profile": profile, "form": form or {"memory": 4096, "vcpus": 2, "disk_size": 40, "source_type": "iso", "guest_arch": "auto", "boot_order": "auto", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
 
 
 # Virtuality noVNC console patch
@@ -1311,7 +1342,16 @@ def dashboard(request: Request):
     if auth_redirect:
         return auth_redirect
     services = {"libvirtd": service_state("libvirtd.service"), "virtlogd": service_state("virtlogd.service"), "cockpit": service_state("cockpit.socket"), "dashboard": service_state("virtuality-console-dashboard.service"), "web": service_state("virtuality-web.service")}
-    return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "user": AUTH_USER, "profile": host_profile.load_host_profile(), "operations": list_operations(5), "operation_css": operation_css})
+    service_rows = [{"key": key, "name": presenters.SERVICE_LABELS.get(key, key), "state": state, **presenters.service_state(state)} for key, state in services.items()]
+    return templates.TemplateResponse("dashboard.html", {"request": request, "app_name": APP_NAME, "system": system_summary(), "services": services, "service_rows": service_rows, "services_ok": all(row["tone"] == "success" for row in service_rows if row["key"] in ("libvirtd", "web")), "vms": parse_virsh_list(), "pools": parse_pool_list(), "network": network_summary(), "user": AUTH_USER, "profile": host_profile.load_host_profile(), "operations": list_operations(5), "operation_css": operation_css, "host": presenters.host_stats(STORAGE_DIR), "greeting": presenters.greeting()})
+
+
+@app.get("/help", response_class=HTMLResponse)
+def help_page(request: Request):
+    auth_redirect = require_auth(request)
+    if auth_redirect:
+        return auth_redirect
+    return templates.TemplateResponse("help.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "host_ip": system_summary()["ip"]})
 
 
 @app.get("/host", response_class=HTMLResponse)
@@ -1622,7 +1662,9 @@ def update_page(request: Request):
             "state": update_core.state(),
             "log_tail": update_core.update_log_tail(),
         }
-    return templates.TemplateResponse("update.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "info": info, "error": error})
+    current = str(info.get("current_version", ""))
+    current_release = next((item for item in update_core.load_manifest().get("versions", []) if str(item.get("version")) == current), None)
+    return templates.TemplateResponse("update.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "info": info, "error": error, "current_release": current_release})
 
 
 @app.get("/update/status")
@@ -1721,15 +1763,23 @@ def api_logs(request: Request, source: str = "web", lines: int = 220):
 
 
 @app.get("/vm/create", response_class=HTMLResponse)
-def vm_create_page(request: Request):
+def vm_create_page(request: Request, iso: str = "", image: str = ""):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-    return vm_form_context(request)
+    if not iso and not image:
+        return vm_form_context(request)
+    profile = host_profile.load_host_profile()
+    form = {"memory": 4096, "vcpus": 2, "disk_size": 40, "source_type": "disk_image" if image else "iso", "guest_arch": "auto", "boot_order": "auto", "network_mode": profile.get("recommended_network", "nat"), "bridge": DEFAULT_BRIDGE}
+    if iso:
+        form["iso_path"] = str(ISO_DIR / Path(iso).name)
+    if image:
+        form["disk_image_path"] = str(DISK_IMAGES_DIR / Path(image).name)
+    return vm_form_context(request, form=form)
 
 
 @app.post("/vm/create", response_class=HTMLResponse)
-def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(...), iso_path: str = Form(""), disk_image_path: str = Form(""), source_type: str = Form("iso"), guest_arch: str = Form("auto"), boot_order: str = Form("auto"), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE)):
+def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(20), iso_path: str = Form(""), disk_image_path: str = Form(""), source_type: str = Form("iso"), guest_arch: str = Form("auto"), boot_order: str = Form("auto"), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE)):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect

@@ -4,7 +4,7 @@ import pytest
 
 import app
 
-PAGES = ["/", "/host", "/iso", "/disk-images", "/network", "/operations", "/logs", "/update", "/vm/create", "/vm/web01", "/vm/web01/console"]
+PAGES = ["/", "/help", "/host", "/iso", "/disk-images", "/network", "/operations", "/logs", "/update", "/vm/create", "/vm/web01", "/vm/web01/console"]
 
 
 def test_healthz_is_public(client):
@@ -85,7 +85,38 @@ def test_vm_details_include_autostart(data_dirs):
 
 
 def test_vm_detail_shows_autostart_enabled(logged_in):
-    assert "autostart: enabled" in logged_in.get("/vm/web01").text
+    html = logged_in.get("/vm/web01").text
+    assert 'action="/vm/web01/autostart-disable"' in html
+    assert 'role="switch" aria-checked="true"' in html
+
+
+def test_dashboard_uses_plain_language(logged_in):
+    html = logged_in.get("/").text
+    assert "Работает" in html and "Выключена" in html
+    assert "2 ядра" in html and "2 ГБ" in html
+    assert "shut off" not in html
+
+
+def test_vm_create_preselects_image(logged_in, data_dirs):
+    (data_dirs["iso"] / "debian.iso").write_bytes(b"iso")
+    html = logged_in.get("/vm/create?iso=debian.iso").text
+    assert f'value="{data_dirs["iso"] / "debian.iso"}" data-label="debian.iso" selected' in html
+
+
+def test_vm_create_disk_image_without_disk_size(logged_in, data_dirs, monkeypatch):
+    image = data_dirs["disk_images"] / "cloud.qcow2"
+    image.write_bytes(b"qcow")
+    captured = {}
+    monkeypatch.setattr(app, "start_background_operation", lambda operation, cmd: captured.update(cmd=cmd))
+    monkeypatch.setattr(app.network_core, "create_nat_network", lambda: {})
+    form = {"name": "cloud-vm", "memory": 1024, "vcpus": 1, "disk_image_path": str(image), "source_type": "disk_image", "network_mode": "nat"}
+    response = logged_in.post("/vm/create", data=form, follow_redirects=False)
+    assert response.status_code == 303, response.text[:300]
+    assert "--import" in captured["cmd"][-1]
+
+
+def test_help_page(logged_in):
+    assert "Как создать машину" in logged_in.get("/help").text
 
 
 def test_redirect_message_is_url_encoded(logged_in, monkeypatch):

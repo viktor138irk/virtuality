@@ -11,7 +11,7 @@ Virtuality можно поставить двумя способами:
 
 ## Что внутри образа
 
-Образ собирается из официального **Ubuntu Server 24.04 LTS live-server ISO** (amd64 или arm64) и дополняется:
+Образ собирается из официального, ничем не изменённого **Ubuntu Server 26.04 LTS live-server ISO** (amd64 или arm64; поддержка до 2031 года) и дополняется:
 
 ```text
 /autoinstall.yaml                      # сценарий установщика Ubuntu (subiquity autoinstall)
@@ -63,23 +63,24 @@ make iso                 # amd64
 make iso ARCH=arm64      # ARM64-серверы с UEFI
 ```
 
-Скрипт сам скачает последний Ubuntu 24.04.x live-server ISO, проверит SHA256 и положит результат в `dist/`:
+Скрипт сам скачает последний Ubuntu 26.04.x live-server ISO, проверит SHA256 и положит результат в `dist/`:
 
 ```text
-dist/virtuality-0.10.0-ubuntu-24.04-amd64.iso
-dist/virtuality-0.10.0-ubuntu-24.04-amd64.iso.sha256
+dist/virtuality-0.10.0-ubuntu-26.04-amd64.iso
+dist/virtuality-0.10.0-ubuntu-26.04-amd64.iso.sha256
 ```
 
 Скачанный ISO Ubuntu кешируется в `.cache/iso`. Уже скачанный образ можно передать явно:
 
 ```bash
-./image/build-iso.sh --ubuntu-iso ~/Downloads/ubuntu-24.04.5-live-server-amd64.iso
+./image/build-iso.sh --ubuntu-iso ~/Downloads/ubuntu-26.04.1-live-server-amd64.iso
 ```
 
 ### Параметры
 
 ```text
 --arch amd64|arm64         архитектура
+--ubuntu 26.04|24.04       база образа (по умолчанию 26.04 LTS)
 --ref GIT_REF              какую версию Virtuality положить в образ (по умолчанию HEAD)
 --web-port PORT            порт web-панели (по умолчанию 8088)
 --no-auto-update           не включать ночное автообновление с GitHub
@@ -111,7 +112,7 @@ make iso ISO_ARGS="--unattended --username admin --password-hash '$(openssl pass
 Linux / macOS:
 
 ```bash
-sudo dd if=dist/virtuality-0.10.0-ubuntu-24.04-amd64.iso of=/dev/sdX bs=4M status=progress conv=fsync
+sudo dd if=dist/virtuality-0.10.0-ubuntu-26.04-amd64.iso of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
 Windows: Rufus (режим DD) или balenaEtcher.
@@ -119,7 +120,7 @@ Windows: Rufus (режим DD) или balenaEtcher.
 Проверка целостности:
 
 ```bash
-cd dist && sha256sum -c virtuality-0.10.0-ubuntu-24.04-amd64.iso.sha256
+cd dist && sha256sum -c virtuality-0.10.0-ubuntu-26.04-amd64.iso.sha256
 ```
 
 ---
@@ -137,6 +138,6 @@ Workflow `.github/workflows/image.yml` собирает ISO:
 
 ## Ограничения
 
-- Целевая ОС образа — Ubuntu Server 24.04 LTS.
+- База образа — Ubuntu Server 26.04 LTS (или 24.04 LTS через `--ubuntu 24.04`).
 - Для первой загрузки нужен интернет: пакеты KVM/libvirt/Cockpit ставятся из репозиториев Ubuntu. Python-зависимости панели уже лежат в образе.
 - ARM64-образ рассчитан на серверы с UEFI. Raspberry Pi и Orange Pi 5 грузятся иначе — для них используйте их штатный образ Ubuntu Server и `install.sh`.

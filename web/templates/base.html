@@ -1,0 +1,94 @@
+{% from "_ui.html" import icon, logo, alert %}
+{%- set path = request.url.path -%}
+{%- macro nav_link(href, icon_name, label, active, extra='') -%}
+<a href="{{ href }}" class="{{ 'active' if active else '' }}" {% if active %}aria-current="page"{% endif %}>{{ icon(icon_name) }}<span>{{ label }}</span>{{ extra|safe }}</a>
+{%- endmacro -%}
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}{{ page_title|default('Панель') }}{% endblock %} — Virtuality</title>
+  <script>
+    (function () {
+      var mode = 'system';
+      try { mode = localStorage.getItem('virtualityTheme') || 'system'; } catch (e) {}
+      var dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
+  <link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/app.css?v={{ app_version }}">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237b6bff'/%3E%3Cstop offset='1' stop-color='%232f73f0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Cpath d='M9 10l7 13 7-13' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {%- set notice = update_notice() -%}
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="Главное меню">
+      <a class="logo" href="/">
+        <span class="brand-mark">{{ logo() }}</span>
+        <span class="brand-name">Virtuality<small>Виртуализация · {{ app_version }}</small></span>
+      </a>
+
+      <nav class="nav">
+        {{ nav_link('/', 'layout-dashboard', 'Обзор', path == '/') }}
+        {{ nav_link('/vm/create', 'plus', 'Создать машину', path.startswith('/vm/create')) }}
+
+        <div class="nav-section">Ресурсы</div>
+        {{ nav_link('/iso', 'disc-3', 'Образы ОС', path.startswith('/iso') or path.startswith('/disk-images')) }}
+        {{ nav_link('/network', 'globe', 'Сеть и доступ', path.startswith('/network')) }}
+
+        <div class="nav-section">Система</div>
+        {{ nav_link('/operations', 'list-checks', 'Задачи', path.startswith('/operations')) }}
+        {{ nav_link('/logs', 'scroll-text', 'Журналы', path.startswith('/logs')) }}
+        {{ nav_link('/update', 'refresh-cw', 'Обновления', path.startswith('/update'), '<span class="nav-dot" title="Доступно обновление"></span>' if notice.has_update else '') }}
+        {{ nav_link('/host', 'server', 'Сервер', path.startswith('/host')) }}
+        {{ nav_link('/help', 'circle-help', 'Помощь', path.startswith('/help')) }}
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="server-chip">
+          <span class="avatar">{{ (user or '?')[:1]|upper }}</span>
+          <div><strong>{{ user }}</strong><span>Администратор</span></div>
+        </div>
+        <div class="sidebar-actions">
+          <button type="button" class="btn btn-sm btn-icon" data-theme-toggle title="Сменить тему">{{ icon('moon') }}</button>
+          <form method="post" action="/logout" data-no-busy><button type="submit" class="btn btn-sm" style="flex:1">{{ icon('log-out', 'icon-sm') }}Выйти</button></form>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="mobilebar">
+        <button type="button" class="btn btn-icon btn-ghost" data-nav-toggle aria-label="Открыть меню">{{ icon('menu') }}</button>
+        <a class="logo" href="/"><span class="brand-mark">{{ logo() }}</span><span class="brand-name">Virtuality</span></a>
+        <button type="button" class="btn btn-icon btn-ghost" data-theme-toggle aria-label="Сменить тему">{{ icon('moon') }}</button>
+      </header>
+
+      <main class="content">
+        {% block page_header %}{% endblock %}
+        <div class="alerts">{% block alerts %}{% if error %}{{ alert('danger', error) }}{% endif %}{% endblock %}</div>
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+
+  <dialog class="dialog" id="confirm-dialog">
+    <form method="dialog">
+      <div class="dialog-body">
+        <div class="dialog-icon">{{ icon('triangle-alert', 'icon-lg') }}</div>
+        <div><h3 data-confirm-title>Подтвердите действие</h3><p data-confirm-text></p></div>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn" value="cancel">Отмена</button>
+        <button class="btn btn-danger" type="button" data-confirm-ok>Продолжить</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toasts" aria-live="polite"></div>
+  <script src="/static/panel.js?v={{ app_version }}" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

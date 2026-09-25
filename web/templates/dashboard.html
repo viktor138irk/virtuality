@@ -1,190 +1,163 @@
-<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ app_name }} Panel</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <div class="v-layout">
-    {% include "_sidebar.html" %}
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, vm_badge, op_badge, meter, alert %}
+{% set page_title = 'Обзор' %}
+{% set running = vms|selectattr('state', 'in', ['running', 'idle', 'blocked'])|list|length %}
 
-    <main class="v-main">
-      <header class="v-topbar">
-        <div>
-          <div class="v-title">Обзор</div>
-          <div class="v-subtitle">{{ system.hostname }} · {{ system.ip }} · {{ system.time }}</div>
-        </div>
-        <div class="top-meta">
-          <span>user: {{ user }}</span>
-          <form method="post" action="/logout" class="logout-form"><button class="ghost">Выйти</button></form>
-        </div>
-      </header>
-
-      {% if update_notice and update_notice.has_update %}
-        <section class="card update-banner">
-          <div>
-            <div class="label">Доступно обновление Virtuality</div>
-            <div class="value small">{{ update_notice.current_version }} → {{ update_notice.latest_version }}</div>
-            <div class="muted small-note">Пропущено версий: {{ update_notice.missing_count }} · новых коммитов: {{ update_notice.commit_count }}</div>
-          </div>
-          <div class="actions">
-            <a class="link-pill accent" href="/update">Посмотреть изменения</a>
-          </div>
-        </section>
-      {% endif %}
-
-      <section class="grid stats">
-        <article class="card stat">
-          <div class="label">Uptime</div>
-          <div class="value">{{ system.uptime }}</div>
-        </article>
-        <article class="card stat">
-          <div class="label">Load</div>
-          <div class="value">{{ system.load }}</div>
-        </article>
-        <article class="card stat">
-          <div class="label">Kernel</div>
-          <div class="value small">{{ system.kernel }}</div>
-        </article>
-        <article class="card stat">
-          <div class="label">VM</div>
-          <div class="value">{{ vms|length }}</div>
-        </article>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2>Виртуальные машины</h2>
-          <div class="actions">
-            <a class="link-pill" href="/operations">Операции</a>
-            <a class="link-pill" href="/logs">Журналы</a>
-          </div>
-        </div>
-        <table class="vm-table">
-          <thead>
-            <tr><th>ID</th><th>Name</th><th>IP</th><th>State</th><th>Autostart</th><th>Actions</th></tr>
-          </thead>
-          <tbody>
-          {% for vm in vms %}
-            {% set is_running = 'running' in vm.state %}
-            <tr class="vm-row {{ 'is-running' if is_running else 'is-stopped' }}">
-              <td>{{ vm.id }}</td>
-              <td class="strong"><a class="table-link" href="/vm/{{ vm.name }}">{{ vm.name }}</a></td>
-              <td class="strong">{{ vm.ip|default('—') }}</td>
-              <td><span class="status {{ 'ok' if is_running else 'err' if 'shut' in vm.state else 'warn' }}">{{ vm.state }}</span></td>
-              <td class="autostart-cell">
-                {% if vm.autostart_enabled %}
-                  <form method="post" action="/vm/{{ vm.name }}/autostart-disable" class="inline-form">
-                    <button class="status status-button ok" title="Отключить автозапуск">{{ vm.autostart_label|default('enabled') }}</button>
-                  </form>
-                {% else %}
-                  <form method="post" action="/vm/{{ vm.name }}/autostart" class="inline-form">
-                    <button class="status status-button err" title="Включить автозапуск">{{ vm.autostart_label|default('disabled') }}</button>
-                  </form>
-                {% endif %}
-              </td>
-              <td class="vm-actions-cell">
-                <div class="vm-actions compact-actions">
-                  <a class="icon-action" href="/vm/{{ vm.name }}" title="Подробнее"><span>ℹ</span><em>Детали</em></a>
-                  <a class="icon-action accent" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener" title="Консоль"><span>▣</span><em>Консоль</em></a>
-                  {% if is_running %}
-                    <form method="post" action="/vm/{{ vm.name }}/reboot"><button class="icon-action" title="Перезагрузить"><span>↻</span><em>Reboot</em></button></form>
-                    <form method="post" action="/vm/{{ vm.name }}/shutdown"><button class="icon-action" title="Мягко выключить"><span>⏻</span><em>Shutdown</em></button></form>
-                    <form method="post" action="/vm/{{ vm.name }}/destroy"><button class="icon-action danger" title="Принудительно выключить"><span>⚡</span><em>Power</em></button></form>
-                  {% else %}
-                    <form method="post" action="/vm/{{ vm.name }}/start"><button class="icon-action success" title="Запустить"><span>▶</span><em>Start</em></button></form>
-                    <form method="post" action="/vm/{{ vm.name }}/delete" onsubmit="return confirm('Удалить VM {{ vm.name }} вместе с дисками?');"><button class="icon-action danger" title="Удалить VM"><span>🗑</span><em>Delete</em></button></form>
-                  {% endif %}
-                </div>
-              </td>
-            </tr>
-          {% else %}
-            <tr><td colspan="6" class="muted">Виртуальных машин пока нет</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </section>
-
-      <section class="grid three dashboard-service-grid">
-        <article class="card">
-          <div class="card-head">
-            <h2>Сервисы</h2>
-            <span class="pill">systemd</span>
-          </div>
-          <div class="services">
-            {% for name, state in services.items() %}
-            <div class="service-row">
-              <span>{{ name }}</span>
-              <span class="status {{ 'ok' if state == 'active' else 'warn' }}">{{ state }}</span>
-            </div>
-            {% endfor %}
-          </div>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>Storage pools</h2>
-            <span class="pill">libvirt</span>
-          </div>
-          <table>
-            <thead>
-              <tr><th>Name</th><th>State</th><th>Autostart</th></tr>
-            </thead>
-            <tbody>
-            {% for pool in pools %}
-              <tr>
-                <td>{{ pool.name }}</td>
-                <td><span class="status {{ 'ok' if pool.state == 'active' else 'warn' }}">{{ pool.state }}</span></td>
-                <td>{{ pool.autostart }}</td>
-              </tr>
-            {% else %}
-              <tr><td colspan="3" class="muted">Storage pools не найдены</td></tr>
-            {% endfor %}
-            </tbody>
-          </table>
-        </article>
-
-        <article class="card">
-          <div class="card-head">
-            <h2>Последние операции</h2>
-            <a class="link-pill" href="/operations">Все операции</a>
-          </div>
-          <div class="services">
-            {% for operation in operations %}
-              <a class="service-row service-link" href="/operations/{{ operation.id }}">
-                <span>
-                  <strong>{{ operation.title }}</strong>
-                  <small>{{ operation.created_at }} · {{ operation.message }}</small>
-                </span>
-                <span class="status {{ operation_css(operation.status) }}">{{ operation.status }}</span>
-              </a>
-            {% else %}
-              <div class="muted">Операций пока нет.</div>
-            {% endfor %}
-          </div>
-        </article>
-      </section>
-
-      <section class="grid two">
-        <article class="card">
-          <div class="card-head">
-            <h2>Интерфейсы</h2>
-            <span class="pill">ip -br a</span>
-          </div>
-          <pre>{{ network.interfaces }}</pre>
-        </article>
-        <article class="card">
-          <div class="card-head">
-            <h2>Маршруты</h2>
-            <span class="pill">ip route</span>
-          </div>
-          <pre>{{ network.routes }}</pre>
-        </article>
-      </section>
-    </main>
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <div class="eyebrow">{{ icon('server', 'icon-sm') }} {{ system.hostname }} · {{ system.ip }}</div>
+    <h1>{{ greeting }}, {{ user }}</h1>
+    <p class="lead">
+      {% if vms %}Работает <strong data-live-count="running">{{ running }}</strong> из {{ vms|length }} {{ plural(vms|length, 'машины', 'машин', 'машин') }}.{% else %}Сервер готов к работе — осталось создать первую виртуальную машину.{% endif %}
+    </p>
   </div>
-  <script src="/static/panel.js" defer></script>
-</body>
-</html>
+  <div class="page-actions">
+    <a class="btn btn-primary" href="/vm/create">{{ icon('plus') }}Создать машину</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block alerts %}
+  {% set notice = update_notice() %}
+  {% if notice.has_update %}
+    <div class="alert brand">{{ icon('sparkles') }}<div><strong>Доступна новая версия {{ notice.latest_version }}</strong>Обновление займёт пару минут, машины продолжат работать.</div><a class="btn btn-sm btn-primary alert-action" href="/update">Посмотреть</a></div>
+  {% endif %}
+  {% if profile.virtualization_warning %}
+    {{ alert('warning', 'Машины будут работать медленно. Включите аппаратную виртуализацию (Intel VT-x / AMD-V) в настройках BIOS сервера.', 'Аппаратное ускорение недоступно') }}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="grid grid-4">
+  <article class="card stat">
+    <div class="stat-head">Машины<span class="stat-icon">{{ icon('monitor', 'icon-sm') }}</span></div>
+    <div class="stat-value"><span data-live-count="running">{{ running }}</span><small>/ {{ vms|length }} работают</small></div>
+    {{ meter(((running / vms|length * 100) if vms else 0)|round|int, 'brand') }}
+  </article>
+  <article class="card stat">
+    <div class="stat-head">Процессор<span class="stat-icon">{{ icon('cpu', 'icon-sm') }}</span></div>
+    <div class="stat-value">{{ host.cpu_pct }}<small>%</small></div>
+    {{ meter(host.cpu_pct) }}
+    <div class="stat-foot">{{ host.cpu_count }} {{ plural(host.cpu_count, 'ядро', 'ядра', 'ядер') }}</div>
+  </article>
+  <article class="card stat">
+    <div class="stat-head">Память<span class="stat-icon">{{ icon('memory-stick', 'icon-sm') }}</span></div>
+    <div class="stat-value">{{ host.mem_used }}<small>из {{ host.mem_total }}</small></div>
+    {{ meter(host.mem_pct) }}
+    <div class="stat-foot">Занято {{ host.mem_pct }}%</div>
+  </article>
+  <article class="card stat">
+    <div class="stat-head">Хранилище<span class="stat-icon">{{ icon('hard-drive', 'icon-sm') }}</span></div>
+    <div class="stat-value">{{ host.disk_free }}<small>свободно</small></div>
+    {{ meter(host.disk_pct) }}
+    <div class="stat-foot">Всего {{ host.disk_total }}</div>
+  </article>
+</section>
+
+{% if vms %}
+<section class="card mt-3">
+  <div class="card-header">
+    <div><h2>Виртуальные машины</h2><p>Нажмите на машину, чтобы открыть её настройки</p></div>
+    <a class="btn btn-sm" href="/vm/create">{{ icon('plus', 'icon-sm') }}Новая</a>
+  </div>
+  <div class="vm-list">
+    {% for vm in vms %}
+      {% set s = vm.state|vm_state %}
+      <div class="vm-row" data-live-vm="{{ vm.name }}" data-running="{{ '1' if s.running else '0' }}" data-reload-on-change>
+        <a class="vm-ident" href="/vm/{{ vm.name }}">
+          <span class="vm-avatar {{ 'on' if s.running else '' }}">{{ icon('monitor') }}<span class="status-dot {{ s.tone }}" data-live="dot"></span></span>
+          <span style="min-width:0">
+            <span class="vm-name truncate" style="display:block">{{ vm.name }}</span>
+            <span class="vm-sub"><span data-live="ip">{{ vm.ip if vm.ip and vm.ip != '—' else ('IP появится после запуска' if not s.running else 'Получает адрес…') }}</span></span>
+          </span>
+        </a>
+        <div class="vm-col">
+          <div class="vm-cell-label">Ресурсы</div>
+          <div class="vm-cell-value">{{ vm.vcpus or '—' }} {{ plural(vm.vcpus or 0, 'ядро', 'ядра', 'ядер') }} · {{ vm.memory_mb|format_mb }}</div>
+        </div>
+        <div class="vm-col">{{ vm_badge(vm.state) }}</div>
+        <div class="vm-actions">
+          {% if s.running %}
+            <a class="btn btn-sm" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">{{ icon('monitor', 'icon-sm') }}<span class="btn-label">Экран</span></a>
+          {% else %}
+            <form method="post" action="/vm/{{ vm.name }}/start" class="inline-form" data-toast="Машина {{ vm.name }} запускается"><button class="btn btn-sm">{{ icon('play', 'icon-sm') }}<span class="btn-label">Запустить</span></button></form>
+          {% endif %}
+          <details class="menu">
+            <summary class="btn btn-sm btn-icon btn-ghost" aria-label="Действия">{{ icon('ellipsis') }}</summary>
+            <div class="menu-list">
+              <a class="menu-item" href="/vm/{{ vm.name }}">{{ icon('settings') }}Открыть настройки</a>
+              {% if s.running %}
+                <a class="menu-item" href="/vm/{{ vm.name }}/console" target="_blank" rel="noopener">{{ icon('monitor') }}Открыть экран</a>
+                <form method="post" action="/vm/{{ vm.name }}/reboot" data-toast="Машина {{ vm.name }} перезагружается"><button class="menu-item">{{ icon('rotate-cw') }}Перезагрузить</button></form>
+                <form method="post" action="/vm/{{ vm.name }}/shutdown" data-toast="Машина {{ vm.name }} выключается"><button class="menu-item">{{ icon('power') }}Выключить</button></form>
+                <div class="menu-sep"></div>
+                <form method="post" action="/vm/{{ vm.name }}/destroy" data-confirm="Машина будет выключена сразу, как при отключении питания. Несохранённые данные внутри неё пропадут." data-confirm-title="Выключить {{ vm.name }} принудительно?" data-confirm-button="Выключить" data-toast="Машина {{ vm.name }} выключена" data-toast-tone="warning"><button class="menu-item danger">{{ icon('zap') }}Выключить принудительно</button></form>
+              {% else %}
+                <form method="post" action="/vm/{{ vm.name }}/start" data-toast="Машина {{ vm.name }} запускается"><button class="menu-item">{{ icon('play') }}Запустить</button></form>
+                <div class="menu-sep"></div>
+                <form method="post" action="/vm/{{ vm.name }}/delete" data-confirm="Машина и все её диски будут удалены без возможности восстановления." data-confirm-title="Удалить {{ vm.name }}?" data-confirm-button="Удалить навсегда" data-toast="Машина {{ vm.name }} удалена" data-toast-tone="warning"><button class="menu-item danger">{{ icon('trash-2') }}Удалить машину</button></form>
+              {% endif %}
+            </div>
+          </details>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% else %}
+<section class="card hero-card mt-3">
+  <div class="row-between" style="align-items:flex-start">
+    <div>
+      <span class="badge brand" style="background:rgba(255,255,255,.12);color:#fff">{{ icon('sparkles', 'icon-sm') }}Начало работы</span>
+      <h2 class="mt-2">Создайте первую виртуальную машину</h2>
+      <p>Три шага: загрузите установочный образ системы, создайте машину и установите систему прямо в браузере.</p>
+    </div>
+  </div>
+  <div class="grid grid-3 mt-3">
+    <a class="card card-link" href="/iso" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#fff">
+      <div class="card-body"><span class="list-icon" style="background:rgba(255,255,255,.12);color:#fff">{{ icon('disc-3') }}</span><h3 class="mt-2" style="color:#fff">1. Загрузите образ</h3><p class="small" style="color:rgba(255,255,255,.7)">Ubuntu, Debian, Windows — файл .iso</p></div>
+    </a>
+    <a class="card card-link" href="/vm/create" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#fff">
+      <div class="card-body"><span class="list-icon" style="background:rgba(255,255,255,.12);color:#fff">{{ icon('plus') }}</span><h3 class="mt-2" style="color:#fff">2. Создайте машину</h3><p class="small" style="color:rgba(255,255,255,.7)">Выберите готовую конфигурацию</p></div>
+    </a>
+    <div class="card" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#fff">
+      <div class="card-body"><span class="list-icon" style="background:rgba(255,255,255,.12);color:#fff">{{ icon('monitor') }}</span><h3 class="mt-2" style="color:#fff">3. Откройте экран</h3><p class="small" style="color:rgba(255,255,255,.7)">Установите систему прямо в браузере</p></div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<section class="grid grid-2 mt-3">
+  <article class="card">
+    <div class="card-header"><div><h2>Последние задачи</h2><p>Создание машин, загрузка и конвертация образов</p></div><a class="btn btn-sm btn-ghost" href="/operations">Все{{ icon('chevron-right', 'icon-sm') }}</a></div>
+    <div class="list">
+      {% for op in operations %}
+        {% set os = op.status|operation_state %}
+        <a class="list-item" href="/operations/{{ op.id }}">
+          <span class="list-icon {{ os.tone }}">{{ icon('circle-check' if op.status == 'success' else 'circle-x' if op.status == 'error' else 'clock') }}</span>
+          <div class="grow"><div class="title truncate">{{ op.title }}</div><div class="meta truncate">{{ op.created_at }} · {{ op.message }}</div></div>
+          {{ op_badge(op.status) }}
+        </a>
+      {% else %}
+        <div class="empty" style="padding:32px 20px"><p class="subtle">Задач пока не было. Здесь появится прогресс создания машин и загрузки образов.</p></div>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-header">
+      <div><h2>Состояние сервера</h2><p>Службы, от которых зависит работа машин</p></div>
+      {% if services_ok %}{{ badge('Всё в порядке', 'success') }}{% else %}{{ badge('Требует внимания', 'danger') }}{% endif %}
+    </div>
+    <div class="checklist">
+      {% for svc in service_rows %}
+        <div class="check-item {{ svc.tone }}">
+          {{ icon('circle-check' if svc.tone == 'success' else 'triangle-alert' if svc.tone == 'warning' else 'circle-dot' if svc.tone == 'neutral' else 'circle-x') }}
+          <div class="row-between" style="flex:1"><strong>{{ svc.name }}</strong><span>{{ svc.label }}</span></div>
+        </div>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+{% endblock %}
