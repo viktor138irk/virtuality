@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -26,6 +27,8 @@ from itsdangerous import BadSignature, URLSafeSerializer, URLSafeTimedSerializer
 
 import auth
 import host_profile
+import catalog
+import cloudinit
 import network_core
 import presenters
 import update_core
@@ -293,12 +296,16 @@ def run_operation_worker(operation_id: str, cmd: list[str]) -> None:
                     update_operation(fresh, progress=new_progress, message=line.strip()[:240] or fresh.get("message"))
         exit_code = process.wait()
         fresh = read_operation(operation_id) or operation
+        if fresh.get("seed_file"):
+            cloudinit.remove_seed(fresh["seed_file"])
         if exit_code == 0:
             append_operation_log(operation_id, "virt-install завершился успешно.")
             run_cmd(["virsh", "pool-refresh", "virtuality-images"], timeout=20)
-            update_operation(fresh, status="success", progress=100, exit_code=exit_code, message="VM создана успешно", finished_at=utc_now())
+            update_operation(fresh, status="success", progress=100, exit_code=exit_code, message=fresh.get("success_message") or "Машина создана", finished_at=utc_now())
         else:
             append_operation_log(operation_id, f"virt-install завершился с ошибкой. Exit code: {exit_code}")
+            if fresh.get("vm_name") and fresh.get("network_mode") == "nat":
+                network_core.release_nat_address(fresh["vm_name"])
             update_operation(fresh, status="error", progress=100, exit_code=exit_code, message=f"virt-install завершился с ошибкой: {exit_code}", finished_at=utc_now())
     except Exception as exc:
         fresh = read_operation(operation_id) or operation
@@ -577,7 +584,8 @@ def list_disk_image_files() -> list[dict[str, str]]:
         except OSError:
             size_gb = 0
             updated = "unknown"
-        files.append({"name": item.name, "path": str(item), "format": item.suffix.lower().lstrip('.'), "size": f"{size_gb:.2f} GB", "updated": updated})
+        entry = catalog.entry_for_filename(item.name)
+        files.append({"name": item.name, "path": str(item), "format": item.suffix.lower().lstrip('.'), "size": f"{size_gb:.2f} GB", "updated": updated, "login": cloudinit.default_user(item.name), "title": entry["title"] if entry else "", "catalog_id": entry["id"] if entry else ""})
     return files
 
 
@@ -612,6 +620,14 @@ def disk_image_format(path: Path) -> str:
         except (json.JSONDecodeError, AttributeError):
             pass
     return 'qcow2' if path.suffix.lower() == '.qcow2' else 'raw'
+
+
+def disk_image_virtual_size(path: Path) -> int:
+    info = run_cmd(["qemu-img", "info", "--output=json", str(path)], timeout=30)
+    try:
+        return int(json.loads(info.get("stdout") or "{}").get("virtual-size", 0)) if info.get("ok") else 0
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return 0
 
 
 def bridge_exists(name: str) -> bool:
@@ -1239,7 +1255,7 @@ def virt_boot_arg(boot_order: str, is_arm: bool) -> str:
 def vm_form_context(request: Request, error: str | None = None, form: dict[str, Any] | None = None, status_code: int = 200):
     profile = host_profile.load_host_profile()
     default_mode = profile.get("recommended_network", "nat")
-    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "disk_images": list_disk_image_files(), "boot_options": vm_boot_order_options(), "error": error, "profile": profile, "form": form or {"memory": 4096, "vcpus": 2, "disk_size": 40, "source_type": "iso", "boot_order": "auto", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
+    return templates.TemplateResponse("vm_create.html", {"request": request, "app_name": APP_NAME, "user": AUTH_USER, "isos": list_iso_files(), "disk_images": list_disk_image_files(), "os_types": catalog.OS_TYPES, "boot_options": vm_boot_order_options(), "error": error, "profile": profile, "form": form or {"memory": 4096, "vcpus": 2, "disk_size": 40, "source_type": "iso", "boot_order": "auto", "network_mode": default_mode, "bridge": DEFAULT_BRIDGE}}, status_code=status_code)
 
 
 # Virtuality noVNC console patch
@@ -1748,12 +1764,15 @@ def vm_create_page(request: Request, iso: str = "", image: str = ""):
 
 
 @app.post("/vm/create", response_class=HTMLResponse)
-def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(20), iso_path: str = Form(""), disk_image_path: str = Form(""), source_type: str = Form("iso"), boot_order: str = Form("auto"), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE)):
+def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form(...), vcpus: int = Form(...), disk_size: int = Form(20), iso_path: str = Form(""), disk_image_path: str = Form(""), source_type: str = Form("iso"), boot_order: str = Form("auto"), network_mode: str = Form("nat"), bridge: str = Form(DEFAULT_BRIDGE), os_type: str = Form("linux"), cloud_init: str = Form("0"), ci_user: str = Form(""), ci_password: str = Form(""), ci_ssh_key: str = Form("")):
     auth_redirect = require_auth(request)
     if auth_redirect:
         return auth_redirect
-    form = {"name": name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "iso_path": iso_path, "disk_image_path": disk_image_path, "source_type": source_type, "boot_order": boot_order, "network_mode": network_mode, "bridge": bridge}
+    ci_user = ci_user.strip()
+    form = {"name": name, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "iso_path": iso_path, "disk_image_path": disk_image_path, "source_type": source_type, "boot_order": boot_order, "network_mode": network_mode, "bridge": bridge, "os_type": os_type, "cloud_init": cloud_init, "ci_user": ci_user, "ci_ssh_key": ci_ssh_key}
     error = None
+    use_cloud_init = source_type == "disk_image" and cloud_init == "1"
+    ssh_keys = cloudinit.parse_ssh_keys(ci_ssh_key) if use_cloud_init else []
     if not valid_vm_name(name):
         error = "Имя VM может содержать латиницу, цифры, точку, дефис и подчёркивание. Длина 2–63 символа."
     elif vm_exists(name):
@@ -1772,6 +1791,14 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
         error = "Некорректный источник VM."
     elif boot_order not in ("auto", "disk", "cdrom_disk", "disk_cdrom"):
         error = "Некорректный порядок загрузки VM."
+    elif os_type not in {item["id"] for item in catalog.OS_TYPES}:
+        error = "Некорректный тип системы."
+    elif use_cloud_init and not cloudinit.valid_user(ci_user):
+        error = "Имя пользователя: строчные латинские буквы, цифры, дефис и подчёркивание, до 32 символов."
+    elif use_cloud_init and ssh_keys is None:
+        error = "SSH-ключ не похож на публичный ключ. Нужна строка вида «ssh-ed25519 AAAA… комментарий» — из файла ~/.ssh/id_ed25519.pub."
+    elif use_cloud_init and not ssh_keys and len(ci_password) < 6:
+        error = "Задайте пароль не короче 6 символов или вставьте публичный SSH-ключ — иначе в машину нельзя будет войти."
     elif network_mode == "bridge" and not bridge_exists(bridge):
         error = f"Bridge {bridge} не найден на сервере. Для VPS выбери режим NAT Router — virtuality-nat, либо сначала создай bridge {bridge}."
     else:
@@ -1802,24 +1829,60 @@ def vm_create_submit(request: Request, name: str = Form(...), memory: int = Form
     selected_boot_order = normalize_boot_order(boot_order, source_type)
     is_arm = selected_arch == "aarch64"
     virt_type = "kvm" if profile.get("kvm_device") else "qemu"
-    network_arg = f"network={network_core.NETWORK_NAME},model=virtio" if network_mode == "nat" else f"bridge={bridge},model=virtio"
+    os_info = catalog.os_type(os_type) if source_type == "iso" else None
+    windows = os_type.startswith("windows") if source_type == "iso" else False
+    # Windows installers have no virtio drivers: SATA disk and an Intel network card work out of the box.
+    disk_bus = "sata" if windows or os_type == "other" and source_type == "iso" else "virtio"
+    nic_model = "e1000e" if disk_bus == "sata" else "virtio"
+    nat_ip = None
+    if network_mode == "nat":
+        mac = network_core.stable_mac(name)
+        nat_ip = network_core.reserve_nat_address(name, mac)
+        network_arg = f"network={network_core.NETWORK_NAME},model={nic_model},mac={mac}"
+    else:
+        network_arg = f"bridge={bridge},model={nic_model}"
     cmd = ["virt-install", "--name", name, "--memory", str(memory), "--vcpus", str(vcpus), "--virt-type", virt_type]
     if is_arm:
         cmd += ["--arch", "aarch64", "--machine", "virt", "--cpu", "host" if virt_type == "kvm" else "cortex-a57"]
+    uefi = is_arm or os_type == "windows11" and source_type == "iso"
+    catalog_entry = catalog.entry_for_filename(Path(disk_image_path).name) if source_type == "disk_image" else None
+    if catalog_entry:
+        uefi = uefi or bool(catalog_entry["arches"].get(selected_arch, {}).get("uefi"))
+    boot_arg = virt_boot_arg(selected_boot_order, uefi)
+    cmd += ["--boot", boot_arg]
+    if os_type == "windows11" and source_type == "iso":
+        # Windows 11 refuses to install without a TPM 2.0.
+        cmd += ["--tpm", "model=tpm-crb,backend.type=emulator,backend.version=2.0"]
+    graphics = ["--graphics", "vnc,listen=127.0.0.1", "--noautoconsole"]
 
-    cmd += ["--boot", virt_boot_arg(selected_boot_order, is_arm)]
-
+    seed_file = ""
+    login_hint = ""
     if source_type == "disk_image":
         source_disk = Path(disk_image_path).resolve()
         source_format = disk_image_format(source_disk)
-        convert_cmd = f"qemu-img convert -p -f {source_format} -O qcow2 {source_disk} {disk_path}"
-        virt_cmd = " ".join(cmd + ["--import", "--disk", f"path={disk_path},format=qcow2,bus=virtio", "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=127.0.0.1", "--noautoconsole"])
-        cmd = ["bash", "-lc", f"set -euo pipefail; {convert_cmd}; {virt_cmd}"]
+        osinfo = catalog_entry["osinfo"] if catalog_entry else "detect=on,require=off"
+        steps = [f"qemu-img convert -p -f {source_format} -O qcow2 {shlex.quote(str(source_disk))} {shlex.quote(str(disk_path))}"]
+        if disk_size * 1024 ** 3 > disk_image_virtual_size(source_disk):
+            # cloud-init grows the root file system to the new size on first boot.
+            steps.append(f"qemu-img resize {shlex.quote(str(disk_path))} {disk_size}G")
+        virt = cmd + ["--import", "--disk", f"path={disk_path},format=qcow2,bus={disk_bus}", "--osinfo", osinfo, "--network", network_arg, *graphics]
+        if use_cloud_init:
+            try:
+                password_hash = cloudinit.hash_password(ci_password) if ci_password else ""
+            except RuntimeError as exc:
+                return vm_form_context(request, error=f"Не удалось подготовить пароль: {exc}", form=form, status_code=500)
+            user_file, meta_file = cloudinit.write_seed(name, cloudinit.build_user_data(name, ci_user, password_hash, ssh_keys or []), cloudinit.build_meta_data(name))
+            seed_file = str(user_file)
+            virt += ["--cloud-init", f"user-data={user_file},meta-data={meta_file}"]
+            login_hint = f"Вход: {ci_user}" + (" по паролю" if password_hash else "") + (" и по SSH-ключу" if ssh_keys else "")
+        steps.append(" ".join(shlex.quote(part) for part in virt))
+        cmd = ["bash", "-lc", "set -euo pipefail; " + "; ".join(steps)]
     else:
-        cmd += ["--disk", f"path={disk_path},size={disk_size},format=qcow2,bus=virtio", "--cdrom", iso_path, "--os-variant", "generic", "--network", network_arg, "--graphics", "vnc,listen=127.0.0.1", "--noautoconsole"]
+        cmd += ["--disk", f"path={disk_path},size={disk_size},format=qcow2,bus={disk_bus}", "--cdrom", iso_path, "--osinfo", os_info["osinfo"], "--network", network_arg, *graphics]
 
+    success_message = "Машина создана" + (f". {login_hint}" if login_hint else "") + (f". Адрес в сети машин: {nat_ip}" if nat_ip else "")
     operation_id = str(uuid.uuid4())
-    operation = {"id": operation_id, "type": "vm_create", "title": f"Создание VM {name}", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": name, "disk_path": str(disk_path), "iso_path": iso_path, "host_profile": profile.get("profile"), "guest_arch": selected_arch, "boot_order": selected_boot_order, "network_mode": network_mode, "network": network_arg, "bridge": bridge, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "cmd": " ".join(cmd)}
+    operation = {"id": operation_id, "type": "vm_create", "title": f"Создание VM {name}", "status": "queued", "progress": 0, "message": "Операция поставлена в очередь", "created_at": utc_now(), "updated_at": utc_now(), "created_by": AUTH_USER, "vm_name": name, "disk_path": str(disk_path), "iso_path": iso_path, "host_profile": profile.get("profile"), "guest_arch": selected_arch, "boot_order": selected_boot_order, "network_mode": network_mode, "network": network_arg, "bridge": bridge, "memory": memory, "vcpus": vcpus, "disk_size": disk_size, "os_type": os_type, "cloud_init_user": ci_user if use_cloud_init else "", "nat_ip": nat_ip or "", "seed_file": seed_file, "success_message": success_message, "cmd": " ".join(cmd)}
     start_background_operation(operation, cmd)
     return RedirectResponse(url=f"/operations/{operation_id}", status_code=303)
 
@@ -1959,6 +2022,7 @@ def vm_action(request: Request, name: str, action: str):
         result = run_cmd(["virsh", "undefine", name, "--remove-all-storage", "--nvram", "--managed-save", "--snapshots-metadata", "--checkpoints-metadata"], timeout=120)
         if not result["ok"]:
             return redirect_with_message(f"/vm/{name}", "error", f"Не удалось удалить машину: {virsh_error(result)}")
+        network_core.release_nat_address(name)
         return redirect_with_message("/", "message", f"Машина {name} удалена")
     if action not in allowed:
         return JSONResponse({"ok": False, "error": "Unsupported action"}, status_code=400)

@@ -80,3 +80,12 @@ def os_type(type_id: str) -> dict[str, Any]:
 def image_filename(entry: dict[str, Any], arch: str) -> str:
     url = entry["arches"][arch]["url"]
     return url.rsplit("/", 1)[-1]
+
+
+def entry_for_filename(name: str) -> dict[str, Any] | None:
+    """Catalog entry whose download has this file name (any architecture)."""
+    for entry in CLOUD_IMAGES:
+        for arch in entry["arches"].values():
+            if arch["url"].rsplit("/", 1)[-1] == name:
+                return entry
+    return None

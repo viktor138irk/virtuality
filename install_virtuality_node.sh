@@ -178,7 +178,7 @@ case "$(uname -m)" in
 esac
 install_available "Пакеты виртуализации установлены" \
   "${QEMU_SYSTEM_PACKAGES[@]}" qemu-utils libvirt-daemon-system libvirt-clients virtinst \
-  bridge-utils dnsmasq-base swtpm cloud-image-utils
+  bridge-utils dnsmasq-base swtpm cloud-image-utils xorriso
 
 step "Устанавливаем зависимости панели управления"
 install_available "Пакеты панели установлены" \

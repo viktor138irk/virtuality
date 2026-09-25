@@ -445,8 +445,17 @@
       });
       $$('[data-visible-when]', form).forEach((el) => {
         const [key, expected] = el.dataset.visibleWhen.split('=');
-        el.hidden = value(key) !== expected;
+        const target = field(key);
+        const current = target instanceof HTMLInputElement && target.type === 'checkbox' ? (target.checked ? target.value : '0') : value(key);
+        el.hidden = current !== expected;
       });
+      // Default login of the chosen cloud image (ubuntu, debian, …) until the user types a name.
+      const login = field('ci_user');
+      if (login && login.dataset.autoLogin === '1') {
+        const image = field('disk_image_path');
+        const option = image && image.selectedIndex >= 0 ? image.options[image.selectedIndex] : null;
+        login.value = option?.dataset.login || 'admin';
+      }
       const preset = value('preset');
       const custom = preset === 'custom';
       const presetInput = $(`input[name=preset][value="${preset}"]`, form);
@@ -461,13 +470,13 @@
       setSummary('source', source === 'disk_image' ? optionText(field('disk_image_path')) : optionText(field('iso_path')));
       setSummary('cpu', `${value('vcpus')} ${Number(value('vcpus')) === 1 ? 'ядро' : 'ядра'}`);
       setSummary('memory', memory >= 1024 ? `${+(memory / 1024).toFixed(1)} ГБ` : `${memory} МБ`);
-      setSummary('disk', source === 'disk_image' ? 'из образа' : `${value('disk_size')} ГБ`);
+      setSummary('disk', `${value('disk_size')} ГБ`);
       setSummary('network', value('network_mode') === 'bridge' ? 'Локальная сеть' : 'Автоматически (NAT)');
       const hasSource = source === 'disk_image' ? form.dataset.hasDisks === '1' : form.dataset.hasIsos === '1';
       $$('[data-create-button]').forEach((btn) => { btn.disabled = !hasSource || !value('name'); });
       $$('[data-missing-source]').forEach((el) => { el.hidden = hasSource || el.dataset.missingSource !== source; });
     }
-    form.addEventListener('input', sync);
+    form.addEventListener('input', (event) => { if (event.target.name === 'ci_user') event.target.dataset.autoLogin = event.target.value ? '0' : '1'; sync(); });
     form.addEventListener('change', sync);
     sync();
   }

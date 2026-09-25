@@ -55,14 +55,39 @@
             <span class="hint">Нужен другой? <a href="/iso">Загрузите образ</a>.</span>
           {% endif %}
         </div>
+        <div class="field" data-show-when="source_type=iso">
+          <label>Что будете устанавливать</label>
+          <div class="options" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+            {% for os in os_types %}
+              <label class="option">
+                <input type="radio" name="os_type" value="{{ os.id }}" {% if (form.os_type or 'linux') == os.id %}checked{% endif %}>
+                <span class="option-body"><span class="option-top"><span class="option-title">{{ os.title }}</span><span class="option-check"></span></span><span class="option-text">{{ os.hint }}</span></span>
+              </label>
+            {% endfor %}
+          </div>
+          <span class="hint">От этого зависят виртуальные устройства: Windows получит совместимые диск и сеть, Windows 11 — UEFI и TPM.</span>
+        </div>
         <div class="field" data-show-when="source_type=disk_image">
           <label for="disk_image_path">Образ системы</label>
           {% if disk_images %}
             <select class="select" id="disk_image_path" name="disk_image_path">
-              {% for image in disk_images %}<option value="{{ image.path }}" data-label="{{ image.name }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.name }} · {{ image.size }}</option>{% endfor %}
+              {% for image in disk_images %}<option value="{{ image.path }}" data-label="{{ image.title or image.name }}" data-login="{{ image.login }}" {% if form.disk_image_path == image.path %}selected{% endif %}>{{ image.title or image.name }} · {{ image.size }}</option>{% endfor %}
             </select>
             <span class="hint">Образ будет скопирован — оригинал останется для других машин.</span>
           {% endif %}
+        </div>
+        <div class="stack-sm" data-show-when="source_type=disk_image" style="padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)">
+          <label class="switch-row" style="cursor:pointer">
+            <span class="switch-text"><strong>Настроить первый вход</strong><span>У готовых образов нет пароля — без этого шага войти в машину не получится.</span></span>
+            <input type="checkbox" name="cloud_init" value="1" {% if form.cloud_init|default('1') == '1' %}checked{% endif %} style="width:20px;height:20px;accent-color:var(--brand)">
+          </label>
+          <div class="form-grid" data-visible-when="cloud_init=1">
+            <div class="form-row">
+              <div class="field"><label for="ci_user">Пользователь</label><input class="input" id="ci_user" name="ci_user" value="{{ form.ci_user or '' }}" pattern="[a-z_][a-z0-9_\-]{0,31}" autocomplete="off" data-auto-login="{{ '0' if form.ci_user else '1' }}"><span class="hint">Получит права администратора (sudo)</span></div>
+              <div class="field"><label for="ci_password">Пароль</label><input class="input" id="ci_password" type="password" name="ci_password" minlength="6" autocomplete="new-password"><span class="hint">Не короче 6 символов</span></div>
+            </div>
+            <div class="field"><label for="ci_ssh_key">SSH-ключ <span class="subtle">(необязательно)</span></label><textarea class="input" id="ci_ssh_key" name="ci_ssh_key" rows="2" placeholder="ssh-ed25519 AAAA… — содержимое файла ~/.ssh/id_ed25519.pub">{{ form.ci_ssh_key or '' }}</textarea><span class="hint">С ключом можно обойтись без пароля: вход по SSH будет только по ключу.</span></div>
+          </div>
         </div>
         <div class="alert warning" data-missing-source="iso" hidden>{{ icon('triangle-alert') }}<div><strong>Нет установочных образов</strong>Загрузите .iso с системой, например Ubuntu или Debian.</div><a class="btn btn-sm alert-action" href="/iso">Загрузить</a></div>
         <div class="alert warning" data-missing-source="disk_image" hidden>{{ icon('triangle-alert') }}<div><strong>Нет готовых образов</strong>Загрузите образ системы в формате .qcow2, .img или архив.</div><a class="btn btn-sm alert-action" href="/disk-images">Загрузить</a></div>
@@ -95,7 +120,7 @@
         <div class="form-row-3" data-custom-resources data-visible-when="preset=custom">
           <div class="field"><label for="vcpus">Ядра</label><input class="input" id="vcpus" type="number" name="vcpus" min="1" max="128" value="{{ form.vcpus }}" required></div>
           <div class="field"><label for="memory">Память, МБ</label><input class="input" id="memory" type="number" name="memory" min="512" max="262144" step="256" value="{{ form.memory }}" required></div>
-          <div class="field" data-show-when="source_type=iso"><label for="disk_size">Диск, ГБ</label><input class="input" id="disk_size" type="number" name="disk_size" min="4" max="4096" value="{{ form.disk_size }}" required></div>
+          <div class="field"><label for="disk_size">Диск, ГБ</label><input class="input" id="disk_size" type="number" name="disk_size" min="4" max="4096" value="{{ form.disk_size }}" required></div>
         </div>
         {% if profile.virtualization_warning %}{{ alert('warning', 'На этом сервере нет аппаратного ускорения — машины будут заметно медленнее.') }}{% endif %}
       </div>

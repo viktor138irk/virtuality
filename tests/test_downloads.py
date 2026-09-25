@@ -317,12 +317,16 @@ def test_catalog_route(logged_in, data_dirs, www, monkeypatch):
     monkeypatch.setattr(app, "start_disk_convert_operation", lambda path: None)
 
     assert unquote(logged_in.post("/downloads/catalog/nope", follow_redirects=False).headers["location"]).startswith("/disk-images?download_error=Такого образа нет")
+    # The worker is started by hand below: a 6 KB file would otherwise finish before the page is rendered.
+    pending = {}
+    monkeypatch.setattr(downloads, "run_operation", lambda operation, worker: pending.update(operation=operation, worker=worker))
     response = logged_in.post("/downloads/catalog/debian-13", follow_redirects=False)
     assert response.status_code == 303 and "download_message=" in response.headers["location"]
     page = logged_in.get("/disk-images").text
     assert "Скачивается" in page
     running = downloads.active_downloads("disk")
     assert running[0]["catalog_id"] == "debian-13"
+    core.run_operation(pending["operation"], pending["worker"])
     assert wait_for(running[0]["id"])["status"] == "success"
     assert (data_dirs["disk_images"] / "debian-13-genericcloud-amd64.qcow2").read_bytes() == payload
     page = logged_in.get("/disk-images").text

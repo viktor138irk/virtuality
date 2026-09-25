@@ -139,7 +139,7 @@ def test_vm_create_iso_builds_virt_install(logged_in, data_dirs, monkeypatch):
     cmd = captured["cmd"]
     assert cmd[0] == "virt-install"
     assert "--cdrom" in cmd and str(iso) in cmd
-    assert "network=virtuality-nat,model=virtio" in cmd
+    assert any(part.startswith("network=virtuality-nat,model=virtio,mac=52:54:00:") for part in cmd)
     assert captured["operation"]["boot_order"] == "cdrom_disk"
 
 

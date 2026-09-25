@@ -177,6 +177,60 @@ def nat_network_xml() -> str:
 """
 
 
+def stable_mac(vm_name: str) -> str:
+    """Locally administered QEMU MAC derived from the machine name (same name → same address)."""
+    import hashlib
+
+    digest = hashlib.sha1(vm_name.encode()).digest()
+    return '52:54:00:' + ':'.join(f'{b:02x}' for b in digest[:3])
+
+
+def nat_reservations() -> list[dict[str, str]]:
+    """DHCP reservations of the NAT network: [{'name', 'mac', 'ip'}]."""
+    result = run_cmd(['virsh', 'net-dumpxml', NETWORK_NAME], timeout=8)
+    if not result['ok']:
+        return []
+    return [
+        {'mac': m.group(1).lower(), 'name': m.group(2), 'ip': m.group(3)}
+        for m in re.finditer(r"<host\s+mac='([^']+)'\s+name='([^']+)'\s+ip='([^']+)'\s*/>", result['stdout'])
+    ]
+
+
+def _net_update(action: str, host_xml: str) -> dict[str, Any]:
+    base = ['virsh', 'net-update', NETWORK_NAME, action, 'ip-dhcp-host', host_xml]
+    result = run_cmd(base + ['--live', '--config'], timeout=15)
+    if not result['ok'] and 'not active' in (result['stderr'] + result['stdout']).lower():
+        result = run_cmd(base + ['--config'], timeout=15)
+    return result
+
+
+def reserve_nat_address(vm_name: str, mac: str) -> str | None:
+    """Pin the machine to one NAT address for its whole life; None when libvirt refused."""
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}', vm_name or ''):
+        return None
+    reservations = nat_reservations()
+    for item in reservations:
+        if item['name'] == vm_name:
+            if item['mac'] != mac.lower():
+                _net_update('modify', f"<host mac='{mac}' name='{vm_name}' ip='{item['ip']}'/>")
+            return item['ip']
+    taken = {item['ip'] for item in reservations}
+    leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
+    taken.update(re.findall(r'\b(192\.168\.100\.\d+)/', leases['stdout'] if leases['ok'] else ''))
+    start, end = int(DHCP_START.rsplit('.', 1)[1]), int(DHCP_END.rsplit('.', 1)[1])
+    free = next((f'192.168.100.{last}' for last in range(start, end + 1) if f'192.168.100.{last}' not in taken), None)
+    if not free:
+        return None
+    result = _net_update('add-last', f"<host mac='{mac}' name='{vm_name}' ip='{free}'/>")
+    return free if result['ok'] else None
+
+
+def release_nat_address(vm_name: str) -> None:
+    for item in nat_reservations():
+        if item['name'] == vm_name:
+            _net_update('delete', f"<host mac='{item['mac']}' name='{item['name']}' ip='{item['ip']}'/>")
+
+
 def libvirt_network_info() -> dict[str, Any]:
     info = run_cmd(['virsh', 'net-info', NETWORK_NAME], timeout=8)
     leases = run_cmd(['virsh', 'net-dhcp-leases', NETWORK_NAME], timeout=8)
