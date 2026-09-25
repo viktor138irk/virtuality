@@ -6,6 +6,7 @@ libvirt через `virsh snapshot-*`.
 только диск. Создание и возврат выполняются как фоновые операции.
 """
 import re
+import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Any
@@ -15,6 +16,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 import presenters
 from core import (
+    active_operations_for,
     append_operation_log,
     cmd_error,
     finish_operation,
@@ -62,7 +64,7 @@ KNOWN_ERRORS = [
     ("is not running", "Машина выключена, поэтому это действие сейчас недоступно."),
 ]
 
-_ROW_RE = re.compile(r"^\s*(\S+)\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s+([+-]\d{4}))?\s+(\S+)\s*$")
+_ROW_RE = re.compile(r"^\s*(\S.*?)\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s+([+-]\d{4}))?\s+(\S+)\s*$")
 
 
 # ---------------------------------------------------------------- parsers
@@ -181,6 +183,8 @@ def list_snapshots(vm: str) -> list[dict[str, Any]]:
         row["state_info"] = snapshot_state(row["state"])
         row["when"] = format_when(row["created_at"])
         row["title"] = row["description"] or row["name"]
+        # Snapshots made outside the panel (virsh, virt-manager) may have names the panel's URLs do not accept.
+        row["manageable"] = valid_label(row["name"])
     return rows
 
 
@@ -194,7 +198,7 @@ def vm_operations(vm: str) -> list[dict[str, Any]]:
 
 
 def active_operations(vm: str) -> list[dict[str, Any]]:
-    return [op for op in vm_operations(vm) if op.get("status") in ("queued", "running")]
+    return active_operations_for(vm, OPERATION_TYPES)
 
 
 def create_blockers(vm: str, snapshots: list[dict[str, Any]], checks: dict[str, Any]) -> list[str]:
@@ -239,7 +243,7 @@ def revert_worker(operation: dict[str, Any]) -> None:
     update_operation(operation, progress=15, message="Возвращаем машину к сохранённому состоянию…", cmd=" ".join(cmd))
     result = run_cmd(cmd, timeout=SNAPSHOT_TIMEOUT)
     _log_result(operation, result)
-    if not result["ok"] and "force" in (result.get("stderr") or "").lower():
+    if not result["ok"] and "revert requires force" in (result.get("stderr") or "").lower():
         # libvirt просит --force, когда конфигурация машины изменилась после снимка: пользователь уже подтвердил возврат.
         append_operation_log(operation["id"], "libvirt требует подтверждения (--force): повторяем принудительно.")
         cmd.append("--force")
@@ -275,7 +279,7 @@ def snapshots_page(request: Request, name: str):
     info = presenters.parse_dominfo(dominfo)
     snapshots = list_snapshots(name)
     checks = domain_checks(name)
-    running = presenters.vm_state(info["state"])["running"]
+    running = vm_active(info["state"])
     op_id = request.query_params.get("op", "")
     operation = read_operation(op_id) if op_id else None
     if operation and (operation.get("vm_name") != name or operation.get("type") not in OPERATION_TYPES):
@@ -297,8 +301,21 @@ def snapshots_page(request: Request, name: str):
     })
 
 
+def vm_active(state: str) -> bool:
+    """Running or paused: libvirt saves the memory of both into the snapshot."""
+    return presenters.vm_state(state)["running"] or "paus" in (state or "").lower()
+
+
+_create_lock = threading.Lock()
+
+
 @router.post("/vm/{name}/snapshots/create")
 def snapshot_create(request: Request, name: str, description: str = Form("")):
+    with _create_lock:  # two quick clicks must not both pass the checks below
+        return _snapshot_create(request, name, description)
+
+
+def _snapshot_create(request: Request, name: str, description: str):
     blocked, dominfo = _guard(request, name)
     if blocked:
         return blocked
@@ -306,7 +323,7 @@ def snapshot_create(request: Request, name: str, description: str = Form("")):
     blockers = create_blockers(name, snapshots, domain_checks(name))
     if blockers:
         return redirect_with_message(f"/vm/{name}/snapshots", "snapshot_error", blockers[0])
-    running = presenters.vm_state(presenters.parse_dominfo(dominfo)["state"])["running"]
+    running = vm_active(presenters.parse_dominfo(dominfo)["state"])
     snap = next_snapshot_name([s["name"] for s in snapshots])
     if not valid_label(snap):
         return redirect_with_message(f"/vm/{name}/snapshots", "snapshot_error", "Не удалось подобрать имя снимка.")
@@ -321,7 +338,7 @@ def snapshot_revert(request: Request, name: str, snap: str):
     if blocked:
         return blocked
     if not valid_label(snap):
-        return JSONResponse({"ok": False, "error": "Invalid snapshot name"}, status_code=400)
+        return redirect_with_message(f"/vm/{name}/snapshots", "snapshot_error", "Этот снимок создан вне панели и имеет необычное имя — управляйте им через virsh.")
     if active_operations(name):
         return redirect_with_message(f"/vm/{name}/snapshots", "snapshot_error", "Дождитесь окончания предыдущей операции со снимками этой машины.")
     operation = new_operation("snapshot_revert", f"Возврат машины {name} к снимку {snap}", vm_name=name, snapshot=snap)
@@ -335,7 +352,7 @@ def snapshot_delete(request: Request, name: str, snap: str):
     if blocked:
         return blocked
     if not valid_label(snap):
-        return JSONResponse({"ok": False, "error": "Invalid snapshot name"}, status_code=400)
+        return redirect_with_message(f"/vm/{name}/snapshots", "snapshot_error", "Этот снимок создан вне панели и имеет необычное имя — управляйте им через virsh.")
     if active_operations(name):
         return redirect_with_message(f"/vm/{name}/snapshots", "snapshot_error", "Дождитесь окончания предыдущей операции со снимками этой машины.")
     result = run_cmd(["virsh", "snapshot-delete", "--domain", name, "--snapshotname", snap], timeout=180)

@@ -273,7 +273,8 @@ def test_delete_snapshot_error(logged_in, data_dirs, recorder, monkeypatch):
 
 
 def test_snapshot_routes_validate_names(logged_in, data_dirs, recorder):
-    assert logged_in.post("/vm/web01/snapshots/-bad/revert", follow_redirects=False).status_code == 400
+    bad = logged_in.post("/vm/web01/snapshots/-bad/revert", follow_redirects=False)
+    assert bad.status_code == 303 and "snapshot_error=" in bad.headers["location"]
     assert logged_in.post("/vm/web01/snapshots/..%2Fx/delete", follow_redirects=False).status_code in (400, 404)
     assert logged_in.post("/vm/-bad/snapshots/create", data={}, follow_redirects=False).status_code == 400
     assert not find(recorder, "virsh", "snapshot-delete") and not find(recorder, "virsh", "snapshot-revert")

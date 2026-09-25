@@ -2007,6 +2007,13 @@ def api_health(request: Request):
 # Feature modules register template globals into app.templates, so they are imported once it exists.
 from features import backups, downloads, settings, setup, snapshots, vmops  # noqa: E402
 
+@app.on_event("startup")
+def close_orphaned_operations() -> None:
+    import core
+
+    core.interrupt_orphaned_operations()
+
+
 app.include_router(setup.router)
 app.include_router(settings.router)
 app.include_router(snapshots.router)

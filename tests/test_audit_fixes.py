@@ -122,3 +122,25 @@ def test_ufw_rules_follow_forwards(data_dirs, monkeypatch):
     assert find(calls, "ufw", "delete", "allow", "2222/tcp")
     assert find(calls, "ufw", "route", "delete", "allow", "in", "on", "eth0")
     assert json.loads(network_core.UFW_STATE_FILE.read_text()) == []
+
+
+# ---------------------------------------------------------------- operations orphaned by a restart
+def test_orphaned_operations_are_closed_on_startup(data_dirs):
+    import core
+
+    running = core.new_operation("snapshot_create", "Снимок web01", vm_name="web01")
+    core.update_operation(running, status="running")
+    done = core.new_operation("backup", "Копия web01", vm_name="web01")
+    core.finish_operation(done, True, "Готово")
+    assert core.active_operations_for("web01")
+    assert core.interrupt_orphaned_operations() == 1
+    assert core.read_operation(running["id"])["status"] == "error" and core.read_operation(running["id"])["interrupted"]
+    assert core.read_operation(done["id"])["status"] == "success"
+    assert core.active_operations_for("web01") == []
+
+
+def test_snapshot_names_with_spaces_are_listed():
+    from features import snapshots
+
+    rows = snapshots.parse_snapshot_list(" Name              Creation Time               State\n------\n before update     2026-09-25 10:12:03 +0000   shutoff\n clean             2026-09-10 12:05:00 +0000   running\n")
+    assert [row["name"] for row in rows] == ["before update", "clean"]

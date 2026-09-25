@@ -271,6 +271,41 @@ def list_operations(limit: int = 25) -> list[dict[str, Any]]:
     return operations
 
 
+def interrupt_orphaned_operations() -> int:
+    """Operations run in threads of the panel process: after a restart the ones still marked
+    queued/running will never finish. Close them so they do not block the next attempt."""
+    if not OPERATIONS_DIR.exists():
+        return 0
+    count = 0
+    for path in OPERATIONS_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if data.get("status") not in ("queued", "running"):
+            continue
+        data.pop("log_tail", None)
+        message = "Прервано: панель перезапускалась во время операции. Проверьте состояние машины и запустите действие снова."
+        update_operation(data, status="error", progress=100, message=message, finished_at=utc_now(), interrupted=True)
+        append_operation_log(data["id"], message)
+        count += 1
+    return count
+
+
+def active_operations_for(vm_name: str, kinds: tuple[str, ...] | set[str] | None = None) -> list[dict[str, Any]]:
+    """Unfinished operations of one machine, over the whole operations directory (not only the latest N)."""
+    ensure_operations_dir()
+    found = []
+    for path in OPERATIONS_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if data.get("vm_name") == vm_name and data.get("status") in ("queued", "running") and (kinds is None or data.get("type") in kinds):
+            found.append(data)
+    return found
+
+
 def running_operations(kind: str | None = None) -> list[dict[str, Any]]:
     return [op for op in list_operations(50) if op.get("status") in ("queued", "running") and (kind is None or op.get("type") == kind)]
 

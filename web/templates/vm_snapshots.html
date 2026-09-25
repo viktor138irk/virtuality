@@ -69,6 +69,7 @@
                 </div>
                 <div class="meta">{{ snap.when }} · {{ snap.state_info.label }}{% if snap.with_memory %} — сохранена вместе с памятью{% endif %}{% if snap.description %} · <span class="mono">{{ snap.name }}</span>{% endif %}</div>
               </div>
+              {% if snap.manageable %}
               <form method="post" action="/vm/{{ vm.name }}/snapshots/{{ snap.name }}/revert" class="inline-form"
                     data-confirm="Машина {{ vm.name }} вернётся в состояние на момент «{{ snap.when|lower }}». Всё, что изменилось после этого — файлы, программы, настройки — будет потеряно без возможности восстановления. {% if snap.with_memory %}После возврата машина будет работать, как в момент снимка.{% else %}После возврата машина будет выключена.{% endif %}"
                     data-confirm-title="Вернуться к этому снимку?" data-confirm-button="Вернуться">
@@ -79,6 +80,9 @@
                     data-confirm-title="Удалить снимок?" data-confirm-button="Удалить" data-toast="Снимок удалён" data-toast-tone="warning">
                 <button class="btn btn-sm btn-icon btn-ghost" aria-label="Удалить снимок" title="Удалить снимок">{{ icon('trash-2', 'icon-sm') }}</button>
               </form>
+              {% else %}
+                <span class="subtle small" title="Снимок создан вне панели — управляйте им через virsh">Создан вне панели</span>
+              {% endif %}
             </div>
           {% endfor %}
         </div>
@@ -105,7 +109,7 @@
   <aside class="stack">
     <article class="card" id="create">
       <div class="card-header"><div><h2>Создать снимок</h2><p>Запомнить состояние машины прямо сейчас</p></div></div>
-      <form method="post" action="/vm/{{ vm.name }}/snapshots/create" data-busy="Создаём снимок…">
+      <form method="post" action="/vm/{{ vm.name }}/snapshots/create">
         <div class="card-body stack-sm">
           <div class="field">
             <label for="description">Описание</label>
@@ -125,7 +129,7 @@
         </div>
         <div class="card-footer">
           <span class="subtle small" style="margin-right:auto">{{ count }} из {{ max_snapshots }}</span>
-          <button type="submit" class="btn btn-primary" {% if blockers %}disabled{% endif %}>{{ icon('camera') }}Создать снимок</button>
+          <button type="submit" class="btn btn-primary" data-busy="Создаём снимок…" {% if blockers %}disabled{% endif %}>{{ icon('camera') }}Создать снимок</button>
         </div>
       </form>
     </article>
