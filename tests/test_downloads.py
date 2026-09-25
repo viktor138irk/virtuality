@@ -242,7 +242,7 @@ def test_download_iso_success_refreshes_pool(data_dirs, www, monkeypatch):
     assert not (data_dirs["iso"] / ".small.iso.part").exists()
     assert ["virsh", "pool-refresh", "virtuality-iso"] in calls
     assert "Готово" in done["message"]
-    assert not downloads.is_live(operation["id"])
+    wait_until(lambda: not downloads.is_live(operation["id"]))  # поток снимает отметку сразу после завершения
 
 
 def test_download_follows_redirect(data_dirs, www):
