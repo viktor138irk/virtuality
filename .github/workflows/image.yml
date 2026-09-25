@@ -1,0 +1,45 @@
+name: Build ISO image
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture"
+        type: choice
+        options: [amd64, arm64, both]
+        default: amd64
+
+permissions:
+  contents: read
+
+jobs:
+  iso:
+    name: ISO ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.arch == 'both' && '["amd64","arm64"]' || format('["{0}"]', inputs.arch)) || '["amd64","arm64"]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sudo apt-get update && sudo apt-get install -y xorriso
+      - uses: actions/cache@v4
+        with:
+          path: .cache/iso
+          key: ubuntu-iso-${{ matrix.arch }}-${{ hashFiles('image/build-iso.sh') }}
+          restore-keys: ubuntu-iso-${{ matrix.arch }}-
+      - run: make iso ARCH=${{ matrix.arch }}
+      # Ubuntu server ISOs are larger than the 2 GB GitHub release asset limit,
+      # so images are published as workflow artifacts.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: virtuality-iso-${{ matrix.arch }}
+          path: |
+            dist/*.iso
+            dist/*.sha256
+          compression-level: 0
+          retention-days: 30
