@@ -298,6 +298,15 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
 .switch[aria-checked="true"] { background: var(--success); }
 .switch[aria-checked="true"]::after { transform: translateX(18px); }
 
+/* checkbox row (consent for destructive actions) */
+.check { display: flex; gap: 12px; align-items: flex-start; padding: 13px 16px; border: 1.5px solid var(--border); border-radius: var(--radius); background: var(--surface-2); cursor: pointer; }
+.check input { width: 18px; height: 18px; flex: none; margin: 2px 0 0; accent-color: var(--brand); cursor: pointer; }
+.check > span { display: grid; gap: 2px; }
+.check > span > span { color: var(--text-3); font-size: 12.5px; }
+.check.danger { border-color: color-mix(in srgb, var(--danger) 30%, transparent); background: var(--danger-soft); }
+.check.danger input { accent-color: var(--danger); }
+.check.danger strong { color: var(--danger); }
+
 /* option cards (radio) */
 .options { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .options-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }

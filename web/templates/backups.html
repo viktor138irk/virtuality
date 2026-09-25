@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, meter, empty, alert %}
+{% set page_title = 'Резервные копии' %}
+
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <h1>Резервные копии</h1>
+    <p class="lead">Полная копия машины: настройки и все её диски. Из копии можно восстановить машину на этом сервере — под тем же или новым названием.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block alerts %}
+  {% if backup_message %}{{ alert('success', backup_message) }}{% endif %}
+  {% if backup_error %}{{ alert('danger', backup_error) }}{% endif %}
+  {% for op in running %}
+    <div class="alert info">{{ icon('activity') }}<div><strong>{{ op.title }} — {{ op.progress|default(0) }}%</strong>{{ op.message }}</div><a class="btn btn-sm alert-action" href="/operations/{{ op.id }}">Следить</a></div>
+  {% endfor %}
+{% endblock %}
+
+{% block content %}
+<section class="grid grid-3">
+  <article class="card stat">
+    <div class="stat-head">Копий на сервере<span class="stat-icon">{{ icon('database', 'icon-sm') }}</span></div>
+    <div class="stat-value">{{ storage.count }}<small>{{ plural(storage.count, 'копия', 'копии', 'копий') }}</small></div>
+    <div class="stat-foot">{{ groups|length }} {{ plural(groups|length, 'машина', 'машины', 'машин') }}</div>
+  </article>
+  <article class="card stat">
+    <div class="stat-head">Занято копиями<span class="stat-icon">{{ icon('hard-drive', 'icon-sm') }}</span></div>
+    <div class="stat-value">{{ storage.used }}</div>
+    {{ meter(storage.used_pct, 'brand') }}
+    <div class="stat-foot">{{ storage.used_pct }}% места на диске сервера</div>
+  </article>
+  <article class="card stat">
+    <div class="stat-head">Свободно для новых копий<span class="stat-icon">{{ icon('layers', 'icon-sm') }}</span></div>
+    <div class="stat-value">{{ storage.free }}</div>
+    <div class="stat-foot">Перед копированием место проверяется автоматически</div>
+  </article>
+</section>
+
+{% if groups %}
+  <div class="stack mt-3">
+    {% for g in groups %}
+      <article class="card">
+        <div class="card-header">
+          <div class="row">
+            <span class="vm-avatar">{{ icon('monitor') }}</span>
+            <div>
+              <h2>{% if g.exists %}<a href="/vm/{{ g.vm }}" style="color:inherit">{{ g.vm }}</a>{% else %}{{ g.vm }}{% endif %}{% if not g.exists %} {{ badge('машина удалена', 'warning', cls='hide-sm') }}{% endif %}</h2>
+              <p>{{ g.count }} {{ plural(g.count, 'копия', 'копии', 'копий') }} · {{ g.size }}{% if not g.exists %} · машины больше нет на сервере, но её можно восстановить{% endif %}</p>
+            </div>
+          </div>
+          {% if g.exists %}<a class="btn btn-sm" href="/vm/{{ g.vm }}/backups">{{ icon('plus', 'icon-sm') }}Создать копию</a>{% endif %}
+        </div>
+        <div class="list">
+          {% with rows = g.backups, back = '/backups' %}{% include "_backup_rows.html" %}{% endwith %}
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% else %}
+  <article class="card mt-3">
+    {{ empty('database', 'Копий пока нет', 'Откройте страницу машины, перейдите на вкладку «Резервные копии» и нажмите «Создать копию». Копирование идёт в фоне — страницу можно закрыть.', '/', 'К списку машин', 'monitor') }}
+  </article>
+{% endif %}
+
+<section class="grid grid-2 mt-3">
+  <article class="card">
+    <div class="card-body stack-sm">
+      <div class="row">{{ icon('shield-check') }}<h3>Что входит в копию</h3></div>
+      <p class="muted small">Настройки машины (процессор, память, сеть, порядок загрузки) и все её диски целиком. Установочные образы (ISO) не копируются — они лежат отдельно в разделе «Образы ОС». Диски сжимаются, поэтому копия обычно меньше самой машины.</p>
+    </div>
+  </article>
+  <article class="card">
+    <div class="card-body stack-sm">
+      <div class="row">{{ icon('info') }}<h3>Как это работает</h3></div>
+      <p class="muted small">Работающая машина на время копирования аккуратно выключается и потом запускается снова. При восстановлении машина создаётся выключенной и получает новые сетевые адреса, чтобы не мешать оригиналу. Копии хранятся в папке <code>/var/lib/virtuality/backups</code>.</p>
+    </div>
+  </article>
+</section>
+{% endblock %}

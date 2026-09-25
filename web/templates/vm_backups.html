@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_ui.html" import icon, badge, vm_badge, empty, alert %}
+{% set page_title = vm.name ~ ' — резервные копии' %}
+{% set s = vm.state|vm_state %}
+
+{% block page_header %}
+<div class="page-header" data-live-vm="{{ vm.name }}">
+  <div>
+    <div class="eyebrow"><a href="/">{{ icon('arrow-left', 'icon-sm') }} Все машины</a></div>
+    <div class="title-row">
+      <span class="vm-avatar {{ 'on' if s.running else '' }}" style="width:48px;height:48px">{{ icon('monitor', 'icon-lg') }}<span class="status-dot {{ s.tone }}" data-live="dot"></span></span>
+      <div>
+        <div class="row"><h1>{{ vm.name }}</h1>{{ vm_badge(vm.state, 'lg') }}</div>
+        <p class="subtle mt-1">{{ vm.info.vcpus }} {{ plural(vm.info.vcpus, 'ядро', 'ядра', 'ядер') }} · {{ vm.info.memory_mb|format_mb }} памяти</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block alerts %}
+  {% if backup_message %}{{ alert('success', backup_message) }}{% endif %}
+  {% if backup_error %}{{ alert('danger', backup_error) }}{% endif %}
+  {% if active %}
+    <div class="alert info">{{ icon('activity') }}<div><strong>{{ active.title }} — {{ active.progress|default(0) }}%</strong>{{ active.message }}</div><a class="btn btn-sm alert-action" href="/operations/{{ active.id }}">Следить</a></div>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<nav class="tabs" role="tablist">
+  <a href="/vm/{{ vm.name }}#overview">{{ icon('layout-dashboard', 'icon-sm') }}Обзор</a>
+  <a href="/vm/{{ vm.name }}#resources">{{ icon('cpu', 'icon-sm') }}Ресурсы</a>
+  <a href="/vm/{{ vm.name }}#storage">{{ icon('hard-drive', 'icon-sm') }}Диски и загрузка</a>
+  <a href="/vm/{{ vm.name }}/backups" class="active" aria-current="page">{{ icon('database', 'icon-sm') }}Резервные копии{% if backups %}<span class="tag">{{ backups|length }}</span>{% endif %}</a>
+  <a href="/vm/{{ vm.name }}#expert">{{ icon('terminal', 'icon-sm') }}Для специалистов</a>
+</nav>
+
+<section class="grid grid-main">
+  <article class="card">
+    <div class="card-header"><div><h2>Копии этой машины</h2><p>Новые сверху. Из любой можно восстановить машину — под тем же или новым названием.</p></div></div>
+    {% if backups %}
+      <div class="list">
+        {% with rows = backups, back = '/vm/' ~ vm.name ~ '/backups' %}{% include "_backup_rows.html" %}{% endwith %}
+      </div>
+    {% else %}
+      {{ empty('database', 'Копий пока нет', 'Создайте первую копию — это займёт несколько минут и защитит от неудачных обновлений и случайных ошибок.') }}
+    {% endif %}
+  </article>
+
+  <aside class="stack">
+    <article class="card">
+      <div class="card-header"><div><h2>Создать копию</h2><p>Настройки и все диски машины</p></div></div>
+      <form method="post" action="/vm/{{ vm.name }}/backups/create" class="stack-sm" data-busy="Запускаем…">
+        <div class="card-body stack-sm">
+          {% if s.running %}
+            {{ alert('info', 'Машина работает: на время копирования она будет аккуратно выключена, а потом запущена снова.') }}
+          {% endif %}
+          <div class="field">
+            <label for="note">Заметка <span class="subtle" style="font-weight:400">— необязательно</span></label>
+            <input class="input" id="note" type="text" name="note" maxlength="120" placeholder="например, перед обновлением сайта" autocomplete="off">
+            <span class="hint">Поможет потом вспомнить, зачем делали копию.</span>
+          </div>
+          <div class="kv">
+            <div><span>Свободно для копий</span><strong>{{ storage.free }}</strong></div>
+            <div><span>Уже занято копиями</span><strong>{{ storage.used }}</strong></div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <button type="submit" class="btn btn-primary btn-block" {% if active %}disabled{% endif %}>{{ icon('database') }}Создать копию</button>
+        </div>
+      </form>
+    </article>
+    <article class="card">
+      <div class="card-body stack-sm">
+        <div class="row">{{ icon('clock') }}<h3>Сколько это займёт</h3></div>
+        <p class="muted small">Обычно несколько минут: зависит от размера дисков. Ход выполнения виден в разделе «Задачи», страницу можно закрыть.</p>
+      </div>
+    </article>
+  </aside>
+</section>
+{% endblock %}
